@@ -1,5 +1,5 @@
-import { ComponentExample } from "@/components/component-example";
+import HeroSection from "@/components/hero-section-3";
 
 export default function Page() {
-return <ComponentExample />;
+return <HeroSection />;
 }

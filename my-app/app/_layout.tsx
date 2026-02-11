@@ -10,6 +10,7 @@ import "../global.css";
 
 import { ThemeProvider, useTheme } from "@/context/ThemeContext";
 import { UserProvider } from "@/context/UserContext";
+import { ToastProvider } from "@/context/ToastContext";
 import { ENV } from "@/env";
 import { Colors } from "@/constants/theme";
 
@@ -94,8 +95,9 @@ function InnerLayout() {
   return (
     <NavigationThemeProvider value={isDark ? customDarkTheme : customLightTheme}>
       <UserProvider>
-        <AuthGuard>
-          <Stack>
+        <ToastProvider>
+          <AuthGuard>
+            <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="(auth)" options={{ headerShown: false }} />
             <Stack.Screen
@@ -119,9 +121,10 @@ function InnerLayout() {
                 },
                 headerTintColor: isDark ? Colors.dark.text : Colors.light.text,
               }}
-            />
-          </Stack>
-        </AuthGuard>
+              />
+            </Stack>
+          </AuthGuard>
+        </ToastProvider>
       </UserProvider>
       <StatusBar style={isDark ? "light" : "dark"} />
     </NavigationThemeProvider>

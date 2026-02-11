@@ -12,6 +12,7 @@ import {
 import { useRouter } from "expo-router";
 import { useClerk, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTheme } from "@/context/ThemeContext";
 import { useUserContext } from "@/context/UserContext";
@@ -28,6 +29,7 @@ export default function ProfileScreen() {
   const { theme, isDark, toggleTheme } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { signOut } = useClerk();
   const { user } = useUser();
   const {
@@ -121,41 +123,65 @@ export default function ProfileScreen() {
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16 }}
-    >
-      {/* Header */}
-      <View style={{ marginBottom: 24 }}>
-        <Text style={{ fontSize: 28, fontWeight: "bold", color: colors.text }}>
-          Profile Settings
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 4 }}>
-          Manage your personal information and preferences
-        </Text>
-      </View>
-
-      {/* User Card */}
+    <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
+      {/* Top Bar with Internet Status */}
       <View
         style={{
-          backgroundColor: colors.card,
-          borderRadius: 16,
-          padding: 20,
-          marginBottom: 16,
-          borderWidth: 1,
-          borderColor: colors.border,
+          flexDirection: "row",
+          justifyContent: "space-between",
           alignItems: "center",
+          paddingHorizontal: 16,
+          paddingVertical: 12,
         }}
       >
+        <Text style={{ fontSize: 24, fontWeight: "bold", color: colors.text }}>
+          Profile
+        </Text>
         <View
           style={{
-            width: 80,
-            height: 80,
-            borderRadius: 40,
-            backgroundColor: colors.primary,
-            justifyContent: "center",
+            width: 12,
+            height: 12,
+            borderRadius: 6,
+            backgroundColor: isOnline ? colors.success : colors.error,
+          }}
+        />
+      </View>
+
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 16, paddingTop: 0 }}
+      >
+        {/* Header */}
+        <View style={{ marginBottom: 24 }}>
+          <Text style={{ fontSize: 28, fontWeight: "bold", color: colors.text }}>
+            Profile Settings
+          </Text>
+          <Text style={{ color: colors.textMuted, marginTop: 4 }}>
+            Manage your personal information and preferences
+          </Text>
+        </View>
+
+        {/* User Card */}
+        <View
+          style={{
+            backgroundColor: colors.card,
+            borderRadius: 16,
+            padding: 20,
+            marginBottom: 16,
+            borderWidth: 1,
+            borderColor: colors.border,
             alignItems: "center",
-            marginBottom: 12,
+          }}
+        >
+          <View
+            style={{
+              width: 80,
+              height: 80,
+              borderRadius: 40,
+              backgroundColor: colors.primary,
+              justifyContent: "center",
+              alignItems: "center",
+              marginBottom: 12,
           }}
         >
           <Text
@@ -512,6 +538,7 @@ export default function ProfileScreen() {
 
       {/* Bottom spacing */}
       <View style={{ height: 32 }} />
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }

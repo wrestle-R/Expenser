@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTheme } from "@/context/ThemeContext";
 import { useUserContext } from "@/context/UserContext";
@@ -21,11 +22,13 @@ export default function WorkflowsScreen() {
   const { isDark } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const {
     workflows,
     loading,
     refreshWorkflows,
     deleteWorkflow,
+    isOnline,
   } = useUserContext();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -92,15 +95,15 @@ export default function WorkflowsScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Header */}
+    <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
+      {/* Top Bar with Internet Status */}
       <View
         style={{
           flexDirection: "row",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: 16,
-          paddingTop: 8,
+          paddingHorizontal: 16,
+          paddingVertical: 12,
         }}
       >
         <View>
@@ -111,28 +114,38 @@ export default function WorkflowsScreen() {
             Quick actions for recurring transactions
           </Text>
         </View>
-        <TouchableOpacity
-          style={{
-            backgroundColor: colors.primary,
-            paddingHorizontal: 16,
-            paddingVertical: 10,
-            borderRadius: 10,
-            flexDirection: "row",
-            alignItems: "center",
-          }}
-          onPress={() => router.push("/add-workflow")}
-        >
-          <Ionicons name="add" size={18} color={colors.primaryForeground} />
-          <Text
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <View
             style={{
-              color: colors.primaryForeground,
-              fontWeight: "600",
-              marginLeft: 4,
+              width: 12,
+              height: 12,
+              borderRadius: 6,
+              backgroundColor: isOnline ? colors.success : colors.error,
             }}
+          />
+          <TouchableOpacity
+            style={{
+              backgroundColor: colors.primary,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 10,
+              flexDirection: "row",
+              alignItems: "center",
+            }}
+            onPress={() => router.push("/add-workflow")}
           >
-            Add
-          </Text>
-        </TouchableOpacity>
+            <Ionicons name="add" size={18} color={colors.primaryForeground} />
+            <Text
+              style={{
+                color: colors.primaryForeground,
+                fontWeight: "600",
+                marginLeft: 4,
+              }}
+            >
+              Add
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView

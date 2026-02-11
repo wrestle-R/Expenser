@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTheme } from "@/context/ThemeContext";
 import { useUserContext } from "@/context/UserContext";
@@ -19,6 +20,7 @@ export default function HomeScreen() {
   const { isDark } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const {
     profile,
     transactions,
@@ -75,37 +77,61 @@ export default function HomeScreen() {
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16 }}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={colors.primary}
-        />
-      }
-    >
-      {/* Greeting */}
-      <View style={{ marginBottom: 24 }}>
-        <Text
+    <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
+      {/* Top Bar with Internet Status */}
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+        }}
+      >
+        <Text style={{ fontSize: 20, fontWeight: "bold", color: colors.text }}>
+          Expenser
+        </Text>
+        <View
           style={{
-            fontSize: 24,
-            fontWeight: "bold",
-            color: colors.text,
+            width: 12,
+            height: 12,
+            borderRadius: 6,
+            backgroundColor: isOnline ? colors.success : colors.error,
           }}
-        >
-          Welcome back, {profile?.name?.split(" ")[0] || "User"}!
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 4 }}>
-          Here's your financial overview
-        </Text>
-        {!isOnline && (
-          <View
+        />
+      </View>
+
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 16, paddingTop: 0 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
+        }
+      >
+        {/* Greeting */}
+        <View style={{ marginBottom: 24 }}>
+          <Text
             style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginTop: 8,
+              fontSize: 24,
+              fontWeight: "bold",
+              color: colors.text,
+            }}
+          >
+            Welcome back, {profile?.name?.split(" ")[0] || "User"}!
+          </Text>
+          <Text style={{ color: colors.textMuted, marginTop: 4 }}>
+            Here's your financial overview
+          </Text>
+          {!isOnline && (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                marginTop: 8,
               padding: 8,
               backgroundColor: colors.warningBg,
               borderRadius: 8,
@@ -437,5 +463,6 @@ export default function HomeScreen() {
       {/* Bottom spacing */}
       <View style={{ height: 32 }} />
     </ScrollView>
+    </View>
   );
 }

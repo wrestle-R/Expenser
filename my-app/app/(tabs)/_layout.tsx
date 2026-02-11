@@ -1,7 +1,8 @@
 import { Tabs } from "expo-router";
 import React from "react";
-import { View } from "react-native";
+import { View, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { Colors } from "@/constants/theme";
@@ -12,6 +13,10 @@ export default function TabLayout() {
   const { isDark } = useTheme();
   const { isOnline, pendingCount } = useUserContext();
   const colors = isDark ? Colors.dark : Colors.light;
+  const insets = useSafeAreaInsets();
+
+  // Extra padding for gesture navigation
+  const bottomPadding = Platform.OS === "android" ? 20 : Math.max(insets.bottom, 20);
 
   return (
     <Tabs
@@ -21,17 +26,11 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: colors.card,
           borderTopColor: colors.border,
-          paddingBottom: 8,
-          paddingTop: 6,
-          height: 60,
+          paddingBottom: bottomPadding,
+          paddingTop: 10,
+          height: 70 + bottomPadding,
         },
-        headerStyle: {
-          backgroundColor: colors.card,
-        },
-        headerTintColor: colors.text,
-        headerTitleStyle: {
-          fontWeight: "600",
-        },
+        headerShown: false,
         tabBarButton: HapticTab,
       }}
     >
@@ -39,29 +38,6 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Home",
-          headerTitle: "Expenser",
-          headerRight: () =>
-            !isOnline ? (
-              <View
-                style={{
-                  marginRight: 16,
-                  flexDirection: "row",
-                  alignItems: "center",
-                }}
-              >
-                <Ionicons name="cloud-offline" size={20} color={colors.warning} />
-              </View>
-            ) : pendingCount > 0 ? (
-              <View
-                style={{
-                  marginRight: 16,
-                  flexDirection: "row",
-                  alignItems: "center",
-                }}
-              >
-                <Ionicons name="sync" size={20} color={colors.info} />
-              </View>
-            ) : null,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "home" : "home-outline"}

@@ -12,11 +12,11 @@ import {
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-import { useTheme } from "@/context/ThemeContext";
-import { useUserContext } from "@/context/UserContext";
-import { useToast } from "@/context/ToastContext";
-import { Colors, CATEGORIES, paymentMethodConfig } from "@/constants/theme";
-import { TransactionType, PaymentMethod } from "@/lib/types";
+import { useTheme } from "../context/ThemeContext";
+import { useUserContext } from "../context/UserContext";
+import { useToast } from "../context/ToastContext";
+import { Colors, CATEGORIES, paymentMethodConfig } from "../constants/theme";
+import { TransactionType, PaymentMethod } from "../lib/types";
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: string }[] = [
   { id: "bank", label: "Bank (UPI)", icon: "card" },

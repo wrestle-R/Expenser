@@ -8,11 +8,11 @@ import * as SecureStore from "expo-secure-store";
 import "react-native-reanimated";
 import "../global.css";
 
-import { ThemeProvider, useTheme } from "@/context/ThemeContext";
-import { UserProvider } from "@/context/UserContext";
-import { ToastProvider } from "@/context/ToastContext";
-import { ENV } from "@/env";
-import { Colors } from "@/constants/theme";
+import { ThemeProvider, useTheme } from "../context/ThemeContext";
+import { UserProvider } from "../context/UserContext";
+import { ToastProvider } from "../context/ToastContext";
+import { ENV } from "../env";
+import { Colors } from "../constants/theme";
 
 // Secure token cache for Clerk
 const tokenCache = {

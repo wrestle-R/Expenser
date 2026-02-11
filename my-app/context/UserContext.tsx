@@ -6,8 +6,8 @@ import React, {
   useCallback,
 } from "react";
 import { useAuth } from "@clerk/clerk-expo";
-import { api } from "@/lib/api";
-import { syncService } from "@/lib/sync";
+import { api } from "../lib/api";
+import { syncService } from "../lib/sync";
 import {
   getStoredProfile,
   setStoredProfile,
@@ -22,9 +22,9 @@ import {
   setLocalBalances,
   getPendingTransactions,
   getPendingWorkflows,
-} from "@/lib/storage";
-import { IUserProfile, ITransaction, IWorkflow, ILocalBalance } from "@/lib/types";
-import { generateTempId } from "@/lib/utils";
+} from "../lib/storage";
+import { IUserProfile, ITransaction, IWorkflow, ILocalBalance } from "../lib/types";
+import { generateTempId } from "../lib/utils";
 
 interface UserContextType {
   profile: IUserProfile | null;

@@ -12,19 +12,25 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    await connectDB();
-    const user = await User.findOne({ clerkId: userId });
+    try {
+      await connectDB();
+    } catch (dbError) {
+      console.error("[API /user/profile GET] Database connection error:", dbError);
+      return NextResponse.json({ error: "Database connection failed" }, { status: 500 });
+    }
+
+    const user = await User.findOne({ clerkId: userId }).lean();
 
     if (!user) {
-      console.log("[API /user/profile GET] User not found");
+      console.log("[API /user/profile GET] User not found for clerkId:", userId);
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     console.log("[API /user/profile GET] User found:", user.name);
     return NextResponse.json({ profile: user });
-  } catch (error) {
-    console.error("[API /user/profile GET] Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  } catch (error: any) {
+    console.error("[API /user/profile GET] General Error:", error.message, error.stack);
+    return NextResponse.json({ error: error.message || "Internal Server Error" }, { status: 500 });
   }
 }
 

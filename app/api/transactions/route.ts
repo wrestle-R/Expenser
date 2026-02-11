@@ -45,6 +45,7 @@ export async function POST(req: Request) {
       description: data.description,
       category: data.category || "General",
       paymentMethod: data.paymentMethod,
+      splitAmount: data.splitAmount || 0,
       date: data.date || new Date(),
     });
 
@@ -53,9 +54,25 @@ export async function POST(req: Request) {
     if (user) {
       const method = data.paymentMethod as "bank" | "cash" | "splitwise";
       const amt = data.type === "income" ? data.amount : -data.amount;
+      
+      // Update primary method balance
       user.balances[method] = (user.balances[method] || 0) + amt;
+      
+      // Update splitwise balance if there is a split amount
+      if (data.splitAmount && data.splitAmount > 0) {
+        // If I paid 60 (Expense) and 40 is split, that 40 is owed TO me.
+        // So Splitwise balance increases.
+        // If type is Expense, splitAmount increases splitwise balance.
+        // If type is Income.. well, usually split applies to expenses.
+        
+        // Assumption: Split amount is always "owed to me" in an expense.
+        if (data.type === "expense") {
+             user.balances["splitwise"] = (user.balances["splitwise"] || 0) + data.splitAmount;
+        }
+      }
+      
       await user.save();
-      console.log("[API /transactions POST] Updated balance for", method, ":", user.balances[method]);
+      console.log("[API /transactions POST] Updated balances");
     }
 
     console.log("[API /transactions POST] Created transaction:", transaction._id);
@@ -92,9 +109,17 @@ export async function DELETE(req: Request) {
     if (user) {
       const method = transaction.paymentMethod as "bank" | "cash" | "splitwise";
       const amt = transaction.type === "income" ? -transaction.amount : transaction.amount;
+      
+      // Reverse primary balance
       user.balances[method] = (user.balances[method] || 0) + amt;
+      
+      // Reverse splitwise balance if exists
+      if (transaction.splitAmount && transaction.splitAmount > 0 && transaction.type === "expense") {
+         user.balances["splitwise"] = (user.balances["splitwise"] || 0) - transaction.splitAmount;
+      }
+      
       await user.save();
-      console.log("[API /transactions DELETE] Reversed balance for", method);
+      console.log("[API /transactions DELETE] Reversed balances");
     }
 
     return NextResponse.json({ success: true });

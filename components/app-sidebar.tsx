@@ -11,12 +11,13 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, ArrowRightLeft, Wallet, LogOut, Moon, Sun } from "lucide-react";
+import { LayoutDashboard, ArrowRightLeft, Wallet, LogOut, Moon, Sun, Workflow } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useRouter, usePathname } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import Link from "next/link";
 
 const navItems = [
@@ -29,6 +30,11 @@ const navItems = [
     title: "Transactions",
     url: "/dashboard/transactions",
     icon: ArrowRightLeft,
+  },
+  {
+    title: "Workflows",
+    url: "/dashboard/workflows",
+    icon: Workflow,
   },
 ];
 
@@ -47,37 +53,47 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon" className="border-r">
+    <Sidebar collapsible="icon" className="border-r shadow-sm">
       {/* Header - Left aligned, no subtitle */}
-      <SidebarHeader className="border-b px-4 py-4">
-        <div className="flex items-center gap-3 group-data-[collapsible=icon]:justify-center">
-          <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground flex-shrink-0">
-            <Wallet className="size-4" />
+      <SidebarHeader className="px-4 py-6">
+        <div className="flex items-center gap-3 transition-all duration-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <div className="flex aspect-square size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/20 flex-shrink-0">
+            <Wallet className="size-5" />
           </div>
-          <span className="font-bold text-lg group-data-[collapsible=icon]:hidden">
+          <span className="font-bold text-xl tracking-tight group-data-[collapsible=icon]:hidden">
             Expenser
           </span>
         </div>
       </SidebarHeader>
 
       {/* Main Navigation */}
-      <SidebarContent className="py-4">
+      <SidebarContent className="py-2">
         <SidebarGroup>
           <SidebarGroupContent>
-            <SidebarMenu className="gap-2 px-2">
+            <SidebarMenu className="gap-1.5 px-3 group-data-[collapsible=icon]:px-2">
               {navItems.map((item) => {
                 const isActive = pathname === item.url || (item.url === "/dashboard" && pathname === "/dashboard");
                 const Icon = item.icon;
                 return (
                   <SidebarMenuItem key={item.title}>
-                    <Link href={item.url}>
+                    <Link href={item.url} className="w-full">
                       <SidebarMenuButton
                         tooltip={item.title}
                         isActive={isActive}
-                        className="w-full"
+                        className={cn(
+                          "w-full transition-all duration-300 group-data-[collapsible=icon]:justify-center",
+                          isActive 
+                            ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground font-semibold shadow-lg shadow-primary/20 translate-x-1" 
+                            : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                        )}
                       >
-                        <Icon className="size-4" />
-                        <span>{item.title}</span>
+                        <div className="flex items-center justify-center w-5">
+                          <Icon className={cn("size-5 transition-transform duration-300 group-hover/menu-button:scale-110", isActive ? "text-primary-foreground" : "")} />
+                        </div>
+                        <span className="group-data-[collapsible=icon]:hidden ml-3">{item.title}</span>
+                        {isActive && !pathname.includes("profile") && (
+                           <div className="absolute left-0 w-1 h-2/3 bg-white rounded-r-full group-data-[collapsible=icon]:hidden" />
+                        )}
                       </SidebarMenuButton>
                     </Link>
                   </SidebarMenuItem>
@@ -89,46 +105,46 @@ export function AppSidebar() {
       </SidebarContent>
 
       {/* Footer */}
-      <SidebarFooter className="border-t p-4">
-        <SidebarMenu className="gap-2">
+      <SidebarFooter className="border-t p-3 bg-muted/40">
+        <SidebarMenu className="gap-2 px-1">
           {/* Theme Toggle */}
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={toggleTheme}
               tooltip={theme === "light" ? "Dark Mode" : "Light Mode"}
-              className="w-full"
+              className="w-full group-data-[collapsible=icon]:justify-center transition-all duration-300 hover:bg-accent hover:text-foreground"
             >
-              {theme === "light" ? (
-                <>
-                  <Moon className="size-4" />
-                  <span>Dark Mode</span>
-                </>
-              ) : (
-                <>
-                  <Sun className="size-4" />
-                  <span>Light Mode</span>
-                </>
-              )}
+              <div className="flex items-center justify-center w-5">
+                {theme === "light" ? <Moon className="size-5" /> : <Sun className="size-5" />}
+              </div>
+              <span className="group-data-[collapsible=icon]:hidden ml-3 font-medium">{theme === "light" ? "Dark Mode" : "Light Mode"}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
 
-          <Separator className="my-1" />
+          <Separator className="my-1 opacity-50" />
 
           {/* Profile */}
           <SidebarMenuItem>
-            <Link href="/dashboard/profile">
+            <Link href="/dashboard/profile" className="w-full">
               <SidebarMenuButton
                 tooltip="Profile"
                 isActive={pathname === "/dashboard/profile"}
-                className="w-full"
+                className={cn(
+                  "w-full group-data-[collapsible=icon]:justify-center transition-all duration-300",
+                  pathname === "/dashboard/profile" 
+                    ? "bg-primary text-primary-foreground font-semibold shadow-lg shadow-primary/20 translate-x-1" 
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                )}
               >
-                <Avatar className="size-5">
-                  <AvatarImage src={user?.imageUrl} />
-                  <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                    {user?.firstName?.[0] || user?.emailAddresses?.[0]?.emailAddress?.[0]?.toUpperCase() || "U"}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="truncate">
+                <div className="flex items-center justify-center w-5">
+                  <Avatar className="size-6 shadow-sm ring-1 ring-border/50">
+                    <AvatarImage src={user?.imageUrl} />
+                    <AvatarFallback className={cn("text-[10px] font-bold", pathname === "/dashboard/profile" ? "bg-white/20 text-white" : "bg-primary/10 text-primary")}>
+                      {user?.firstName?.[0] || "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                </div>
+                <span className="truncate group-data-[collapsible=icon]:hidden ml-3">
                   {user?.fullName || user?.firstName || "Profile"}
                 </span>
               </SidebarMenuButton>
@@ -140,10 +156,12 @@ export function AppSidebar() {
             <SidebarMenuButton
               onClick={handleSignOut}
               tooltip="Sign Out"
-              className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
+              className="w-full text-destructive hover:text-destructive hover:bg-destructive/10 group-data-[collapsible=icon]:justify-center transition-all duration-300"
             >
-              <LogOut className="size-4" />
-              <span>Sign Out</span>
+              <div className="flex items-center justify-center w-5">
+                <LogOut className="size-5" />
+              </div>
+              <span className="group-data-[collapsible=icon]:hidden ml-3 font-medium">Sign Out</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

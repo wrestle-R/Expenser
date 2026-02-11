@@ -15,6 +15,16 @@ export interface UserProfile {
     splitwise: number;
   };
   onboarded: boolean;
+  workflows?: {
+    _id: string;
+    name: string;
+    type: "income" | "expense";
+    amount: number;
+    description: string;
+    category: string;
+    paymentMethod: "bank" | "cash" | "splitwise";
+    splitAmount: number;
+  }[];
 }
 
 interface UserContextType {

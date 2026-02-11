@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useUserContext } from "@/context/UserContext";
-import { useSearchParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,38 +25,14 @@ import {
   TrendingDown,
   Plus,
   Trash2,
+  Workflow,
+  Zap,
   ShoppingBag,
   Utensils,
   Car,
   MoreHorizontal,
-  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-interface Transaction {
-  _id: string;
-  type: "income" | "expense";
-  amount: number;
-  description: string;
-  category: string;
-  paymentMethod: "bank" | "cash" | "splitwise";
-  splitAmount?: number;
-  date: string;
-}
-
-interface IWorkflow {
-  _id: string;
-  userId: string;
-  name: string;
-  type: "income" | "expense";
-  amount?: number;
-  description: string;
-  category: string;
-  paymentMethod: "bank" | "cash" | "splitwise";
-  splitAmount?: number;
-  createdAt: string;
-  updatedAt: string;
-}
 
 const methodConfig = {
   bank: {
@@ -87,15 +62,28 @@ const MAIN_CATEGORIES = [
   { id: "other", label: "Other", icon: MoreHorizontal, color: "text-gray-600" },
 ];
 
-export default function TransactionsPage() {
-  const { profile, refreshProfile } = useUserContext();
-  const searchParams = useSearchParams();
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+interface IWorkflow {
+  _id: string;
+  userId: string;
+  name: string;
+  type: "income" | "expense";
+  amount?: number;
+  description: string;
+  category: string;
+  paymentMethod: "bank" | "cash" | "splitwise";
+  splitAmount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export default function WorkflowsPage() {
+  const { profile } = useUserContext();
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  // New transaction form
+  // Workflow form
+  const [workflowName, setWorkflowName] = useState("");
   const [newType, setNewType] = useState<"income" | "expense">("expense");
   const [newAmount, setNewAmount] = useState("");
   const [newDescription, setNewDescription] = useState("");
@@ -106,44 +94,24 @@ export default function TransactionsPage() {
   const [splitAmount, setSplitAmount] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const fetchTransactions = useCallback(async () => {
-    try {
-      const res = await fetch("/api/transactions");
-      if (res.ok) {
-        const data = await res.json();
-        setTransactions(data.transactions);
-        console.log("[Transactions] Fetched", data.transactions.length, "transactions");
-      }
-    } catch (err) {
-      console.error("[Transactions] Error:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const fetchWorkflows = useCallback(async () => {
     try {
       const res = await fetch("/api/workflows");
       if (res.ok) {
         const data = await res.json();
         setWorkflows(data.workflows);
-        console.log("[Transactions] Fetched", data.workflows.length, "workflows");
+        console.log("[Workflows] Fetched", data.workflows.length, "workflows");
       }
     } catch (err) {
-      console.error("[Transactions] Error fetching workflows:", err);
+      console.error("[Workflows] Error fetching:", err);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchTransactions();
     fetchWorkflows();
-  }, [fetchTransactions, fetchWorkflows]);
-
-  useEffect(() => {
-    if (searchParams.get("new") === "true") {
-      setDialogOpen(true);
-    }
-  }, [searchParams]);
+  }, [fetchWorkflows]);
 
   useEffect(() => {
     if (profile?.paymentMethods.length && !newMethod) {
@@ -152,95 +120,65 @@ export default function TransactionsPage() {
   }, [profile, newMethod]);
 
   const resetForm = () => {
+    setWorkflowName("");
+    setNewType("expense");
     setNewAmount("");
     setNewDescription("");
     setNewCategory("");
-    setCustomCategory(""); 
+    setCustomCategory("");
+    setNewMethod("");
     setIsSplit(false);
     setSplitAmount("");
   };
 
-  const applyWorkflow = (workflow: IWorkflow) => {
-    setNewType(workflow.type);
-    setNewAmount(workflow.amount ? workflow.amount.toString() : "");
-    setNewDescription(workflow.description);
-    
-    const mainCategoryIds = MAIN_CATEGORIES.map(c => c.id);
-    if (mainCategoryIds.includes(workflow.category.toLowerCase())) {
-      setNewCategory(workflow.category.toLowerCase());
-      setCustomCategory("");
-    } else {
-      setNewCategory("other");
-      setCustomCategory(workflow.category);
-    }
-    
-    setNewMethod(workflow.paymentMethod);
-    if (workflow.splitAmount && workflow.splitAmount > 0) {
-      setIsSplit(true);
-      setSplitAmount(workflow.splitAmount.toString());
-    } else {
-      setIsSplit(false);
-      setSplitAmount("");
-    }
-  };
-
-  const handleAddTransaction = async () => {
-    if (!newAmount || !newDescription || !newMethod) return;
-    
-    // Validate split amount
-    if (isSplit && Number(splitAmount) >= Number(newAmount)) {
-      alert("Split amount must be less than total amount");
-      return;
-    }
-
+  const handleSaveWorkflow = async () => {
+    if (!workflowName || !newDescription || !newMethod) return;
     setSaving(true);
+
     const finalCategory = newCategory === "other" && customCategory ? customCategory : newCategory;
-    
-    const payload = {
+
+    const workflowData = {
+      name: workflowName,
       type: newType,
-      amount: Number(newAmount),
+      amount: newAmount ? Number(newAmount) : 0,
       description: newDescription,
       category: finalCategory || "General",
       paymentMethod: newMethod,
       splitAmount: isSplit ? Number(splitAmount) : 0,
     };
 
-    console.log("[Transactions] Adding transaction:", payload);
-
     try {
-      const res = await fetch("/api/transactions", {
+      const res = await fetch("/api/workflows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(workflowData),
       });
 
       if (res.ok) {
-        console.log("[Transactions] Transaction added successfully");
+        console.log("[Workflows] Workflow saved successfully");
         resetForm();
         setDialogOpen(false);
-        await fetchTransactions();
-        await refreshProfile();
+        await fetchWorkflows();
       }
     } catch (err) {
-      console.error("[Transactions] Error adding:", err);
+      console.error("[Workflows] Error saving workflow:", err);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDeleteWorkflow = async (id: string) => {
     try {
-      console.log("[Transactions] Deleting transaction:", id);
-      const res = await fetch(`/api/transactions?id=${id}`, {
+      const res = await fetch(`/api/workflows?id=${id}`, {
         method: "DELETE",
       });
+
       if (res.ok) {
-        console.log("[Transactions] Deleted successfully");
-        await fetchTransactions();
-        await refreshProfile();
+        console.log("[Workflows] Workflow deleted successfully");
+        await fetchWorkflows();
       }
     } catch (err) {
-      console.error("[Transactions] Error deleting:", err);
+      console.error("[Workflows] Error deleting workflow:", err);
     }
   };
 
@@ -248,9 +186,9 @@ export default function TransactionsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Transactions</h1>
+          <h1 className="text-2xl font-bold">Workflows</h1>
           <p className="text-muted-foreground">
-            View and manage all your transactions
+            Create and manage transaction templates
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -258,46 +196,27 @@ export default function TransactionsPage() {
             render={
               <Button onClick={resetForm}>
                 <Plus className="size-4 mr-1" />
-                Add Transaction
+                Create Workflow
               </Button>
             }
           />
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Add Transaction</DialogTitle>
+              <DialogTitle>Create Workflow</DialogTitle>
               <DialogDescription>
-                Record a new income or expense transaction.
+                Save a transaction template for quick reuse.
               </DialogDescription>
             </DialogHeader>
-            
+
             <div className="space-y-4 pt-2">
-              {/* Quick Workflows */}
-              {workflows.length > 0 && (
-                <div className="pb-3 border-b">
-                  <Label className="text-xs text-muted-foreground mb-2 block">Quick Select from Workflows</Label>
-                  <div className="flex gap-2 flex-wrap">
-                    {workflows.slice(0, 3).map((wf) => (
-                      <button
-                        key={wf._id}
-                        type="button"
-                        onClick={() => applyWorkflow(wf)}
-                        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-all hover:border-primary hover:bg-primary/5"
-                      >
-                        <Zap className="size-3 text-primary" />
-                        {wf.name}
-                      </button>
-                    ))}
-                    {workflows.length > 3 && (
-                      <a
-                        href="/dashboard/workflows"
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                      >
-                        +{workflows.length - 3} more
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
+              <div className="space-y-2">
+                <Label>Workflow Name</Label>
+                <Input
+                  placeholder="e.g., Daily Rickshaw, Lunch"
+                  value={workflowName}
+                  onChange={(e) => setWorkflowName(e.target.value)}
+                />
+              </div>
 
               {/* Type toggle */}
               <div className="flex gap-2 p-1 bg-muted rounded-lg">
@@ -324,7 +243,7 @@ export default function TransactionsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Amount</Label>
+                <Label>Amount (Optional)</Label>
                 <div className="relative">
                   <IndianRupee className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
                   <Input
@@ -340,7 +259,7 @@ export default function TransactionsPage() {
               <div className="space-y-2">
                 <Label>Description</Label>
                 <Input
-                  placeholder="What was this for?"
+                  placeholder="What is this for?"
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
                 />
@@ -418,28 +337,19 @@ export default function TransactionsPage() {
                   {isSplit && (
                     <div className="bg-orange-500/5 p-3 rounded-lg space-y-3 border border-orange-200/20">
                       <p className="text-xs text-muted-foreground">
-                        You paid <span className="font-bold">₹{newAmount || "0"}</span> total.
-                        How much is owed back to you?
+                        Set split amount (Optional)
                       </p>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">Owed to you</Label>
-                          <div className="relative">
-                            <IndianRupee className="absolute left-3 top-2.5 size-4 text-orange-500" />
-                            <Input
-                              className="pl-9 border-orange-200/30"
-                              placeholder="0.00"
-                              type="number"
-                              value={splitAmount}
-                              onChange={(e) => setSplitAmount(e.target.value)}
-                            />
-                          </div>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">Net expense</Label>
-                          <div className="h-10 px-3 flex items-center font-bold text-sm bg-background/50 rounded-md border">
-                            ₹{(Number(newAmount || 0) - Number(splitAmount || 0)).toFixed(2)}
-                          </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Owed back amount</Label>
+                        <div className="relative">
+                          <IndianRupee className="absolute left-3 top-2.5 size-4 text-orange-500" />
+                          <Input
+                            className="pl-9 border-orange-200/30"
+                            placeholder="0.00"
+                            type="number"
+                            value={splitAmount}
+                            onChange={(e) => setSplitAmount(e.target.value)}
+                          />
                         </div>
                       </div>
                     </div>
@@ -449,17 +359,17 @@ export default function TransactionsPage() {
 
               <Button
                 className="w-full"
-                onClick={handleAddTransaction}
-                disabled={!newAmount || !newDescription || !newMethod || saving}
+                onClick={handleSaveWorkflow}
+                disabled={!workflowName || !newDescription || !newMethod || saving}
               >
-                {saving ? "Adding..." : "Add Transaction"}
+                {saving ? "Saving..." : "Save Workflow"}
               </Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* Transactions list */}
+      {/* Workflows list */}
       <Card>
         {loading ? (
           <div className="p-6 space-y-3">
@@ -467,93 +377,62 @@ export default function TransactionsPage() {
               <div key={i} className="h-14 animate-pulse rounded bg-muted" />
             ))}
           </div>
-        ) : transactions.length === 0 ? (
+        ) : workflows.length === 0 ? (
           <div className="p-12 text-center text-muted-foreground">
-            <p className="text-lg">No transactions yet</p>
+            <Workflow className="size-16 mx-auto opacity-20 mb-4" />
+            <p className="text-lg font-medium">No workflows yet</p>
             <p className="text-sm mt-1">
-              Click &quot;Add Transaction&quot; to get started.
+              Create templates for frequently used transactions.
             </p>
           </div>
         ) : (
           <div className="divide-y">
-            {transactions.map((txn) => {
-              const config = methodConfig[txn.paymentMethod as keyof typeof methodConfig] || methodConfig.bank;
+            {workflows.map((wf) => {
+              const config = methodConfig[wf.paymentMethod as keyof typeof methodConfig];
+              const Icon = config?.icon || CreditCard;
               return (
                 <div
-                  key={txn._id}
+                  key={wf._id}
                   className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    <div
-                      className={`rounded-lg p-2 ${
-                        txn.type === "income"
-                          ? "bg-emerald-500/10"
-                          : "bg-red-500/10"
-                      }`}
-                    >
-                      {txn.type === "income" ? (
-                        <TrendingUp className="size-4 text-emerald-500" />
-                      ) : (
-                        <TrendingDown className="size-4 text-red-500" />
-                      )}
+                    <div className="rounded-lg p-2.5 bg-primary/10">
+                      <Zap className="size-5 text-primary" />
                     </div>
                     <div>
-                      <p className="font-medium text-sm">
-                        {txn.description}
-                        {(txn.splitAmount || 0) > 0 && (
-                           <span className="ml-2 inline-flex items-center rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium text-orange-500 ring-1 ring-inset ring-orange-500/20">
-                             Split
-                           </span>
-                        )}
-                      </p>
+                      <p className="font-medium text-sm">{wf.name}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <Badge variant="secondary" className="text-xs">
-                          {config.label}
+                          <Icon className="size-3 mr-1" />
+                          {config?.label || wf.paymentMethod}
                         </Badge>
-                        {txn.category !== "General" && (
+                        {wf.amount && wf.amount > 0 && (
                           <Badge variant="outline" className="text-xs">
-                            {txn.category}
+                            ₹{wf.amount}
+                          </Badge>
+                        )}
+                        {wf.splitAmount && wf.splitAmount > 0 && (
+                          <Badge variant="outline" className="text-xs text-orange-500">
+                            Split ₹{wf.splitAmount}
                           </Badge>
                         )}
                         <span className="text-xs text-muted-foreground">
-                          {new Date(txn.date).toLocaleDateString("en-IN", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })}
+                          {wf.category}
                         </span>
                       </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {wf.description}
+                      </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
-                        <p
-                          className={`font-semibold flex items-center justify-end gap-0.5 ${
-                            txn.type === "income"
-                              ? "text-emerald-500"
-                              : "text-red-500"
-                          }`}
-                        >
-                          {txn.type === "income" ? "+" : "-"}
-                          <IndianRupee className="size-3.5" />
-                          {txn.amount.toLocaleString("en-IN")}
-                        </p>
-                        {(txn.splitAmount || 0) > 0 && (
-                            <p className="text-[10px] text-orange-500 flex items-center justify-end gap-1">
-                                <ArrowRightLeft className="size-2.5" />
-                                Gets back ₹{txn.splitAmount}
-                            </p>
-                        )}
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleDelete(txn._id)}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </div>
+                  <Button
+                    onClick={() => handleDeleteWorkflow(wf._id)}
+                    size="icon"
+                    variant="ghost"
+                    className="size-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
                 </div>
               );
             })}

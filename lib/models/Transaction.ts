@@ -7,6 +7,7 @@ export interface ITransaction extends Document {
   description: string;
   category: string;
   paymentMethod: "bank" | "cash" | "splitwise";
+  splitAmount?: number;
   date: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -24,6 +25,7 @@ const TransactionSchema = new Schema<ITransaction>(
       enum: ["bank", "cash", "splitwise"],
       required: true,
     },
+    splitAmount: { type: Number, default: 0 },
     date: { type: Date, default: Date.now },
   },
   { timestamps: true }

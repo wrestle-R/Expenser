@@ -2,7 +2,7 @@ import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from "@react-navigation/native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { View, ActivityIndicator } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import "react-native-reanimated";
@@ -37,21 +37,31 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isSignedIn, isLoaded } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const hasNavigated = useRef(false);
 
   useEffect(() => {
     if (!isLoaded) return;
 
     const inAuthGroup = segments[0] === "(auth)";
-    const inTabsGroup = segments[0] === "(tabs)";
 
-    if (!isSignedIn && inTabsGroup) {
-      // Redirect to sign-in
-      router.replace("/(auth)/sign-in");
-    } else if (isSignedIn && inAuthGroup) {
-      // Redirect to home
-      router.replace("/(tabs)");
+    console.log("[AuthGuard] isSignedIn:", isSignedIn, "inAuthGroup:", inAuthGroup, "segments:", segments);
+
+    if (isSignedIn && inAuthGroup) {
+      // Signed in but on auth screen -> go to tabs
+      console.log("[AuthGuard] Redirecting signed-in user to (tabs)");
+      hasNavigated.current = true;
+      setTimeout(() => {
+        router.replace("/(tabs)");
+      }, 100);
+    } else if (!isSignedIn && !inAuthGroup) {
+      // Not signed in and not on auth screen -> go to sign-in
+      console.log("[AuthGuard] Redirecting unauthenticated user to sign-in");
+      hasNavigated.current = true;
+      setTimeout(() => {
+        router.replace("/(auth)/sign-in");
+      }, 100);
     }
-  }, [isSignedIn, isLoaded, segments, router]);
+  }, [isSignedIn, isLoaded, segments]);
 
   if (!isLoaded) {
     return (

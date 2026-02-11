@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -10,45 +10,63 @@ import {
   ActivityIndicator,
   Alert,
 } from "react-native";
-import { useSignIn } from "@clerk/clerk-expo";
+import { useSignIn, useAuth } from "@clerk/clerk-expo";
 import { useRouter, Link } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-import { useTheme } from "@/context/ThemeContext";
-import { Colors } from "@/constants/theme";
+import { useTheme } from "../../context/ThemeContext";
+import { Colors } from "../../constants/theme";
 
 export default function SignInScreen() {
   const { isDark } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
   const { signIn, setActive, isLoaded } = useSignIn();
+  const { isSignedIn } = useAuth();
   const router = useRouter();
 
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  // Handle navigation when user is signed in
+  useEffect(() => {
+    if (isSignedIn) {
+      console.log("[SignIn] User is signed in, navigating to tabs...");
+      router.replace("/(tabs)");
+    }
+  }, [isSignedIn]);
+
   const handleSignIn = async () => {
     if (!isLoaded) return;
 
-    if (!email || !password) {
+    if (!identifier || !password) {
       Alert.alert("Error", "Please fill in all fields");
       return;
     }
 
     setLoading(true);
     try {
+      console.log("[SignIn] Creating sign-in attempt...");
       const result = await signIn.create({
-        identifier: email,
+        identifier,
         password,
       });
 
+      console.log("[SignIn] Result status:", result.status);
+
       if (result.status === "complete") {
+        console.log("[SignIn] Sign-in complete, setting active session...");
         await setActive({ session: result.createdSessionId });
-        router.replace("/(tabs)");
+      } else {
+        console.log("[SignIn] Unexpected status:", result.status);
+        Alert.alert(
+          "Sign In Incomplete",
+          `Status: ${result.status}. Please check your account settings or try again.`
+        );
       }
     } catch (err: any) {
-      console.error("Sign in error:", err);
+      console.error("[SignIn] Error:", err?.errors?.[0]?.message);
       Alert.alert(
         "Sign In Failed",
         err.errors?.[0]?.message || "Please check your credentials and try again"
@@ -108,7 +126,7 @@ export default function SignInScreen() {
 
         {/* Form */}
         <View style={{ gap: 16 }}>
-          {/* Email */}
+          {/* Email or Username */}
           <View>
             <Text
               style={{
@@ -118,7 +136,7 @@ export default function SignInScreen() {
                 marginBottom: 8,
               }}
             >
-              Email
+              Email or Username
             </Text>
             <View
               style={{
@@ -131,7 +149,7 @@ export default function SignInScreen() {
                 paddingHorizontal: 16,
               }}
             >
-              <Ionicons name="mail-outline" size={20} color={colors.textMuted} />
+              <Ionicons name="person-outline" size={20} color={colors.textMuted} />
               <TextInput
                 style={{
                   flex: 1,
@@ -140,11 +158,10 @@ export default function SignInScreen() {
                   fontSize: 16,
                   color: colors.text,
                 }}
-                placeholder="Enter your email"
+                placeholder="Enter email or username"
                 placeholderTextColor={colors.textMuted}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
+                value={identifier}
+                onChangeText={setIdentifier}
                 autoCapitalize="none"
                 autoCorrect={false}
               />

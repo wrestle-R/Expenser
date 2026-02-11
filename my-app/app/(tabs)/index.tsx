@@ -11,10 +11,10 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useTheme } from "@/context/ThemeContext";
-import { useUserContext } from "@/context/UserContext";
-import { Colors, paymentMethodConfig } from "@/constants/theme";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { useTheme } from "../../context/ThemeContext";
+import { useUserContext } from "../../context/UserContext";
+import { Colors, paymentMethodConfig } from "../../constants/theme";
+import { formatCurrency, formatDate } from "../../lib/utils";
 
 export default function HomeScreen() {
   const { isDark } = useTheme();

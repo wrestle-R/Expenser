@@ -14,10 +14,10 @@ import { useClerk, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useTheme } from "@/context/ThemeContext";
-import { useUserContext } from "@/context/UserContext";
-import { Colors, paymentMethodConfig } from "@/constants/theme";
-import { clearAllData } from "@/lib/storage";
+import { useTheme } from "../../context/ThemeContext";
+import { useUserContext } from "../../context/UserContext";
+import { Colors, paymentMethodConfig } from "../../constants/theme";
+import { clearAllData } from "../../lib/storage";
 
 const paymentOptions = [
   { id: "bank", label: "Bank (UPI)", icon: "card" as const },

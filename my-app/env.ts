@@ -14,16 +14,15 @@ function getApiUrl(): string {
     return envUrl;
   }
 
-  // Default fallback
-  const defaultUrl = "http://192.168.0.104:3000";
+  // Default fallback - use production URL
+  const defaultUrl = "https://expenser-rdp.vercel.app";
   console.warn("[ENV] No EXPO_PUBLIC_API_URL set. Using default:", defaultUrl);
-  console.warn("[ENV] On physical device? Set EXPO_PUBLIC_API_URL=http://YOUR_COMPUTER_IP:3000");
   return defaultUrl;
 }
 
 export const ENV = {
   API_URL: getApiUrl(),
   CLERK_PUBLISHABLE_KEY:
-    process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || "pk_test_Z3VpZGluZy1jYWltYW4tNjIuY2xlcmsuYWNjb3VudHMuZGV2JA",
 };
 

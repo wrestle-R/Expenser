@@ -16,7 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "./ThemeContext";
-import { Colors } from "@/constants/theme";
+import { Colors } from "../constants/theme";
 
 type ToastType = "success" | "error" | "info" | "warning";
 

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useColorScheme as useSystemColorScheme } from "react-native";
-import { getStoredTheme, setStoredTheme } from "@/lib/storage";
+import { getStoredTheme, setStoredTheme } from "../lib/storage";
 
 type Theme = "light" | "dark";
 

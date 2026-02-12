@@ -23,7 +23,7 @@ import {
   getPendingTransactions,
   getPendingWorkflows,
 } from "../lib/storage";
-import { IUserProfile, ITransaction, IWorkflow, ILocalBalance } from "../lib/types";
+import { IUserProfile, ITransaction, IWorkflow, ILocalBalance, CreateTransactionPayload, CreateWorkflowPayload } from "../lib/types";
 import { generateTempId } from "../lib/utils";
 
 interface UserContextType {
@@ -40,11 +40,11 @@ interface UserContextType {
   refreshAll: () => Promise<void>;
   updateProfile: (data: Partial<IUserProfile>) => Promise<void>;
   addTransaction: (
-    data: Omit<ITransaction, "_id" | "clerkId" | "createdAt" | "updatedAt">
+    data: CreateTransactionPayload
   ) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
   addWorkflow: (
-    data: Omit<IWorkflow, "_id" | "userId" | "createdAt" | "updatedAt">
+    data: CreateWorkflowPayload
   ) => Promise<void>;
   deleteWorkflow: (id: string) => Promise<void>;
   getBalance: (method: "bank" | "cash" | "splitwise") => number;
@@ -68,21 +68,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [isOnline, setIsOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
 
-  // Set API token when auth changes
+  // Set API token getter for fresh tokens on every request
   useEffect(() => {
-    async function setApiToken() {
-      if (isSignedIn) {
-        try {
-          const token = await getToken();
-          api.setToken(token);
-        } catch (error) {
-          console.error("[UserContext] Error getting token:", error);
-        }
-      } else {
-        api.setToken(null);
-      }
+    if (isSignedIn) {
+      api.setTokenGetter(() => getToken());
+      // Also set initial token for immediate use
+      getToken().then((token) => api.setToken(token)).catch(console.error);
+    } else {
+      api.setToken(null);
+      api.setTokenGetter(null);
     }
-    setApiToken();
   }, [isSignedIn, getToken]);
 
   // Subscribe to sync status changes
@@ -224,14 +219,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addTransaction = useCallback(
-    async (
-      data: Omit<ITransaction, "_id" | "clerkId" | "createdAt" | "updatedAt">
-    ) => {
+    async (payload: CreateTransactionPayload) => {
       const online = await syncService.isOnline();
 
       if (online) {
         try {
-          const created = await api.createTransaction(data);
+          console.log("[UserContext] Adding transaction online:", payload);
+          const created = await api.createTransaction(payload);
           setTransactions((prev) => [created, ...prev]);
           await refreshProfile(); // Refresh to get updated balances
         } catch (error) {
@@ -243,8 +237,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         const tempTransaction: ITransaction = {
           _id: generateTempId(),
           clerkId: profile?.clerkId || "",
-          ...data,
-          date: data.date || new Date().toISOString(),
+          type: payload.type,
+          amount: payload.amount,
+          description: payload.description,
+          category: payload.category,
+          paymentMethod: payload.paymentMethod,
+          splitAmount: payload.splitAmount || 0,
+          date: payload.date || new Date().toISOString(),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           isLocal: true,
@@ -256,10 +255,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
         // Update local balance
         const newBalances = await syncService.updateLocalBalance(
-          data.paymentMethod,
-          data.amount,
-          data.type,
-          data.splitAmount
+          payload.paymentMethod,
+          payload.amount,
+          payload.type,
+          payload.splitAmount
         );
         setLocalBalancesState(newBalances);
         
@@ -301,12 +300,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addWorkflow = useCallback(
-    async (data: Omit<IWorkflow, "_id" | "userId" | "createdAt" | "updatedAt">) => {
+    async (payload: CreateWorkflowPayload) => {
       const online = await syncService.isOnline();
 
       if (online) {
         try {
-          const created = await api.createWorkflow(data);
+          console.log("[UserContext] Adding workflow online:", payload);
+          const created = await api.createWorkflow(payload);
           setWorkflows((prev) => [created, ...prev]);
         } catch (error) {
           console.error("[UserContext] Error creating workflow:", error);
@@ -316,7 +316,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         const tempWorkflow: IWorkflow = {
           _id: generateTempId(),
           userId: profile?.clerkId || "",
-          ...data,
+          name: payload.name,
+          type: payload.type,
+          amount: payload.amount,
+          description: payload.description,
+          category: payload.category,
+          paymentMethod: payload.paymentMethod,
+          splitAmount: payload.splitAmount,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           isLocal: true,

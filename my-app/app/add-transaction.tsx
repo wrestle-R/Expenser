@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Switch,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -38,6 +39,7 @@ export default function AddTransactionScreen() {
   const [category, setCategory] = useState("other");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("bank");
   const [splitAmount, setSplitAmount] = useState("");
+  const [isSplit, setIsSplit] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Pre-fill from workflow params
@@ -48,7 +50,10 @@ export default function AddTransactionScreen() {
     if (params.category) setCategory(params.category as string);
     if (params.paymentMethod)
       setPaymentMethod(params.paymentMethod as PaymentMethod);
-    if (params.splitAmount) setSplitAmount(params.splitAmount as string);
+    if (params.splitAmount) {
+      setSplitAmount(params.splitAmount as string);
+      setIsSplit(true);
+    }
   }, [params]);
 
   // Filter payment methods based on user's profile
@@ -67,21 +72,37 @@ export default function AddTransactionScreen() {
       return;
     }
 
+    // Calculate net expense if split
+    const payAmount = parseFloat(amount || "0");
+    const split = parseFloat(splitAmount || "0");
+    const finalSplit = isSplit ? split : 0;
+
+    // Validate split amount
+    if (isSplit && finalSplit >= payAmount) {
+      showToast("Split amount must be less than total amount", "error");
+      return;
+    }
+
     setSaving(true);
     try {
-      await addTransaction({
+      const payload = {
         type,
-        amount: parseFloat(amount),
+        amount: payAmount,
         description: description.trim(),
-        category,
+        category: category || "General",
         paymentMethod,
-        splitAmount: splitAmount ? parseFloat(splitAmount) : 0,
-        date: new Date().toISOString(),
-      });
+        splitAmount: finalSplit,
+      };
+      console.log("[AddTransaction] Sending payload:", payload);
+      await addTransaction(payload);
       showToast("Transaction added successfully", "success");
       router.back();
-    } catch (error) {
-      showToast("Failed to add transaction", "error");
+    } catch (error: any) {
+      console.error("[AddTransaction] Error:", error?.message || error);
+      showToast(
+        error?.message || "Failed to add transaction",
+        "error"
+      );
     } finally {
       setSaving(false);
     }
@@ -351,49 +372,121 @@ export default function AddTransactionScreen() {
           </View>
         </View>
 
-        {/* Split Amount (optional) */}
-        {paymentMethod === "splitwise" && (
-          <View style={{ marginBottom: 20 }}>
-            <Text
-              style={{
-                fontSize: 14,
-                fontWeight: "600",
-                color: colors.textMuted,
-                marginBottom: 8,
-              }}
-            >
-              Split Amount (Your Share)
-            </Text>
+        {/* Split Amount (for Expenses) */}
+        {type === "expense" && (
+          <View
+            style={{
+              marginBottom: 20,
+              paddingTop: 20,
+              marginTop: 10,
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+            }}
+          >
             <View
               style={{
                 flexDirection: "row",
                 alignItems: "center",
-                backgroundColor: colors.card,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: colors.border,
-                paddingHorizontal: 16,
+                justifyContent: "space-between",
+                marginBottom: isSplit ? 16 : 0,
               }}
             >
-              <Text
-                style={{ fontSize: 20, color: colors.text, marginRight: 8 }}
-              >
-                ₹
-              </Text>
-              <TextInput
-                style={{
-                  flex: 1,
-                  fontSize: 20,
-                  color: colors.text,
-                  paddingVertical: 14,
-                }}
-                placeholder="0"
-                placeholderTextColor={colors.textMuted}
-                keyboardType="numeric"
-                value={splitAmount}
-                onChangeText={setSplitAmount}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="git-branch-outline" size={20} color={Colors.light.splitwise} />
+                <Text
+                  style={{
+                    fontSize: 16,
+                    fontWeight: "600",
+                    color: colors.text,
+                  }}
+                >
+                  Split transaction?
+                </Text>
+              </View>
+              <Switch
+                value={isSplit}
+                onValueChange={setIsSplit}
+                trackColor={{ false: colors.border, true: Colors.light.splitwise }}
+                thumbColor={"#fff"}
               />
             </View>
+
+            {isSplit && (
+              <View
+                style={{
+                  backgroundColor: isDark ? `${Colors.light.splitwise}15` : `${Colors.light.splitwise}10`,
+                  borderRadius: 12,
+                  padding: 16,
+                  borderWidth: 1,
+                  borderColor: `${Colors.light.splitwise}30`,
+                  gap: 16,
+                }}
+              >
+                <Text style={{ fontSize: 13, color: colors.textMuted }}>
+                  You paid <Text style={{ fontWeight: "bold" }}>₹{amount || "0"}</Text> total.
+                  How much is owed back to you?
+                </Text>
+
+                <View style={{ flexDirection: "row", gap: 12 }}>
+                  <View style={{ flex: 1, gap: 4 }}>
+                    <Text style={{ fontSize: 12, color: colors.textMuted }}>
+                      Owed to you
+                    </Text>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        backgroundColor: colors.card,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: `${Colors.light.splitwise}50`,
+                        paddingHorizontal: 12,
+                      }}
+                    >
+                      <Text
+                        style={{ fontSize: 16, color: Colors.light.splitwise, marginRight: 6 }}
+                      >
+                        ₹
+                      </Text>
+                      <TextInput
+                        style={{
+                          flex: 1,
+                          fontSize: 16,
+                          color: colors.text,
+                          paddingVertical: 10,
+                        }}
+                        placeholder="0"
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="numeric"
+                        value={splitAmount}
+                        onChangeText={setSplitAmount}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={{ flex: 1, gap: 4 }}>
+                    <Text style={{ fontSize: 12, color: colors.textMuted }}>
+                      Net expense
+                    </Text>
+                    <View
+                      style={{
+                        height: 48,
+                        justifyContent: "center",
+                        paddingHorizontal: 12,
+                        backgroundColor: colors.background,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                      }}
+                    >
+                      <Text style={{ fontSize: 16, fontWeight: "bold", color: colors.text }}>
+                        ₹{(parseFloat(amount || "0") - parseFloat(splitAmount || "0")).toFixed(2)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            )}
           </View>
         )}
 

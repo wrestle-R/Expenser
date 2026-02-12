@@ -60,6 +60,27 @@ export interface ILocalBalance {
 export type PaymentMethod = "bank" | "cash" | "splitwise";
 export type TransactionType = "income" | "expense";
 
+// API Payload types (what we send to the backend)
+export interface CreateTransactionPayload {
+  type: TransactionType;
+  amount: number;
+  description: string;
+  category: string;
+  paymentMethod: PaymentMethod;
+  splitAmount?: number;
+  date?: string; // Optional, backend will default to current date
+}
+
+export interface CreateWorkflowPayload {
+  name: string;
+  type: TransactionType;
+  amount?: number;
+  description: string;
+  category: string;
+  paymentMethod: PaymentMethod;
+  splitAmount?: number;
+}
+
 // API Response types
 export interface TransactionsResponse {
   transactions: ITransaction[];

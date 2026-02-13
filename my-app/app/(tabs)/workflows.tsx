@@ -17,6 +17,7 @@ import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { formatCurrency } from "../../lib/utils";
 import { IWorkflow } from "../../lib/types";
+import SyncStatusBanner from "../../components/SyncStatusBanner";
 
 export default function WorkflowsScreen() {
   const { isDark } = useTheme();
@@ -29,6 +30,8 @@ export default function WorkflowsScreen() {
     refreshWorkflows,
     deleteWorkflow,
     isOnline,
+    syncing,
+    manualRefresh,
   } = useUserContext();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -36,7 +39,7 @@ export default function WorkflowsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refreshWorkflows();
+    await manualRefresh();
     setRefreshing(false);
   };
 
@@ -114,12 +117,23 @@ export default function WorkflowsScreen() {
             Quick actions for recurring transactions
           </Text>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <TouchableOpacity
+            onPress={onRefresh}
+            disabled={refreshing || syncing}
+            style={{ padding: 4 }}
+          >
+            <Ionicons
+              name="refresh"
+              size={20}
+              color={syncing ? colors.textMuted : colors.text}
+            />
+          </TouchableOpacity>
           <View
             style={{
-              width: 12,
-              height: 12,
-              borderRadius: 6,
+              width: 10,
+              height: 10,
+              borderRadius: 5,
               backgroundColor: isOnline ? colors.success : colors.error,
             }}
           />
@@ -159,6 +173,9 @@ export default function WorkflowsScreen() {
           />
         }
       >
+        {/* Sync Status Banner */}
+        <SyncStatusBanner />
+
         {workflows.length === 0 ? (
           <View
             style={{

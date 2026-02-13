@@ -21,6 +21,7 @@ import {
   setLocalBalances,
 } from "./storage";
 import { ITransaction, IWorkflow, IUserProfile } from "./types";
+import { notificationService } from "./notifications";
 
 export interface SyncStatus {
   isOnline: boolean;
@@ -29,28 +30,100 @@ export interface SyncStatus {
   lastSyncTime: number | null;
 }
 
+const AUTO_REFRESH_INTERVAL = 3000; // 3 seconds
+
 class SyncService {
   private isSyncing = false;
   private listeners: ((status: SyncStatus) => void)[] = [];
   private unsubscribeNetInfo: (() => void) | null = null;
+  private autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private _isOnline = false;
 
   async initialize() {
     // Listen for network state changes
     this.unsubscribeNetInfo = NetInfo.addEventListener((state) => {
-      if (state.isConnected) {
+      const wasOffline = !this._isOnline;
+      this._isOnline = state.isConnected ?? false;
+
+      if (state.isConnected && wasOffline) {
         console.log("[Sync] Network connected, triggering sync...");
         this.syncAll();
+      }
+
+      // Notify listeners about connectivity change
+      this.notifyListeners();
+
+      // Start/stop auto-refresh based on connectivity
+      if (state.isConnected) {
+        this.startAutoRefresh();
+      } else {
+        this.stopAutoRefresh();
       }
     });
 
     // Check current network state and sync if online
     const state = await NetInfo.fetch();
+    this._isOnline = state.isConnected ?? false;
     if (state.isConnected) {
       this.syncAll();
+      this.startAutoRefresh();
+    }
+  }
+
+  private startAutoRefresh() {
+    if (this.autoRefreshTimer) return; // Already running
+    console.log("[Sync] Starting auto-refresh every 3s");
+    this.autoRefreshTimer = setInterval(() => {
+      if (this._isOnline && !this.isSyncing) {
+        this.silentRefresh();
+      }
+    }, AUTO_REFRESH_INTERVAL);
+  }
+
+  private stopAutoRefresh() {
+    if (this.autoRefreshTimer) {
+      console.log("[Sync] Stopping auto-refresh");
+      clearInterval(this.autoRefreshTimer);
+      this.autoRefreshTimer = null;
+    }
+  }
+
+  // Light refresh - just fetch latest data without full sync
+  private async silentRefresh() {
+    try {
+      const state = await NetInfo.fetch();
+      if (!state.isConnected) return;
+
+      // Only fetch, don't sync pending (that happens in syncAll)
+      const [transactions, workflows, profile] = await Promise.all([
+        api.getTransactions().catch(() => null),
+        api.getWorkflows().catch(() => null),
+        api.getProfile().catch(() => null),
+      ]);
+
+      if (transactions) await setStoredTransactions(transactions);
+      if (workflows) await setStoredWorkflows(workflows);
+      if (profile) {
+        await setStoredProfile(profile);
+        await setLocalBalances(profile.balances);
+      }
+
+      // Also sync any pending items
+      const pendingTxns = await getPendingTransactions();
+      const pendingWorkflows = await getPendingWorkflows();
+      const pendingDeletes = await getPendingDeletes();
+      if (pendingTxns.length > 0 || pendingWorkflows.length > 0 || pendingDeletes.length > 0) {
+        this.syncAll(); // Full sync if there are pending items
+      }
+
+      this.notifyListeners();
+    } catch (error) {
+      // Silent fail - this is background refresh
     }
   }
 
   cleanup() {
+    this.stopAutoRefresh();
     if (this.unsubscribeNetInfo) {
       this.unsubscribeNetInfo();
     }
@@ -69,13 +142,12 @@ class SyncService {
   }
 
   async getStatus(): Promise<SyncStatus> {
-    const state = await NetInfo.fetch();
     const pendingTxns = await getPendingTransactions();
     const pendingWorkflows = await getPendingWorkflows();
     const pendingDeletes = await getPendingDeletes();
 
     return {
-      isOnline: state.isConnected ?? false,
+      isOnline: this._isOnline,
       isSyncing: this.isSyncing,
       pendingCount:
         pendingTxns.length + pendingWorkflows.length + pendingDeletes.length,
@@ -84,8 +156,40 @@ class SyncService {
   }
 
   async isOnline(): Promise<boolean> {
-    const state = await NetInfo.fetch();
-    return state.isConnected ?? false;
+    // Use cached value first for speed, but verify with NetInfo
+    try {
+      const state = await NetInfo.fetch();
+      this._isOnline = state.isConnected ?? false;
+    } catch {
+      // Use cached value
+    }
+    return this._isOnline;
+  }
+
+  // Quick sync check without network call
+  isOnlineSync(): boolean {
+    return this._isOnline;
+  }
+
+  // Force a manual refresh - fetches everything fresh
+  async forceRefresh(): Promise<{
+    transactions: ITransaction[];
+    workflows: IWorkflow[];
+    profile: IUserProfile | null;
+  } | null> {
+    const online = await this.isOnline();
+    if (!online) return null;
+
+    try {
+      // Sync pending items first
+      await this.syncAll();
+      
+      // Then fetch fresh data
+      return await this.fetchAllFromServer();
+    } catch (error) {
+      console.error("[Sync] Force refresh failed:", error);
+      return null;
+    }
   }
 
   async syncAll() {
@@ -120,6 +224,9 @@ class SyncService {
 
       // Update last sync time
       await setLastSyncTime(Date.now());
+
+      // Clear unsynced/stale notifications on successful sync
+      await notificationService.onSyncComplete();
 
       console.log("[Sync] Sync completed successfully");
     } catch (error) {

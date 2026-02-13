@@ -4,7 +4,9 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useRef,
 } from "react";
+import { AppState, AppStateStatus } from "react-native";
 import { useAuth } from "@clerk/clerk-expo";
 import { api } from "../lib/api";
 import { syncService } from "../lib/sync";
@@ -14,9 +16,11 @@ import {
   getStoredTransactions,
   setStoredTransactions,
   addPendingTransaction,
+  removePendingTransaction,
   getStoredWorkflows,
   setStoredWorkflows,
   addPendingWorkflow,
+  removePendingWorkflow,
   addPendingDelete,
   getLocalBalances,
   setLocalBalances,
@@ -25,6 +29,7 @@ import {
 } from "../lib/storage";
 import { IUserProfile, ITransaction, IWorkflow, ILocalBalance, CreateTransactionPayload, CreateWorkflowPayload } from "../lib/types";
 import { generateTempId } from "../lib/utils";
+import { notificationService } from "../lib/notifications";
 
 interface UserContextType {
   profile: IUserProfile | null;
@@ -34,10 +39,12 @@ interface UserContextType {
   syncing: boolean;
   isOnline: boolean;
   pendingCount: number;
+  lastSyncTime: number | null;
   refreshProfile: () => Promise<void>;
   refreshTransactions: () => Promise<void>;
   refreshWorkflows: () => Promise<void>;
   refreshAll: () => Promise<void>;
+  manualRefresh: () => Promise<void>;
   updateProfile: (data: Partial<IUserProfile>) => Promise<void>;
   addTransaction: (
     data: CreateTransactionPayload
@@ -67,6 +74,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [syncing, setSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+  const [lastSyncTime, setLastSyncTimeState] = useState<number | null>(null);
+  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Set API token getter for fresh tokens on every request
   useEffect(() => {
@@ -86,8 +95,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       setIsOnline(status.isOnline);
       setSyncing(status.isSyncing);
       setPendingCount(status.pendingCount);
+      if (status.lastSyncTime) setLastSyncTimeState(status.lastSyncTime);
 
-      // Refresh data after sync completes
+      // Refresh local state after sync completes
       if (!status.isSyncing && status.isOnline) {
         await loadLocalData();
       }
@@ -95,6 +105,35 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     return () => unsubscribe();
   }, []);
+
+  // Auto-refresh data from local storage every 3s (reads what sync service has fetched)
+  useEffect(() => {
+    if (!isSignedIn) return;
+
+    autoRefreshRef.current = setInterval(async () => {
+      await loadLocalData();
+    }, 3000);
+
+    return () => {
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current);
+        autoRefreshRef.current = null;
+      }
+    };
+  }, [isSignedIn]);
+
+  // Pause/resume auto-refresh on app background/foreground
+  useEffect(() => {
+    const handleAppState = (state: AppStateStatus) => {
+      if (state === "active" && isSignedIn) {
+        // App came back to foreground - trigger a sync
+        syncService.syncAll().catch(console.error);
+      }
+    };
+
+    const sub = AppState.addEventListener("change", handleAppState);
+    return () => sub.remove();
+  }, [isSignedIn]);
 
   // Load local data on mount
   const loadLocalData = useCallback(async () => {
@@ -120,7 +159,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initialize data on mount
+  // Initialize data on mount - OFFLINE FIRST
   useEffect(() => {
     async function initialize() {
       if (!isSignedIn) {
@@ -129,12 +168,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       }
 
       setLoading(true);
-      await loadLocalData();
 
-      // Initialize sync service and attempt sync
+      // Step 1: Load local data IMMEDIATELY (this is what makes it offline-first)
+      await loadLocalData();
+      setLoading(false); // Show UI right away with cached data
+
+      // Step 2: Initialize sync service + notifications
       syncService.initialize();
-      
-      // Try to fetch from server
+      notificationService.initialize().catch(console.error);
+
+      // Step 3: Try to fetch from server in background (non-blocking)
       try {
         const [serverTxns, serverWorkflows, serverProfile] = await Promise.all([
           syncService.fetchTransactions(),
@@ -143,19 +186,25 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         ]);
 
         if (serverProfile) setProfile(serverProfile);
-        setTransactions(serverTxns);
-        setWorkflows(serverWorkflows);
+        if (serverTxns.length > 0 || serverWorkflows.length > 0) {
+          setTransactions(serverTxns);
+          setWorkflows(serverWorkflows);
+        }
+        setLastSyncTimeState(Date.now());
       } catch (error) {
-        console.log("[UserContext] Using local data:", error);
+        console.log("[UserContext] Offline - using cached data:", error);
+        // This is FINE - we already loaded local data above
       }
-
-      setLoading(false);
     }
 
     initialize();
 
     return () => {
       syncService.cleanup();
+      notificationService.cleanup();
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current);
+      }
     };
   }, [isSignedIn, loadLocalData]);
 
@@ -193,6 +242,32 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     await Promise.all([refreshProfile(), refreshTransactions(), refreshWorkflows()]);
   }, [refreshProfile, refreshTransactions, refreshWorkflows]);
 
+  // Manual refresh button handler - forces a full sync + fetch
+  const manualRefresh = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const result = await syncService.forceRefresh();
+      if (result) {
+        if (result.profile) {
+          setProfile(result.profile);
+          setLocalBalancesState(result.profile.balances);
+        }
+        setTransactions(result.transactions);
+        setWorkflows(result.workflows);
+        setLastSyncTimeState(Date.now());
+      } else {
+        // Offline - at least reload local data
+        await loadLocalData();
+      }
+    } catch (error) {
+      console.error("[UserContext] Manual refresh failed:", error);
+      // Fall back to loading local data
+      await loadLocalData();
+    } finally {
+      setSyncing(false);
+    }
+  }, [loadLocalData]);
+
   const updateProfile = useCallback(
     async (data: Partial<IUserProfile>) => {
       try {
@@ -222,48 +297,56 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     async (payload: CreateTransactionPayload) => {
       const online = await syncService.isOnline();
 
+      // ALWAYS create a local transaction first for instant UI feedback
+      const tempTransaction: ITransaction = {
+        _id: generateTempId(),
+        clerkId: profile?.clerkId || "",
+        type: payload.type,
+        amount: payload.amount,
+        description: payload.description,
+        category: payload.category,
+        paymentMethod: payload.paymentMethod,
+        splitAmount: payload.splitAmount || 0,
+        date: payload.date || new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isLocal: true,
+        syncStatus: "pending",
+      };
+
+      // Add to local state immediately
+      await addPendingTransaction(tempTransaction);
+      setTransactions((prev) => [tempTransaction, ...prev]);
+
+      // Update local balance
+      const newBalances = await syncService.updateLocalBalance(
+        payload.paymentMethod,
+        payload.amount,
+        payload.type,
+        payload.splitAmount
+      );
+      setLocalBalancesState(newBalances);
+      setPendingCount((prev) => {
+        notificationService.onPendingItemAdded(prev + 1);
+        return prev + 1;
+      });
+
       if (online) {
+        // Try to sync immediately in background
         try {
-          console.log("[UserContext] Adding transaction online:", payload);
+          console.log("[UserContext] Syncing transaction online:", payload);
           const created = await api.createTransaction(payload);
-          setTransactions((prev) => [created, ...prev]);
+          // Remove temp and replace with server version
+          await removePendingTransaction(tempTransaction._id);
+          setTransactions((prev) => 
+            prev.map((t) => t._id === tempTransaction._id ? created : t)
+          );
           await refreshProfile(); // Refresh to get updated balances
+          setPendingCount((prev) => Math.max(0, prev - 1));
         } catch (error) {
-          console.error("[UserContext] Error creating transaction:", error);
-          throw error;
+          console.log("[UserContext] Failed to sync, will retry later:", error);
+          // Transaction is already saved locally - it will sync via auto-refresh
         }
-      } else {
-        // Create locally
-        const tempTransaction: ITransaction = {
-          _id: generateTempId(),
-          clerkId: profile?.clerkId || "",
-          type: payload.type,
-          amount: payload.amount,
-          description: payload.description,
-          category: payload.category,
-          paymentMethod: payload.paymentMethod,
-          splitAmount: payload.splitAmount || 0,
-          date: payload.date || new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          isLocal: true,
-          syncStatus: "pending",
-        };
-
-        await addPendingTransaction(tempTransaction);
-        setTransactions((prev) => [tempTransaction, ...prev]);
-
-        // Update local balance
-        const newBalances = await syncService.updateLocalBalance(
-          payload.paymentMethod,
-          payload.amount,
-          payload.type,
-          payload.splitAmount
-        );
-        setLocalBalancesState(newBalances);
-        
-        // Update pending count
-        setPendingCount((prev) => prev + 1);
       }
     },
     [profile, refreshProfile]
@@ -293,7 +376,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       } else {
         // Queue for deletion when online
         await addPendingDelete({ type: "transaction", id });
-        setPendingCount((prev) => prev + 1);
+        setPendingCount((prev) => {
+          notificationService.onPendingItemAdded(prev + 1);
+          return prev + 1;
+        });
       }
     },
     [refreshProfile]
@@ -303,35 +389,42 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     async (payload: CreateWorkflowPayload) => {
       const online = await syncService.isOnline();
 
+      // Always save locally first
+      const tempWorkflow: IWorkflow = {
+        _id: generateTempId(),
+        userId: profile?.clerkId || "",
+        name: payload.name,
+        type: payload.type,
+        amount: payload.amount,
+        description: payload.description,
+        category: payload.category,
+        paymentMethod: payload.paymentMethod,
+        splitAmount: payload.splitAmount,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isLocal: true,
+        syncStatus: "pending",
+      };
+
+      await addPendingWorkflow(tempWorkflow);
+      setWorkflows((prev) => [tempWorkflow, ...prev]);
+      setPendingCount((prev) => {
+        notificationService.onPendingItemAdded(prev + 1);
+        return prev + 1;
+      });
+
       if (online) {
         try {
-          console.log("[UserContext] Adding workflow online:", payload);
+          console.log("[UserContext] Syncing workflow online:", payload);
           const created = await api.createWorkflow(payload);
-          setWorkflows((prev) => [created, ...prev]);
+          await removePendingWorkflow(tempWorkflow._id);
+          setWorkflows((prev) =>
+            prev.map((w) => w._id === tempWorkflow._id ? created : w)
+          );
+          setPendingCount((prev) => Math.max(0, prev - 1));
         } catch (error) {
-          console.error("[UserContext] Error creating workflow:", error);
-          throw error;
+          console.log("[UserContext] Failed to sync workflow, will retry later:", error);
         }
-      } else {
-        const tempWorkflow: IWorkflow = {
-          _id: generateTempId(),
-          userId: profile?.clerkId || "",
-          name: payload.name,
-          type: payload.type,
-          amount: payload.amount,
-          description: payload.description,
-          category: payload.category,
-          paymentMethod: payload.paymentMethod,
-          splitAmount: payload.splitAmount,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          isLocal: true,
-          syncStatus: "pending",
-        };
-
-        await addPendingWorkflow(tempWorkflow);
-        setWorkflows((prev) => [tempWorkflow, ...prev]);
-        setPendingCount((prev) => prev + 1);
       }
     },
     [profile]
@@ -354,7 +447,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       }
     } else {
       await addPendingDelete({ type: "workflow", id });
-      setPendingCount((prev) => prev + 1);
+      setPendingCount((prev) => {
+        notificationService.onPendingItemAdded(prev + 1);
+        return prev + 1;
+      });
     }
   }, []);
 
@@ -392,10 +488,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         syncing,
         isOnline,
         pendingCount,
+        lastSyncTime,
         refreshProfile,
         refreshTransactions,
         refreshWorkflows,
         refreshAll,
+        manualRefresh,
         updateProfile,
         addTransaction,
         deleteTransaction,

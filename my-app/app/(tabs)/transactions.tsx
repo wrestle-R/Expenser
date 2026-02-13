@@ -17,6 +17,7 @@ import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { formatCurrency, formatDate } from "../../lib/utils";
 import { ITransaction } from "../../lib/types";
+import SyncStatusBanner from "../../components/SyncStatusBanner";
 
 const PAGE_SIZE = 10;
 
@@ -31,6 +32,8 @@ export default function TransactionsScreen() {
     refreshTransactions,
     deleteTransaction,
     isOnline,
+    syncing,
+    manualRefresh,
   } = useUserContext();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -39,7 +42,7 @@ export default function TransactionsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refreshTransactions();
+    await manualRefresh();
     setRefreshing(false);
   };
 
@@ -105,12 +108,23 @@ export default function TransactionsScreen() {
             {transactions.length} total transactions
           </Text>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <TouchableOpacity
+            onPress={onRefresh}
+            disabled={refreshing || syncing}
+            style={{ padding: 4 }}
+          >
+            <Ionicons
+              name="refresh"
+              size={20}
+              color={syncing ? colors.textMuted : colors.text}
+            />
+          </TouchableOpacity>
           <View
             style={{
-              width: 12,
-              height: 12,
-              borderRadius: 6,
+              width: 10,
+              height: 10,
+              borderRadius: 5,
               backgroundColor: isOnline ? colors.success : colors.error,
             }}
           />
@@ -150,6 +164,9 @@ export default function TransactionsScreen() {
           />
         }
       >
+        {/* Sync Status Banner */}
+        <SyncStatusBanner />
+
         {transactions.length === 0 ? (
           <View
             style={{

@@ -15,6 +15,7 @@ import { useTheme } from "../../context/ThemeContext";
 import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { formatCurrency, formatDate } from "../../lib/utils";
+import SyncStatusBanner from "../../components/SyncStatusBanner";
 
 export default function HomeScreen() {
   const { isDark } = useTheme();
@@ -30,6 +31,7 @@ export default function HomeScreen() {
     isOnline,
     pendingCount,
     refreshAll,
+    manualRefresh,
     getBalance,
     getTotalBalance,
   } = useUserContext();
@@ -38,7 +40,7 @@ export default function HomeScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refreshAll();
+    await manualRefresh();
     setRefreshing(false);
   };
 
@@ -91,14 +93,27 @@ export default function HomeScreen() {
         <Text style={{ fontSize: 20, fontWeight: "bold", color: colors.text }}>
           Expenser
         </Text>
-        <View
-          style={{
-            width: 12,
-            height: 12,
-            borderRadius: 6,
-            backgroundColor: isOnline ? colors.success : colors.error,
-          }}
-        />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <TouchableOpacity
+            onPress={onRefresh}
+            disabled={refreshing || syncing}
+            style={{ padding: 4 }}
+          >
+            <Ionicons
+              name="refresh"
+              size={20}
+              color={syncing ? colors.textMuted : colors.text}
+            />
+          </TouchableOpacity>
+          <View
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: 5,
+              backgroundColor: isOnline ? colors.success : colors.error,
+            }}
+          />
+        </View>
       </View>
 
       <ScrollView
@@ -126,25 +141,10 @@ export default function HomeScreen() {
           <Text style={{ color: colors.textMuted, marginTop: 4 }}>
             Here's your financial overview
           </Text>
-          {!isOnline && (
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                marginTop: 8,
-              padding: 8,
-              backgroundColor: colors.warningBg,
-              borderRadius: 8,
-            }}
-          >
-            <Ionicons name="cloud-offline" size={16} color={colors.warning} />
-            <Text style={{ color: colors.warning, marginLeft: 8, fontSize: 12 }}>
-              You're offline. Changes will sync when connected.
-              {pendingCount > 0 && ` (${pendingCount} pending)`}
-            </Text>
-          </View>
-        )}
-      </View>
+        </View>
+
+        {/* Sync Status Banner */}
+        <SyncStatusBanner />
 
       {/* Total Balance Card */}
       <View

@@ -128,3 +128,82 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
+
+export async function PUT(req: Request) {
+  try {
+    const { userId } = await auth();
+    console.log("[API /transactions PUT] userId:", userId);
+
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json({ error: "Transaction ID required" }, { status: 400 });
+    }
+
+    const data = await req.json();
+    console.log("[API /transactions PUT] Data:", data);
+
+    await connectDB();
+
+    // Get the old transaction to reverse its balance impact
+    const oldTransaction = await Transaction.findOne({ _id: id, clerkId: userId });
+    if (!oldTransaction) {
+      return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
+    }
+
+    // Update user balance - reverse old transaction
+    const user = await User.findOne({ clerkId: userId });
+    if (user) {
+      // Reverse old transaction
+      const oldMethod = oldTransaction.paymentMethod as "bank" | "cash" | "splitwise";
+      const oldAmt = oldTransaction.type === "income" ? -oldTransaction.amount : oldTransaction.amount;
+      user.balances[oldMethod] = (user.balances[oldMethod] || 0) + oldAmt;
+      
+      if (oldTransaction.splitAmount && oldTransaction.splitAmount > 0 && oldTransaction.type === "expense") {
+        user.balances["splitwise"] = (user.balances["splitwise"] || 0) - oldTransaction.splitAmount;
+      }
+
+      // Apply new transaction
+      const newMethod = (data.paymentMethod || oldTransaction.paymentMethod) as "bank" | "cash" | "splitwise";
+      const newType = data.type || oldTransaction.type;
+      const newAmount = data.amount ?? oldTransaction.amount;
+      const newSplitAmount = data.splitAmount ?? oldTransaction.splitAmount;
+      
+      const newAmt = newType === "income" ? newAmount : -newAmount;
+      user.balances[newMethod] = (user.balances[newMethod] || 0) + newAmt;
+      
+      if (newSplitAmount && newSplitAmount > 0 && newType === "expense") {
+        user.balances["splitwise"] = (user.balances["splitwise"] || 0) + newSplitAmount;
+      }
+
+      await user.save();
+      console.log("[API /transactions PUT] Updated balances");
+    }
+
+    // Update the transaction
+    const transaction = await Transaction.findOneAndUpdate(
+      { _id: id, clerkId: userId },
+      {
+        type: data.type ?? oldTransaction.type,
+        amount: data.amount ?? oldTransaction.amount,
+        description: data.description ?? oldTransaction.description,
+        category: data.category ?? oldTransaction.category,
+        paymentMethod: data.paymentMethod ?? oldTransaction.paymentMethod,
+        splitAmount: data.splitAmount ?? oldTransaction.splitAmount,
+        date: data.date ?? oldTransaction.date,
+      },
+      { new: true }
+    );
+
+    console.log("[API /transactions PUT] Updated transaction:", transaction?._id);
+    return NextResponse.json({ transaction });
+  } catch (error) {
+    console.error("[API /transactions PUT] Error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}

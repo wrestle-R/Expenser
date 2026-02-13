@@ -27,7 +27,7 @@ import {
   getPendingTransactions,
   getPendingWorkflows,
 } from "../lib/storage";
-import { IUserProfile, ITransaction, IWorkflow, ILocalBalance, CreateTransactionPayload, CreateWorkflowPayload } from "../lib/types";
+import { IUserProfile, ITransaction, IWorkflow, ILocalBalance, CreateTransactionPayload, CreateWorkflowPayload, UpdateTransactionPayload } from "../lib/types";
 import { generateTempId } from "../lib/utils";
 import { notificationService } from "../lib/notifications";
 
@@ -48,6 +48,10 @@ interface UserContextType {
   updateProfile: (data: Partial<IUserProfile>) => Promise<void>;
   addTransaction: (
     data: CreateTransactionPayload
+  ) => Promise<void>;
+  updateTransaction: (
+    id: string,
+    data: UpdateTransactionPayload
   ) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
   addWorkflow: (
@@ -151,8 +155,32 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       if (storedProfile) setProfile(storedProfile);
       
       // Merge pending with stored, pending first (newest)
-      setTransactions([...pendingTxns, ...storedTxns]);
-      setWorkflows([...pendingWorkflows, ...storedWorkflows]);
+      // Deduplicate by _id to avoid showing same transaction twice
+      const storedTxnIds = new Set(storedTxns.map(t => t._id));
+      const uniquePendingTxns = pendingTxns.filter(t => !storedTxnIds.has(t._id));
+      
+      // Also check for potential duplicates based on content (same description, amount, and similar date)
+      // This handles the case where a transaction was synced but might still be in pending
+      const finalPendingTxns = uniquePendingTxns.filter(pending => {
+        // Check if there's a synced transaction that matches this pending one
+        const possibleDuplicate = storedTxns.find(stored => 
+          stored.description === pending.description &&
+          stored.amount === pending.amount &&
+          stored.type === pending.type &&
+          stored.paymentMethod === pending.paymentMethod &&
+          // Check if dates are within 1 minute of each other
+          Math.abs(new Date(stored.date).getTime() - new Date(pending.date).getTime()) < 60000
+        );
+        return !possibleDuplicate;
+      });
+      
+      setTransactions([...finalPendingTxns, ...storedTxns]);
+      
+      // Same deduplication for workflows
+      const storedWorkflowIds = new Set(storedWorkflows.map(w => w._id));
+      const uniquePendingWorkflows = pendingWorkflows.filter(w => !storedWorkflowIds.has(w._id));
+      setWorkflows([...uniquePendingWorkflows, ...storedWorkflows]);
+      
       setLocalBalancesState(balances);
     } catch (error) {
       console.error("[UserContext] Error loading local data:", error);
@@ -352,6 +380,40 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     [profile, refreshProfile]
   );
 
+  const updateTransaction = useCallback(
+    async (id: string, payload: UpdateTransactionPayload) => {
+      const online = await syncService.isOnline();
+      const isTemp = id.startsWith("temp_");
+
+      // For local/temp transactions, we can't update them easily
+      // They'll be synced and then can be edited
+      if (isTemp) {
+        throw new Error("Cannot edit pending transactions. Please wait for sync.");
+      }
+
+      if (!online) {
+        throw new Error("Cannot edit transactions while offline");
+      }
+
+      try {
+        // Update on server
+        const updated = await api.updateTransaction(id, payload);
+        
+        // Update local state
+        setTransactions((prev) =>
+          prev.map((t) => (t._id === id ? updated : t))
+        );
+        
+        // Refresh profile to get updated balances
+        await refreshProfile();
+      } catch (error) {
+        console.error("[UserContext] Error updating transaction:", error);
+        throw error;
+      }
+    },
+    [refreshProfile]
+  );
+
   const deleteTransaction = useCallback(
     async (id: string) => {
       const online = await syncService.isOnline();
@@ -496,6 +558,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         manualRefresh,
         updateProfile,
         addTransaction,
+        updateTransaction,
         deleteTransaction,
         addWorkflow,
         deleteWorkflow,

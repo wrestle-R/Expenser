@@ -99,6 +99,21 @@ class ApiService {
     });
   }
 
+  async updateTransaction(
+    id: string,
+    payload: Partial<CreateTransactionPayload>
+  ): Promise<ITransaction> {
+    console.log("[API] Updating transaction with payload:", { id, payload });
+    const data = await this.request<{ transaction: ITransaction }>(
+      `/api/transactions?id=${id}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }
+    );
+    return data.transaction;
+  }
+
   // === Workflows ===
   async getWorkflows(): Promise<IWorkflow[]> {
     const data = await this.request<WorkflowsResponse>("/api/workflows");

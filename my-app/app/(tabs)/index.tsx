@@ -15,7 +15,6 @@ import { useTheme } from "../../context/ThemeContext";
 import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { formatCurrency, formatDate } from "../../lib/utils";
-import SyncStatusBanner from "../../components/SyncStatusBanner";
 
 export default function HomeScreen() {
   const { isDark } = useTheme();
@@ -142,9 +141,6 @@ export default function HomeScreen() {
             Here's your financial overview
           </Text>
         </View>
-
-        {/* Sync Status Banner */}
-        <SyncStatusBanner />
 
       {/* Total Balance Card */}
       <View

@@ -16,6 +16,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import {
   CreditCard,
@@ -31,6 +42,7 @@ import {
   Car,
   MoreHorizontal,
   Zap,
+  Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -94,6 +106,14 @@ export default function TransactionsPage() {
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  
+  // Delete confirmation state
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // New transaction form
   const [newType, setNewType] = useState<"income" | "expense">("expense");
@@ -105,6 +125,17 @@ export default function TransactionsPage() {
   const [isSplit, setIsSplit] = useState(false);
   const [splitAmount, setSplitAmount] = useState("");
   const [saving, setSaving] = useState(false);
+  
+  // Edit transaction form (mirrors the add form)
+  const [editType, setEditType] = useState<"income" | "expense">("expense");
+  const [editAmount, setEditAmount] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editCustomCategory, setEditCustomCategory] = useState("");
+  const [editMethod, setEditMethod] = useState("");
+  const [editIsSplit, setEditIsSplit] = useState(false);
+  const [editSplitAmount, setEditSplitAmount] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   const fetchTransactions = useCallback(async () => {
     try {
@@ -184,6 +215,77 @@ export default function TransactionsPage() {
     }
   };
 
+  // Open edit dialog with transaction data
+  const handleEditClick = (txn: Transaction) => {
+    setEditingTransaction(txn);
+    setEditType(txn.type);
+    setEditAmount(txn.amount.toString());
+    setEditDescription(txn.description);
+    
+    const mainCategoryIds = MAIN_CATEGORIES.map(c => c.id);
+    if (mainCategoryIds.includes(txn.category.toLowerCase())) {
+      setEditCategory(txn.category.toLowerCase());
+      setEditCustomCategory("");
+    } else {
+      setEditCategory("other");
+      setEditCustomCategory(txn.category);
+    }
+    
+    setEditMethod(txn.paymentMethod);
+    if (txn.splitAmount && txn.splitAmount > 0) {
+      setEditIsSplit(true);
+      setEditSplitAmount(txn.splitAmount.toString());
+    } else {
+      setEditIsSplit(false);
+      setEditSplitAmount("");
+    }
+    setEditDialogOpen(true);
+  };
+
+  const handleUpdateTransaction = async () => {
+    if (!editingTransaction || !editAmount || !editDescription || !editMethod) return;
+    
+    // Validate split amount
+    if (editIsSplit && Number(editSplitAmount) >= Number(editAmount)) {
+      alert("Split amount must be less than total amount");
+      return;
+    }
+
+    setEditSaving(true);
+    const finalCategory = editCategory === "other" && editCustomCategory ? editCustomCategory : editCategory;
+    
+    const payload = {
+      type: editType,
+      amount: Number(editAmount),
+      description: editDescription,
+      category: finalCategory || "General",
+      paymentMethod: editMethod,
+      splitAmount: editIsSplit ? Number(editSplitAmount) : 0,
+    };
+
+    console.log("[Transactions] Updating transaction:", payload);
+
+    try {
+      const res = await fetch(`/api/transactions?id=${editingTransaction._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        console.log("[Transactions] Transaction updated successfully");
+        setEditDialogOpen(false);
+        setEditingTransaction(null);
+        await fetchTransactions();
+        await refreshProfile();
+      }
+    } catch (err) {
+      console.error("[Transactions] Error updating:", err);
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const handleAddTransaction = async () => {
     if (!newAmount || !newDescription || !newMethod) return;
     
@@ -228,10 +330,12 @@ export default function TransactionsPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleConfirmDelete = async () => {
+    if (!deleteId) return;
+    setDeleting(true);
     try {
-      console.log("[Transactions] Deleting transaction:", id);
-      const res = await fetch(`/api/transactions?id=${id}`, {
+      console.log("[Transactions] Deleting transaction:", deleteId);
+      const res = await fetch(`/api/transactions?id=${deleteId}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -241,6 +345,9 @@ export default function TransactionsPage() {
       }
     } catch (err) {
       console.error("[Transactions] Error deleting:", err);
+    } finally {
+      setDeleting(false);
+      setDeleteId(null);
     }
   };
 
@@ -545,14 +652,46 @@ export default function TransactionsPage() {
                             </p>
                         )}
                     </div>
+                    {/* Edit Button */}
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="size-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleDelete(txn._id)}
+                      className="size-8 text-muted-foreground hover:text-primary"
+                      onClick={() => handleEditClick(txn)}
                     >
-                      <Trash2 className="size-3.5" />
+                      <Pencil className="size-3.5" />
                     </Button>
+                    {/* Delete Button with Confirmation */}
+                    <AlertDialog open={deleteId === txn._id} onOpenChange={(open) => !open && setDeleteId(null)}>
+                      <AlertDialogTrigger render={
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => setDeleteId(txn._id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      } />
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete Transaction</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to delete "{txn.description}"? This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel onClick={() => setDeleteId(null)}>Cancel</AlertDialogCancel>
+                          <AlertDialogAction 
+                            variant="destructive" 
+                            onClick={handleConfirmDelete}
+                            disabled={deleting}
+                          >
+                            {deleting ? "Deleting..." : "Delete"}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
                 </div>
               );
@@ -560,6 +699,179 @@ export default function TransactionsPage() {
           </div>
         )}
       </Card>
+
+      {/* Edit Transaction Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={(open) => {
+        setEditDialogOpen(open);
+        if (!open) setEditingTransaction(null);
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Transaction</DialogTitle>
+            <DialogDescription>
+              Update the transaction details.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 pt-2">
+            {/* Type toggle */}
+            <div className="flex gap-2 p-1 bg-muted rounded-lg">
+              <button
+                onClick={() => setEditType("expense")}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all",
+                  editType === "expense" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:bg-background/50"
+                )}
+              >
+                <TrendingDown className="size-4 text-red-500" />
+                Expense
+              </button>
+              <button
+                onClick={() => setEditType("income")}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all",
+                  editType === "income" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:bg-background/50"
+                )}
+              >
+                <TrendingUp className="size-4 text-green-500" />
+                Income
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Amount</Label>
+              <div className="relative">
+                <IndianRupee className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="0.00"
+                  type="number"
+                  className="pl-9"
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Input
+                placeholder="What was this for?"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {MAIN_CATEGORIES.map((cat) => {
+                  const Icon = cat.icon;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setEditCategory(cat.id)}
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg border-2 px-3 py-2.5 text-sm transition-all",
+                        editCategory === cat.id
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      )}
+                    >
+                      <Icon className={`size-4 ${cat.color}`} />
+                      {cat.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {editCategory === "other" && (
+                <Input
+                  placeholder="Enter custom category"
+                  value={editCustomCategory}
+                  onChange={(e) => setEditCustomCategory(e.target.value)}
+                  className="mt-2"
+                />
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Payment Method</Label>
+              <div className="flex gap-2 flex-wrap">
+                {profile?.paymentMethods.map((method) => {
+                  const config = methodConfig[method as keyof typeof methodConfig];
+                  const Icon = config.icon;
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setEditMethod(method)}
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm transition-all",
+                        editMethod === method
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      )}
+                    >
+                      <Icon className={`size-4 ${config.color}`} />
+                      {config.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {editType === "expense" && (
+              <div className="pt-3 border-t space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="flex items-center gap-2 cursor-pointer">
+                    <ArrowRightLeft className="size-4 text-orange-500" />
+                    Split transaction?
+                  </Label>
+                  <Switch checked={editIsSplit} onCheckedChange={setEditIsSplit} />
+                </div>
+
+                {editIsSplit && (
+                  <div className="bg-orange-500/5 p-3 rounded-lg space-y-3 border border-orange-200/20">
+                    <p className="text-xs text-muted-foreground">
+                      You paid <span className="font-bold">₹{editAmount || "0"}</span> total.
+                      How much is owed back to you?
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Owed to you</Label>
+                        <div className="relative">
+                          <IndianRupee className="absolute left-3 top-2.5 size-4 text-orange-500" />
+                          <Input
+                            className="pl-9 border-orange-200/30"
+                            placeholder="0.00"
+                            type="number"
+                            value={editSplitAmount}
+                            onChange={(e) => setEditSplitAmount(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Net expense</Label>
+                        <div className="h-10 px-3 flex items-center font-bold text-sm bg-background/50 rounded-md border">
+                          ₹{(Number(editAmount || 0) - Number(editSplitAmount || 0)).toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <Button
+              className="w-full"
+              onClick={handleUpdateTransaction}
+              disabled={!editAmount || !editDescription || !editMethod || editSaving}
+            >
+              {editSaving ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

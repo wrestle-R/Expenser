@@ -18,6 +18,7 @@ import { useTheme } from "../../context/ThemeContext";
 import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { clearAllData } from "../../lib/storage";
+import ConfirmModal from "../../components/ConfirmModal";
 
 const paymentOptions = [
   { id: "bank", label: "Bank (UPI)", icon: "card" as const },
@@ -46,6 +47,8 @@ export default function ProfileScreen() {
   const [selectedMethods, setSelectedMethods] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -61,7 +64,7 @@ export default function ProfileScreen() {
     );
   };
 
-  const handleSave = async () => {
+  const handleSavePress = () => {
     if (!name.trim()) {
       Alert.alert("Error", "Please enter your name");
       return;
@@ -72,6 +75,11 @@ export default function ProfileScreen() {
       return;
     }
 
+    setShowSaveConfirm(true);
+  };
+
+  const handleConfirmSave = async () => {
+    setShowSaveConfirm(false);
     setSaving(true);
     try {
       await updateProfile({
@@ -90,21 +98,17 @@ export default function ProfileScreen() {
   };
 
   const handleSignOut = async () => {
-    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign Out",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await clearAllData();
-            await signOut();
-          } catch (error) {
-            console.error("Sign out error:", error);
-          }
-        },
-      },
-    ]);
+    setShowSignOutConfirm(true);
+  };
+
+  const handleConfirmSignOut = async () => {
+    setShowSignOutConfirm(false);
+    try {
+      await clearAllData();
+      await signOut();
+    } catch (error) {
+      console.error("Sign out error:", error);
+    }
   };
 
   if (loading) {
@@ -482,7 +486,7 @@ export default function ProfileScreen() {
           alignItems: "center",
           marginBottom: 16,
         }}
-        onPress={handleSave}
+        onPress={handleSavePress}
         disabled={saving || saved}
       >
         {saving ? (
@@ -539,6 +543,33 @@ export default function ProfileScreen() {
       {/* Bottom spacing */}
       <View style={{ height: 32 }} />
       </ScrollView>
+
+      {/* Save Confirmation Modal */}
+      <ConfirmModal
+        visible={showSaveConfirm}
+        onClose={() => setShowSaveConfirm(false)}
+        onConfirm={handleConfirmSave}
+        title="Save Changes"
+        message="Are you sure you want to save these profile changes?"
+        confirmText="Save"
+        cancelText="Cancel"
+        confirmColor="success"
+        icon="save-outline"
+        loading={saving}
+      />
+
+      {/* Sign Out Confirmation Modal */}
+      <ConfirmModal
+        visible={showSignOutConfirm}
+        onClose={() => setShowSignOutConfirm(false)}
+        onConfirm={handleConfirmSignOut}
+        title="Sign Out"
+        message="Are you sure you want to sign out? Any unsynced data will be lost."
+        confirmText="Sign Out"
+        cancelText="Cancel"
+        confirmColor="destructive"
+        icon="log-out-outline"
+      />
     </View>
   );
 }

@@ -94,6 +94,12 @@ class SyncService {
       const state = await NetInfo.fetch();
       if (!state.isConnected) return;
 
+      // Check for pending items FIRST
+      const pendingTxns = await getPendingTransactions();
+      const pendingWorkflows = await getPendingWorkflows();
+      const pendingDeletes = await getPendingDeletes();
+      const hasPendingItems = pendingTxns.length > 0 || pendingWorkflows.length > 0 || pendingDeletes.length > 0;
+
       // Only fetch, don't sync pending (that happens in syncAll)
       const [transactions, workflows, profile] = await Promise.all([
         api.getTransactions().catch(() => null),
@@ -105,14 +111,15 @@ class SyncService {
       if (workflows) await setStoredWorkflows(workflows);
       if (profile) {
         await setStoredProfile(profile);
-        await setLocalBalances(profile.balances);
+        // ONLY update local balances from server if there are NO pending transactions
+        // Otherwise we would overwrite the user's local balance changes
+        if (!hasPendingItems) {
+          await setLocalBalances(profile.balances);
+        }
       }
 
-      // Also sync any pending items
-      const pendingTxns = await getPendingTransactions();
-      const pendingWorkflows = await getPendingWorkflows();
-      const pendingDeletes = await getPendingDeletes();
-      if (pendingTxns.length > 0 || pendingWorkflows.length > 0 || pendingDeletes.length > 0) {
+      // Trigger full sync if there are pending items
+      if (hasPendingItems) {
         this.syncAll(); // Full sync if there are pending items
       }
 
@@ -306,6 +313,10 @@ class SyncService {
     profile: IUserProfile | null;
   }> {
     try {
+      // Check for pending items to determine if we should update balances
+      const pendingTxns = await getPendingTransactions();
+      const hasPendingTransactions = pendingTxns.length > 0;
+
       const [transactions, workflows, profile] = await Promise.all([
         api.getTransactions(),
         api.getWorkflows(),
@@ -317,8 +328,11 @@ class SyncService {
       await setStoredWorkflows(workflows);
       if (profile) {
         await setStoredProfile(profile);
-        // Reset local balances to server balances
-        await setLocalBalances(profile.balances);
+        // Only reset local balances to server balances if there are NO pending transactions
+        // This prevents overwriting local balance changes before they're synced
+        if (!hasPendingTransactions) {
+          await setLocalBalances(profile.balances);
+        }
       }
 
       return { transactions, workflows, profile };
@@ -370,9 +384,16 @@ class SyncService {
 
     if (isOnline) {
       try {
+        // Check if there are pending transactions before updating balances
+        const pendingTxns = await getPendingTransactions();
+        const hasPendingTransactions = pendingTxns.length > 0;
+
         const profile = await api.getProfile();
         await setStoredProfile(profile);
-        await setLocalBalances(profile.balances);
+        // Only update local balances if there are no pending transactions
+        if (!hasPendingTransactions) {
+          await setLocalBalances(profile.balances);
+        }
         return profile;
       } catch (error) {
         console.error("[Sync] Error fetching profile, using local:", error);

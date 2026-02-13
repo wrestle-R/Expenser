@@ -71,6 +71,16 @@ export interface CreateTransactionPayload {
   date?: string; // Optional, backend will default to current date
 }
 
+export interface UpdateTransactionPayload {
+  type?: TransactionType;
+  amount?: number;
+  description?: string;
+  category?: string;
+  paymentMethod?: PaymentMethod;
+  splitAmount?: number;
+  date?: string;
+}
+
 export interface CreateWorkflowPayload {
   name: string;
   type: TransactionType;

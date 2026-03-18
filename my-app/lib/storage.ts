@@ -169,6 +169,14 @@ export async function getPendingDeletes(): Promise<PendingDelete[]> {
   }
 }
 
+export async function setPendingDeletes(items: PendingDelete[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(KEYS.PENDING_DELETES, JSON.stringify(items));
+  } catch (error) {
+    console.error("[Storage] Error setting pending deletes:", error);
+  }
+}
+
 export async function clearPendingDeletes(): Promise<void> {
   try {
     await AsyncStorage.removeItem(KEYS.PENDING_DELETES);

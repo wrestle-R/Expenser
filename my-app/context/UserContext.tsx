@@ -207,6 +207,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       // Step 3: Try to fetch from server in background (non-blocking)
       try {
+        const online = await syncService.isOnline();
         const [serverTxns, serverWorkflows, serverProfile] = await Promise.all([
           syncService.fetchTransactions(),
           syncService.fetchWorkflows(),
@@ -218,7 +219,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           setTransactions(serverTxns);
           setWorkflows(serverWorkflows);
         }
-        setLastSyncTimeState(Date.now());
+        if (online) {
+          setLastSyncTimeState(Date.now());
+        }
       } catch (error) {
         console.log("[UserContext] Offline - using cached data:", error);
         // This is FINE - we already loaded local data above
@@ -424,9 +427,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       if (isTemp) {
         // Just remove from pending
-        const pending = await getPendingTransactions();
-        const filtered = pending.filter((t) => t._id !== id);
-        // Need to update storage
+        await removePendingTransaction(id);
+        setPendingCount((prev) => Math.max(0, prev - 1));
       } else if (online) {
         try {
           await api.deleteTransaction(id);
@@ -500,6 +502,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     if (isTemp) {
       // Just remove from pending (already handled by filter)
+      await removePendingWorkflow(id);
+      setPendingCount((prev) => Math.max(0, prev - 1));
     } else if (online) {
       try {
         await api.deleteWorkflow(id);

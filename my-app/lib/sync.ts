@@ -13,7 +13,9 @@ import {
   clearPendingWorkflows,
   removePendingWorkflow,
   getPendingDeletes,
+  getLastSyncTime,
   clearPendingDeletes,
+  setPendingDeletes,
   getStoredProfile,
   setStoredProfile,
   setLastSyncTime,
@@ -152,13 +154,14 @@ class SyncService {
     const pendingTxns = await getPendingTransactions();
     const pendingWorkflows = await getPendingWorkflows();
     const pendingDeletes = await getPendingDeletes();
+    const lastSyncTime = await getLastSyncTime();
 
     return {
       isOnline: this._isOnline,
       isSyncing: this.isSyncing,
       pendingCount:
         pendingTxns.length + pendingWorkflows.length + pendingDeletes.length,
-      lastSyncTime: null,
+      lastSyncTime,
     };
   }
 
@@ -248,6 +251,8 @@ class SyncService {
     const pendingDeletes = await getPendingDeletes();
     console.log("[Sync] Syncing", pendingDeletes.length, "pending deletes");
 
+    const failedDeletes: typeof pendingDeletes = [];
+
     for (const item of pendingDeletes) {
       try {
         if (item.type === "transaction") {
@@ -257,7 +262,13 @@ class SyncService {
         }
       } catch (error) {
         console.error("[Sync] Error deleting item:", item, error);
+        failedDeletes.push(item);
       }
+    }
+
+    if (failedDeletes.length > 0) {
+      await setPendingDeletes(failedDeletes);
+      return;
     }
 
     await clearPendingDeletes();

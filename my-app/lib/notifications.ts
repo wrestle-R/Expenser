@@ -4,12 +4,7 @@ import * as Device from "expo-device";
 import { Platform, AppState, AppStateStatus } from "react-native";
 import { getPendingTransactions, getPendingWorkflows, getPendingDeletes, getLastSyncTime } from "./storage";
 
-// Notification IDs for deduplication
-const NOTIF_ID_UNSYNCED = "expenser-unsynced-data";
-const NOTIF_ID_STALE = "expenser-stale-data";
-
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
-const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 
 // Configure how notifications appear when the app is in the foreground
 Notifications.setNotificationHandler({
@@ -26,6 +21,11 @@ class NotificationService {
   private initialized = false;
   private checkInterval: ReturnType<typeof setInterval> | null = null;
   private appStateSubscription: { remove: () => void } | null = null;
+  private scheduledUnsyncedReminderId: string | null = null;
+  private activeUnsyncedNotificationId: string | null = null;
+  private activeStaleNotificationId: string | null = null;
+  private lastUnsyncedCountNotified = 0;
+  private lastStaleHoursNotified = -1;
 
   async initialize() {
     if (this.initialized) return;
@@ -94,8 +94,11 @@ class NotificationService {
   // Schedule a notification to fire later when the app is in background
   private async scheduleBackgroundReminder() {
     try {
-      // Cancel any existing scheduled reminders first
-      await Notifications.cancelScheduledNotificationAsync(NOTIF_ID_STALE);
+      // Cancel any existing scheduled reminder first.
+      if (this.scheduledUnsyncedReminderId) {
+        await Notifications.cancelScheduledNotificationAsync(this.scheduledUnsyncedReminderId).catch(() => {});
+        this.scheduledUnsyncedReminderId = null;
+      }
       
       // Check if there's pending data to sync
       const [pendingTxns, pendingWorkflows, pendingDeletes] = await Promise.all([
@@ -108,8 +111,7 @@ class NotificationService {
       
       if (totalPending > 0) {
         // Schedule a notification to remind user about unsynced data in 1 hour
-        await Notifications.scheduleNotificationAsync({
-          identifier: NOTIF_ID_UNSYNCED,
+        this.scheduledUnsyncedReminderId = await Notifications.scheduleNotificationAsync({
           content: {
             title: "Don't forget to sync!",
             body: `You have ${totalPending} item${totalPending > 1 ? "s" : ""} waiting to sync. Open Expenser to upload your changes.`,
@@ -132,7 +134,6 @@ class NotificationService {
   private startPeriodicCheck() {
     // Check immediately on init
     this.checkAndNotify();
-    this.checkAndNotify();
 
     // Then every 30 minutes
     this.checkInterval = setInterval(() => {
@@ -149,6 +150,11 @@ class NotificationService {
       this.appStateSubscription.remove();
       this.appStateSubscription = null;
     }
+    this.scheduledUnsyncedReminderId = null;
+    this.activeUnsyncedNotificationId = null;
+    this.activeStaleNotificationId = null;
+    this.lastUnsyncedCountNotified = 0;
+    this.lastStaleHoursNotified = -1;
   }
 
   /**
@@ -181,9 +187,16 @@ class NotificationService {
     const totalPending = pendingTxns.length + pendingWorkflows.length + pendingDeletes.length;
 
     if (totalPending > 0) {
+      if (this.lastUnsyncedCountNotified === totalPending && this.activeUnsyncedNotificationId) {
+        return;
+      }
+
+      if (this.activeUnsyncedNotificationId) {
+        await Notifications.dismissNotificationAsync(this.activeUnsyncedNotificationId).catch(() => {});
+      }
+
       const itemWord = totalPending === 1 ? "item" : "items";
-      await Notifications.scheduleNotificationAsync({
-        identifier: NOTIF_ID_UNSYNCED,
+      this.activeUnsyncedNotificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: "Unsynced Data",
           body: `You have ${totalPending} ${itemWord} waiting to sync. Connect to the internet to upload your changes.`,
@@ -192,10 +205,15 @@ class NotificationService {
         },
         trigger: null, // Show immediately
       });
+      this.lastUnsyncedCountNotified = totalPending;
       console.log(`[Notifications] Sent unsynced data notification (${totalPending} items)`);
     } else {
       // Clear the notification if everything is synced
-      await Notifications.dismissNotificationAsync(NOTIF_ID_UNSYNCED);
+      if (this.activeUnsyncedNotificationId) {
+        await Notifications.dismissNotificationAsync(this.activeUnsyncedNotificationId).catch(() => {});
+        this.activeUnsyncedNotificationId = null;
+      }
+      this.lastUnsyncedCountNotified = 0;
     }
   }
 
@@ -207,9 +225,12 @@ class NotificationService {
     const lastSync = await getLastSyncTime();
 
     if (!lastSync) {
-      // Never synced — notify
-      await Notifications.scheduleNotificationAsync({
-        identifier: NOTIF_ID_STALE,
+      if (this.activeStaleNotificationId) {
+        return;
+      }
+
+      // Never synced — notify once
+      this.activeStaleNotificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: "Data May Be Outdated",
           body: "Your data hasn't been refreshed yet. Open the app with internet to get the latest data.",
@@ -218,6 +239,7 @@ class NotificationService {
         },
         trigger: null,
       });
+      this.lastStaleHoursNotified = 0;
       console.log("[Notifications] Sent stale data notification (never synced)");
       return;
     }
@@ -225,8 +247,15 @@ class NotificationService {
     const timeSinceSync = Date.now() - lastSync;
     if (timeSinceSync >= FOUR_HOURS_MS) {
       const hours = Math.floor(timeSinceSync / (60 * 60 * 1000));
-      await Notifications.scheduleNotificationAsync({
-        identifier: NOTIF_ID_STALE,
+      if (hours <= this.lastStaleHoursNotified && this.activeStaleNotificationId) {
+        return;
+      }
+
+      if (this.activeStaleNotificationId) {
+        await Notifications.dismissNotificationAsync(this.activeStaleNotificationId).catch(() => {});
+      }
+
+      this.activeStaleNotificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: "Data May Be Outdated",
           body: `Your data hasn't been refreshed in ${hours}+ hours. Open the app to sync.`,
@@ -235,10 +264,15 @@ class NotificationService {
         },
         trigger: null,
       });
+      this.lastStaleHoursNotified = hours;
       console.log(`[Notifications] Sent stale data notification (${hours}h ago)`);
     } else {
       // Data is fresh — clear the notification
-      await Notifications.dismissNotificationAsync(NOTIF_ID_STALE);
+      if (this.activeStaleNotificationId) {
+        await Notifications.dismissNotificationAsync(this.activeStaleNotificationId).catch(() => {});
+        this.activeStaleNotificationId = null;
+      }
+      this.lastStaleHoursNotified = -1;
     }
   }
 
@@ -248,8 +282,23 @@ class NotificationService {
    */
   async onSyncComplete() {
     try {
-      await Notifications.dismissNotificationAsync(NOTIF_ID_UNSYNCED);
-      await Notifications.dismissNotificationAsync(NOTIF_ID_STALE);
+      if (this.scheduledUnsyncedReminderId) {
+        await Notifications.cancelScheduledNotificationAsync(this.scheduledUnsyncedReminderId).catch(() => {});
+        this.scheduledUnsyncedReminderId = null;
+      }
+
+      if (this.activeUnsyncedNotificationId) {
+        await Notifications.dismissNotificationAsync(this.activeUnsyncedNotificationId).catch(() => {});
+        this.activeUnsyncedNotificationId = null;
+      }
+
+      if (this.activeStaleNotificationId) {
+        await Notifications.dismissNotificationAsync(this.activeStaleNotificationId).catch(() => {});
+        this.activeStaleNotificationId = null;
+      }
+
+      this.lastUnsyncedCountNotified = 0;
+      this.lastStaleHoursNotified = -1;
     } catch {
       // Ignore
     }
@@ -261,21 +310,12 @@ class NotificationService {
   async onPendingItemAdded(pendingCount: number) {
     if (!this.initialized || pendingCount === 0) return;
 
-    const itemWord = pendingCount === 1 ? "item" : "items";
     try {
-      // Show immediate notification that data is pending
-      await Notifications.scheduleNotificationAsync({
-        identifier: NOTIF_ID_UNSYNCED,
-        content: {
-          title: "Transaction Saved Locally",
-          body: `You have ${pendingCount} ${itemWord} waiting to sync. Connect to the internet to upload your changes.`,
-          data: { type: "unsynced" },
-          sound: true,
-          ...(Platform.OS === "android" && { channelId: "sync-reminders" }),
-        },
-        trigger: null, // Immediately
-      });
-      console.log(`[Notifications] Sent pending item notification (${pendingCount} items)`);
+      // Force a refreshed unsynced message and schedule background reminder.
+      this.lastUnsyncedCountNotified = 0;
+      await this.checkUnsyncedData();
+      await this.scheduleBackgroundReminder();
+      console.log(`[Notifications] Pending item added (${pendingCount} items)`);
     } catch (error) {
       console.error("[Notifications] Error sending pending notification:", error);
     }

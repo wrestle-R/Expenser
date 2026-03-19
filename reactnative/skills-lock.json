@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "skills": {
+    "react-native": {
+      "source": "vercel-labs/json-render",
+      "sourceType": "github",
+      "computedHash": "1cfeffbd71f8fc350e7fdb5cd1f76067d64b60f2fef2300fd83181ad90148451"
+    },
+    "react-native-best-practices": {
+      "source": "callstackincubator/agent-skills",
+      "sourceType": "github",
+      "computedHash": "cc54bc37531c0221b2bfde241ef18c5f6e22423665955587f6dd63b0454355d8"
+    },
+    "react-native-reusables": {
+      "source": "hairyf/skills",
+      "sourceType": "github",
+      "computedHash": "f37d8d5a20779994c9e84d527521a3727a2968a57fa6d5485f281623e8ff5c31"
+    },
+    "vercel-react-native-skills": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "2e9088a7333666d8c2833b8ff58bd51b955501c42b4c7244f72b4cbf22dafcc4"
+    }
+  }
+}

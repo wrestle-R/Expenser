@@ -1,19 +1,26 @@
-import "./global.css";
-import React from "react";
-import { Text, View } from "react-native";
-import { SafeAreaProvider } from "react-native-safe-area-context";
-import { PortalHost } from "@rn-primitives/portal";
+import React from 'react';
+import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {ClerkProvider, ClerkLoaded} from '@clerk/clerk-expo';
+import {ThemeProvider} from './src/context/ThemeContext';
+import {ToastProvider} from './src/context/ToastContext';
+import {UserProvider} from './src/context/UserContext';
+import AppNavigator from './src/app/navigation/AppNavigator';
+import {ENV} from './src/config/env';
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <View className="flex-1 items-center justify-center bg-background px-6">
-        <Text className="text-3xl font-bold text-foreground">Welcome</Text>
-        <Text className="mt-3 text-center text-base text-muted-foreground">
-          Your React Native app is configured and ready.
-        </Text>
-      </View>
-      <PortalHost />
-    </SafeAreaProvider>
+    <ClerkProvider publishableKey={ENV.CLERK_PUBLISHABLE_KEY}>
+      <ClerkLoaded>
+        <SafeAreaProvider>
+          <ThemeProvider>
+            <UserProvider>
+              <ToastProvider>
+                <AppNavigator />
+              </ToastProvider>
+            </UserProvider>
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </ClerkLoaded>
+    </ClerkProvider>
   );
 }

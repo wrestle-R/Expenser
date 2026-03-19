@@ -33,6 +33,7 @@ export interface SyncStatus {
 }
 
 const AUTO_REFRESH_INTERVAL = 3000; // 3 seconds
+const NETINFO_TIMEOUT_MS = 3000;
 
 class SyncService {
   private isSyncing = false;
@@ -40,6 +41,15 @@ class SyncService {
   private unsubscribeNetInfo: (() => void) | null = null;
   private autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private _isOnline = false;
+
+  private async getNetworkStateWithTimeout() {
+    return Promise.race([
+      NetInfo.fetch(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("NetInfo timeout")), NETINFO_TIMEOUT_MS);
+      }),
+    ]);
+  }
 
   async initialize() {
     // Listen for network state changes
@@ -64,12 +74,18 @@ class SyncService {
     });
 
     // Check current network state and sync if online
-    const state = await NetInfo.fetch();
-    this._isOnline = state.isConnected ?? false;
-    if (state.isConnected) {
-      this.syncAll();
-      this.startAutoRefresh();
+    try {
+      const state = await this.getNetworkStateWithTimeout();
+      this._isOnline = state.isConnected ?? false;
+      if (state.isConnected) {
+        this.syncAll();
+        this.startAutoRefresh();
+      }
+    } catch (error) {
+      console.warn("[Sync] Initial network check timed out, continuing offline mode");
     }
+
+    this.notifyListeners();
   }
 
   private startAutoRefresh() {
@@ -93,7 +109,7 @@ class SyncService {
   // Light refresh - just fetch latest data without full sync
   private async silentRefresh() {
     try {
-      const state = await NetInfo.fetch();
+      const state = await this.getNetworkStateWithTimeout();
       if (!state.isConnected) return;
 
       // Check for pending items FIRST
@@ -168,7 +184,7 @@ class SyncService {
   async isOnline(): Promise<boolean> {
     // Use cached value first for speed, but verify with NetInfo
     try {
-      const state = await NetInfo.fetch();
+      const state = await this.getNetworkStateWithTimeout();
       this._isOnline = state.isConnected ?? false;
     } catch {
       // Use cached value

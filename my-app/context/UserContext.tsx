@@ -208,6 +208,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       // Step 3: Try to fetch from server in background (non-blocking)
       try {
         const online = await syncService.isOnline();
+        if (!online) {
+          console.log("[UserContext] Offline on launch - staying on cached data");
+          return;
+        }
+
         const [serverTxns, serverWorkflows, serverProfile] = await Promise.all([
           syncService.fetchTransactions(),
           syncService.fetchWorkflows(),

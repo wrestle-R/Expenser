@@ -11,6 +11,8 @@ import {
   CreateWorkflowPayload,
 } from "./types";
 
+const REQUEST_TIMEOUT_MS = 10000;
+
 class ApiService {
   private baseUrl: string;
   private token: string | null = null;
@@ -58,10 +60,24 @@ class ApiService {
 
     console.log(`[API] ${options.method || "GET"} ${url}`);
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let response: Response;
+
+    try {
+      response = await fetch(url, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        throw new Error("Request timed out. Please check your internet connection.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));

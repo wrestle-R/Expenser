@@ -1,9 +1,9 @@
-import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
+import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from "@react-navigation/native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef } from "react";
-import { View, ActivityIndicator } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { View, ActivityIndicator, Text } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import "react-native-reanimated";
 import "../global.css";
@@ -14,19 +14,21 @@ import { ToastProvider } from "../context/ToastContext";
 import { ENV } from "../env";
 import { Colors } from "../constants/theme";
 
+const AUTH_LOAD_TIMEOUT_MS = 5000;
+
 // Secure token cache for Clerk
 const tokenCache = {
   async getToken(key: string) {
     try {
       return SecureStore.getItemAsync(key);
-    } catch (err) {
+    } catch {
       return null;
     }
   },
   async saveToken(key: string, value: string) {
     try {
       return SecureStore.setItemAsync(key, value);
-    } catch (err) {
+    } catch {
       return;
     }
   },
@@ -38,9 +40,24 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
   const router = useRouter();
   const hasNavigated = useRef(false);
+  const [authTimedOut, setAuthTimedOut] = useState(false);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (isLoaded) {
+      setAuthTimedOut(false);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      console.warn("[AuthGuard] Auth load timeout, enabling offline fallback mode");
+      setAuthTimedOut(true);
+    }, AUTH_LOAD_TIMEOUT_MS);
+
+    return () => clearTimeout(timeout);
+  }, [isLoaded]);
+
+  useEffect(() => {
+    if (!isLoaded || authTimedOut) return;
 
     const inAuthGroup = segments[0] === "(auth)";
 
@@ -61,12 +78,33 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
         router.replace("/(auth)/sign-in");
       }, 100);
     }
-  }, [isSignedIn, isLoaded, segments]);
+  }, [isSignedIn, isLoaded, segments, authTimedOut, router]);
 
-  if (!isLoaded) {
+  if (!isLoaded && !authTimedOut) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  if (!isLoaded && authTimedOut) {
+    return (
+      <View style={{ flex: 1 }}>
+        <View
+          style={{
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            backgroundColor: "#EFF6FF",
+            borderBottomWidth: 1,
+            borderBottomColor: "#BFDBFE",
+          }}
+        >
+          <Text style={{ color: "#1D4ED8", fontWeight: "600", fontSize: 12 }}>
+            Offline auth fallback active. Showing locally cached data.
+          </Text>
+        </View>
+        {children}
       </View>
     );
   }
@@ -76,7 +114,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
 // Inner layout that uses theme
 function InnerLayout() {
-  const { theme, isDark } = useTheme();
+  const { isDark } = useTheme();
 
   const customDarkTheme = {
     ...DarkTheme,
@@ -150,11 +188,9 @@ export default function RootLayout() {
 
   return (
     <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
-      <ClerkLoaded>
-        <ThemeProvider>
-          <InnerLayout />
-        </ThemeProvider>
-      </ClerkLoaded>
+      <ThemeProvider>
+        <InnerLayout />
+      </ThemeProvider>
     </ClerkProvider>
   );
 }

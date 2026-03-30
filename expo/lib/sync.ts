@@ -1,6 +1,7 @@
 // Sync service for handling offline/online synchronization
 import NetInfo from "@react-native-community/netinfo";
-import { api } from "./api";
+import type { NetInfoState } from "@react-native-community/netinfo";
+import { ApiError, api } from "./api";
 import {
   getStoredTransactions,
   setStoredTransactions,
@@ -19,6 +20,8 @@ import {
   setLastSyncTime,
   getLocalBalances,
   setLocalBalances,
+  getPendingProfileUpdate,
+  clearPendingProfileUpdate,
 } from "./storage";
 import { ITransaction, IWorkflow, IUserProfile } from "./types";
 import { notificationService } from "./notifications";
@@ -39,6 +42,85 @@ class SyncService {
   private unsubscribeNetInfo: (() => void) | null = null;
   private _isOnline = false;
 
+  private isStateOnline(
+    state: Pick<NetInfoState, "isConnected" | "isInternetReachable">
+  ) {
+    if (!state.isConnected) {
+      return false;
+    }
+
+    return state.isInternetReachable ?? true;
+  }
+
+  private mergeProfile(
+    base: IUserProfile | null,
+    pending: Partial<IUserProfile> | null
+  ): IUserProfile | null {
+    if (!base) {
+      return null;
+    }
+
+    return pending ? { ...base, ...pending } : base;
+  }
+
+  private upsertStoredTransaction(transaction: ITransaction) {
+    return getStoredTransactions().then(async (storedTransactions) => {
+      const filtered = storedTransactions.filter(
+        (item) =>
+          item._id !== transaction._id &&
+          (item.clientRequestId || item._id) !==
+            (transaction.clientRequestId || transaction._id)
+      );
+      await setStoredTransactions([transaction, ...filtered]);
+    });
+  }
+
+  private upsertStoredWorkflow(workflow: IWorkflow) {
+    return getStoredWorkflows().then(async (storedWorkflows) => {
+      const filtered = storedWorkflows.filter((item) => item._id !== workflow._id);
+      await setStoredWorkflows([workflow, ...filtered]);
+    });
+  }
+
+  private isDeleteConflictSafe(error: unknown) {
+    return error instanceof ApiError && error.status === 404;
+  }
+
+  private isNonRetryableSyncError(error: unknown) {
+    if (!(error instanceof ApiError)) {
+      return false;
+    }
+
+    return (
+      error.status >= 400 &&
+      error.status < 500 &&
+      ![401, 403, 408, 409, 429].includes(error.status)
+    );
+  }
+
+  private async preserveFailedTransaction(
+    transaction: ITransaction,
+    error: unknown
+  ) {
+    const failedTransaction: ITransaction = {
+      ...transaction,
+      isLocal: true,
+      syncStatus: "failed",
+      syncError: error instanceof Error ? error.message : "Sync failed",
+    };
+    await this.upsertStoredTransaction(failedTransaction);
+  }
+
+  private async preserveFailedWorkflow(workflow: IWorkflow, error: unknown) {
+    const failedWorkflow: IWorkflow = {
+      ...workflow,
+      isLocal: true,
+      syncStatus: "failed",
+      syncError: error instanceof Error ? error.message : "Sync failed",
+    };
+    await this.upsertStoredWorkflow(failedWorkflow);
+  }
+
   private async getNetworkStateWithTimeout() {
     return Promise.race([
       NetInfo.fetch(),
@@ -58,9 +140,9 @@ class SyncService {
     // Listen for network state changes
     this.unsubscribeNetInfo = NetInfo.addEventListener((state) => {
       const wasOffline = !this._isOnline;
-      this._isOnline = state.isConnected ?? false;
+      this._isOnline = this.isStateOnline(state);
 
-      if (state.isConnected && wasOffline) {
+      if (this._isOnline && wasOffline) {
         console.log("[Sync] Network connected, triggering sync...");
         this.syncAll();
       }
@@ -72,7 +154,7 @@ class SyncService {
     // Check current network state
     try {
       const state = await this.getNetworkStateWithTimeout();
-      this._isOnline = state.isConnected ?? false;
+      this._isOnline = this.isStateOnline(state);
     } catch (error) {
       console.warn("[Sync] Initial network check timed out, continuing offline mode");
     }
@@ -104,13 +186,17 @@ class SyncService {
     const pendingTxns = await getPendingTransactions();
     const pendingWorkflows = await getPendingWorkflows();
     const pendingDeletes = await getPendingDeletes();
+    const pendingProfile = await getPendingProfileUpdate();
     const lastSyncTime = await getLastSyncTime();
 
     return {
       isOnline: this._isOnline,
       isSyncing: this.isSyncing,
       pendingCount:
-        pendingTxns.length + pendingWorkflows.length + pendingDeletes.length,
+        pendingTxns.length +
+        pendingWorkflows.length +
+        pendingDeletes.length +
+        (pendingProfile ? 1 : 0),
       lastSyncTime,
     };
   }
@@ -119,7 +205,7 @@ class SyncService {
     // Use cached value first for speed, but verify with NetInfo
     try {
       const state = await this.getNetworkStateWithTimeout();
-      this._isOnline = state.isConnected ?? false;
+      this._isOnline = this.isStateOnline(state);
     } catch {
       // Use cached value
     }
@@ -179,7 +265,10 @@ class SyncService {
       // 3. Sync pending workflows
       await this.syncPendingWorkflows();
 
-      // 4. Fetch fresh data from server
+      // 4. Sync pending profile edits
+      await this.syncPendingProfile();
+
+      // 5. Fetch fresh data from server
       await this.fetchAllFromServer();
 
       // Update last sync time
@@ -211,6 +300,9 @@ class SyncService {
           await api.deleteWorkflow(item.id);
         }
       } catch (error) {
+        if (this.isDeleteConflictSafe(error)) {
+          continue;
+        }
         console.error("[Sync] Error deleting item:", item, error);
         failedDeletes.push(item);
       }
@@ -230,7 +322,7 @@ class SyncService {
 
     for (const txn of pending) {
       try {
-        await api.createTransaction({
+        const created = await api.createTransaction({
           type: txn.type,
           amount: txn.amount,
           description: txn.description,
@@ -240,8 +332,14 @@ class SyncService {
           date: txn.date,
           clientRequestId: txn.clientRequestId ?? txn._id,
         });
+        await this.upsertStoredTransaction(created);
         await removePendingTransaction(txn._id);
       } catch (error) {
+        if (this.isNonRetryableSyncError(error)) {
+          await this.preserveFailedTransaction(txn, error);
+          await removePendingTransaction(txn._id);
+          continue;
+        }
         console.error("[Sync] Error syncing transaction:", txn._id, error);
       }
     }
@@ -253,7 +351,7 @@ class SyncService {
 
     for (const workflow of pending) {
       try {
-        await api.createWorkflow({
+        const created = await api.createWorkflow({
           name: workflow.name,
           type: workflow.type,
           amount: workflow.amount,
@@ -261,11 +359,33 @@ class SyncService {
           category: workflow.category,
           paymentMethod: workflow.paymentMethod,
           splitAmount: workflow.splitAmount,
+          clientRequestId: workflow.clientRequestId ?? workflow._id,
         });
+        await this.upsertStoredWorkflow(created);
         await removePendingWorkflow(workflow._id);
       } catch (error) {
+        if (this.isNonRetryableSyncError(error)) {
+          await this.preserveFailedWorkflow(workflow, error);
+          await removePendingWorkflow(workflow._id);
+          continue;
+        }
         console.error("[Sync] Error syncing workflow:", workflow._id, error);
       }
+    }
+  }
+
+  private async syncPendingProfile() {
+    const pendingProfile = await getPendingProfileUpdate();
+    if (!pendingProfile) {
+      return;
+    }
+
+    try {
+      const updated = await api.updateProfile(pendingProfile);
+      await setStoredProfile(updated);
+      await clearPendingProfileUpdate();
+    } catch (error) {
+      console.error("[Sync] Error syncing pending profile:", error);
     }
   }
 
@@ -278,6 +398,13 @@ class SyncService {
       // Check for pending items to determine if we should update balances
       const pendingTxns = await getPendingTransactions();
       const hasPendingTransactions = pendingTxns.length > 0;
+      const pendingProfile = await getPendingProfileUpdate();
+      const failedLocalTransactions = (await getStoredTransactions()).filter(
+        (transaction) => transaction.isLocal && transaction.syncStatus === "failed"
+      );
+      const failedLocalWorkflows = (await getStoredWorkflows()).filter(
+        (workflow) => workflow.isLocal && workflow.syncStatus === "failed"
+      );
 
       const [transactions, workflows, profile] = await Promise.all([
         api.getTransactions(),
@@ -286,10 +413,32 @@ class SyncService {
       ]);
 
       // Store everything locally
-      await setStoredTransactions(transactions);
-      await setStoredWorkflows(workflows);
+      await setStoredTransactions([
+        ...failedLocalTransactions,
+        ...transactions.filter(
+          (transaction) =>
+            !failedLocalTransactions.some(
+              (failed) =>
+                failed._id === transaction._id ||
+                (failed.clientRequestId || failed._id) ===
+                  (transaction.clientRequestId || transaction._id)
+            )
+        ),
+      ]);
+      await setStoredWorkflows([
+        ...failedLocalWorkflows,
+        ...workflows.filter(
+          (workflow) =>
+            !failedLocalWorkflows.some(
+              (failed) =>
+                failed._id === workflow._id ||
+                (failed.clientRequestId || failed._id) ===
+                  (workflow.clientRequestId || workflow._id)
+            )
+        ),
+      ]);
       if (profile) {
-        await setStoredProfile(profile);
+        await setStoredProfile(this.mergeProfile(profile, pendingProfile) ?? profile);
         // Only reset local balances to server balances if there are NO pending transactions
         // This prevents overwriting local balance changes before they're synced
         if (!hasPendingTransactions) {
@@ -310,8 +459,23 @@ class SyncService {
     if (isOnline) {
       try {
         const transactions = await api.getTransactions();
-        await setStoredTransactions(transactions);
-        return transactions;
+        const failedLocalTransactions = (await getStoredTransactions()).filter(
+          (transaction) => transaction.isLocal && transaction.syncStatus === "failed"
+        );
+        const mergedTransactions = [
+          ...failedLocalTransactions,
+          ...transactions.filter(
+            (transaction) =>
+              !failedLocalTransactions.some(
+                (failed) =>
+                  failed._id === transaction._id ||
+                  (failed.clientRequestId || failed._id) ===
+                    (transaction.clientRequestId || transaction._id)
+              )
+          ),
+        ];
+        await setStoredTransactions(mergedTransactions);
+        return mergedTransactions;
       } catch (error) {
         console.error("[Sync] Error fetching transactions, using local:", error);
       }
@@ -329,8 +493,23 @@ class SyncService {
     if (isOnline) {
       try {
         const workflows = await api.getWorkflows();
-        await setStoredWorkflows(workflows);
-        return workflows;
+        const failedLocalWorkflows = (await getStoredWorkflows()).filter(
+          (workflow) => workflow.isLocal && workflow.syncStatus === "failed"
+        );
+        const mergedWorkflows = [
+          ...failedLocalWorkflows,
+          ...workflows.filter(
+            (workflow) =>
+              !failedLocalWorkflows.some(
+                (failed) =>
+                  failed._id === workflow._id ||
+                  (failed.clientRequestId || failed._id) ===
+                    (workflow.clientRequestId || workflow._id)
+              )
+          ),
+        ];
+        await setStoredWorkflows(mergedWorkflows);
+        return mergedWorkflows;
       } catch (error) {
         console.error("[Sync] Error fetching workflows, using local:", error);
       }
@@ -346,12 +525,13 @@ class SyncService {
 
     if (isOnline) {
       try {
+        const pendingProfile = await getPendingProfileUpdate();
         // Check if there are pending transactions before updating balances
         const pendingTxns = await getPendingTransactions();
         const hasPendingTransactions = pendingTxns.length > 0;
 
         const profile = await api.getProfile();
-        await setStoredProfile(profile);
+        await setStoredProfile(this.mergeProfile(profile, pendingProfile) ?? profile);
         // Only update local balances if there are no pending transactions
         if (!hasPendingTransactions) {
           await setLocalBalances(profile.balances);

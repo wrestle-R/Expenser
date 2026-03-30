@@ -388,25 +388,41 @@ export default function WorkflowsScreen() {
                             style={{
                               flexDirection: "row",
                               alignItems: "center",
-                              backgroundColor: colors.warningBg,
+                              backgroundColor:
+                                workflow.syncStatus === "failed"
+                                  ? colors.errorBg
+                                  : colors.warningBg,
                               paddingHorizontal: 8,
                               paddingVertical: 4,
                               borderRadius: 6,
                             }}
                           >
                             <Ionicons
-                              name="cloud-upload-outline"
+                              name={
+                                workflow.syncStatus === "failed"
+                                  ? "alert-circle-outline"
+                                  : "cloud-upload-outline"
+                              }
                               size={12}
-                              color={colors.warning}
+                              color={
+                                workflow.syncStatus === "failed"
+                                  ? colors.error
+                                  : colors.warning
+                              }
                             />
                             <Text
                               style={{
                                 fontSize: 12,
-                                color: colors.warning,
+                                color:
+                                  workflow.syncStatus === "failed"
+                                    ? colors.error
+                                    : colors.warning,
                                 marginLeft: 4,
                               }}
                             >
-                              Pending
+                              {workflow.syncStatus === "failed"
+                                ? "Sync failed"
+                                : "Pending"}
                             </Text>
                           </View>
                         )}

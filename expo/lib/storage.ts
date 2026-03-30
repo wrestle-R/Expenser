@@ -14,6 +14,7 @@ const KEYS = {
   PENDING_TRANSACTIONS: "@expenser_pending_transactions",
   PENDING_WORKFLOWS: "@expenser_pending_workflows",
   PENDING_DELETES: "@expenser_pending_deletes",
+  PENDING_PROFILE: "@expenser_pending_profile",
   LAST_SYNC: "@expenser_last_sync",
   THEME: "@expenser_theme",
   LOCAL_BALANCES: "@expenser_local_balances",
@@ -185,6 +186,35 @@ export async function clearPendingDeletes(): Promise<void> {
   }
 }
 
+// === Pending Profile Update ===
+export async function getPendingProfileUpdate(): Promise<Partial<IUserProfile> | null> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.PENDING_PROFILE);
+    return data ? JSON.parse(data) : null;
+  } catch (error) {
+    console.error("[Storage] Error getting pending profile update:", error);
+    return null;
+  }
+}
+
+export async function setPendingProfileUpdate(
+  profile: Partial<IUserProfile>
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(KEYS.PENDING_PROFILE, JSON.stringify(profile));
+  } catch (error) {
+    console.error("[Storage] Error setting pending profile update:", error);
+  }
+}
+
+export async function clearPendingProfileUpdate(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(KEYS.PENDING_PROFILE);
+  } catch (error) {
+    console.error("[Storage] Error clearing pending profile update:", error);
+  }
+}
+
 // === Profile ===
 export async function getStoredProfile(): Promise<IUserProfile | null> {
   try {
@@ -281,6 +311,7 @@ export async function clearAllData(): Promise<void> {
       KEYS.PENDING_TRANSACTIONS,
       KEYS.PENDING_WORKFLOWS,
       KEYS.PENDING_DELETES,
+      KEYS.PENDING_PROFILE,
       KEYS.LAST_SYNC,
       KEYS.LOCAL_BALANCES,
     ]);

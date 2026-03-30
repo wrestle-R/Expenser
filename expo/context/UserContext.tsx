@@ -27,6 +27,9 @@ import {
   getPendingWorkflows,
   getPendingDeletes,
   getLastSyncTime,
+  getPendingProfileUpdate,
+  setPendingProfileUpdate,
+  clearPendingProfileUpdate,
 } from "../lib/storage";
 import { IUserProfile, ITransaction, IWorkflow, ILocalBalance, CreateTransactionPayload, CreateWorkflowPayload, UpdateTransactionPayload } from "../lib/types";
 import { generateTempId } from "../lib/utils";
@@ -101,7 +104,7 @@ interface UserContextType {
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn, isLoaded } = useAuth();
   const [profile, setProfile] = useState<IUserProfile | null>(null);
   const [transactions, setTransactions] = useState<ITransaction[]>([]);
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
@@ -111,6 +114,20 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [isOnline, setIsOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSyncTime, setLastSyncTimeState] = useState<number | null>(null);
+  const [authTimedOut, setAuthTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (isLoaded) {
+      setAuthTimedOut(false);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setAuthTimedOut(true);
+    }, 5000);
+
+    return () => clearTimeout(timeout);
+  }, [isLoaded]);
 
   // Set API token getter for fresh tokens on every request
   useEffect(() => {
@@ -164,6 +181,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         pendingTxns,
         pendingWorkflows,
         pendingDeletes,
+        pendingProfile,
         storedBalances,
         liveBalances,
         lastSync,
@@ -175,6 +193,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           getPendingTransactions(),
           getPendingWorkflows(),
           getPendingDeletes(),
+          getPendingProfileUpdate(),
           getStoredLocalBalances(),
           getLocalBalances(),
           getLastSyncTime(),
@@ -204,7 +223,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         (workflow) => !pendingWorkflowDeletes.has(workflow._id)
       );
 
-      setProfile(storedProfile ?? null);
+      const hydratedProfile =
+        storedProfile && pendingProfile ? { ...storedProfile, ...pendingProfile } : storedProfile;
+
+      setProfile(hydratedProfile ?? null);
       setTransactions(
         dedupeTransactions([
           ...visiblePendingTransactions,
@@ -218,16 +240,19 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         ])
       );
       setPendingCount(
-        pendingTxns.length + pendingWorkflows.length + pendingDeletes.length
+        pendingTxns.length +
+          pendingWorkflows.length +
+          pendingDeletes.length +
+          (pendingProfile ? 1 : 0)
       );
       setLastSyncTimeState(lastSync);
       setLocalBalancesState(
-        storedBalances ?? (storedProfile ? storedProfile.balances : liveBalances)
+        storedBalances ?? (hydratedProfile ? hydratedProfile.balances : liveBalances)
       );
 
       return {
         hasRenderableData:
-          Boolean(storedProfile) ||
+          Boolean(hydratedProfile) ||
           visibleStoredTransactions.length > 0 ||
           visibleStoredWorkflows.length > 0 ||
           visiblePendingTransactions.length > 0 ||
@@ -244,7 +269,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     async function initialize() {
-      if (!isSignedIn) {
+      if (isLoaded && !isSignedIn) {
         setProfile(null);
         setTransactions([]);
         setWorkflows([]);
@@ -252,6 +277,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         setPendingCount(0);
         setLastSyncTimeState(null);
         setLoading(false);
+        return;
+      }
+
+      if (!isLoaded && !authTimedOut) {
         return;
       }
 
@@ -270,6 +299,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       // Step 3: Reconcile with the server when possible
       try {
+        if (!isLoaded || !isSignedIn) {
+          if (!cancelled) {
+            setLoading(false);
+          }
+          return;
+        }
+
         const online = await syncService.isOnline();
         if (!online) {
           console.log("[UserContext] Offline on launch - staying on cached data");
@@ -297,7 +333,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       syncService.cleanup();
       notificationService.cleanup();
     };
-  }, [isSignedIn, loadLocalData]);
+  }, [authTimedOut, isLoaded, isSignedIn, loadLocalData]);
 
   const refreshProfile = useCallback(async () => {
     try {
@@ -351,6 +387,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           const updated = await api.updateProfile(data);
           setProfile(updated);
           await setStoredProfile(updated);
+          await clearPendingProfileUpdate();
           setLocalBalancesState(updated.balances);
         } else {
           // Update locally
@@ -358,6 +395,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             const updated = { ...profile, ...data };
             setProfile(updated);
             await setStoredProfile(updated);
+            const existingPending = await getPendingProfileUpdate();
+            await setPendingProfileUpdate({
+              ...(existingPending ?? {}),
+              ...data,
+            });
             if (updated.balances) {
               setLocalBalancesState(updated.balances);
             }
@@ -532,6 +574,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const tempWorkflow: IWorkflow = {
         _id: generateTempId(),
         userId: profile?.clerkId || "",
+        clientRequestId: generateTempId(),
         name: payload.name,
         type: payload.type,
         amount: payload.amount,
@@ -555,8 +598,15 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       if (online) {
         try {
           console.log("[UserContext] Syncing workflow online:", payload);
-          const created = await api.createWorkflow(payload);
+          const created = await api.createWorkflow({
+            ...payload,
+            clientRequestId: tempWorkflow.clientRequestId,
+          });
           await removePendingWorkflow(tempWorkflow._id);
+          const storedWorkflows = await getStoredWorkflows();
+          await setStoredWorkflows(
+            dedupeWorkflows([created, ...storedWorkflows])
+          );
           setWorkflows((prev) =>
             prev.map((w) => w._id === tempWorkflow._id ? created : w)
           );

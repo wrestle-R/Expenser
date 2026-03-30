@@ -2,7 +2,13 @@
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import { Platform, AppState, AppStateStatus } from "react-native";
-import { getPendingTransactions, getPendingWorkflows, getPendingDeletes, getLastSyncTime } from "./storage";
+import {
+  getPendingTransactions,
+  getPendingWorkflows,
+  getPendingDeletes,
+  getLastSyncTime,
+  getPendingProfileUpdate,
+} from "./storage";
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
@@ -101,13 +107,18 @@ class NotificationService {
       }
       
       // Check if there's pending data to sync
-      const [pendingTxns, pendingWorkflows, pendingDeletes] = await Promise.all([
+      const [pendingTxns, pendingWorkflows, pendingDeletes, pendingProfile] = await Promise.all([
         getPendingTransactions(),
         getPendingWorkflows(),
         getPendingDeletes(),
+        getPendingProfileUpdate(),
       ]);
       
-      const totalPending = pendingTxns.length + pendingWorkflows.length + pendingDeletes.length;
+      const totalPending =
+        pendingTxns.length +
+        pendingWorkflows.length +
+        pendingDeletes.length +
+        (pendingProfile ? 1 : 0);
       
       if (totalPending > 0) {
         // Schedule a notification to remind user about unsynced data in 1 hour
@@ -178,13 +189,18 @@ class NotificationService {
    * Fires when there are pending transactions/workflows/deletes that haven't been synced.
    */
   private async checkUnsyncedData() {
-    const [pendingTxns, pendingWorkflows, pendingDeletes] = await Promise.all([
+    const [pendingTxns, pendingWorkflows, pendingDeletes, pendingProfile] = await Promise.all([
       getPendingTransactions(),
       getPendingWorkflows(),
       getPendingDeletes(),
+      getPendingProfileUpdate(),
     ]);
 
-    const totalPending = pendingTxns.length + pendingWorkflows.length + pendingDeletes.length;
+    const totalPending =
+      pendingTxns.length +
+      pendingWorkflows.length +
+      pendingDeletes.length +
+      (pendingProfile ? 1 : 0);
 
     if (totalPending > 0) {
       if (this.lastUnsyncedCountNotified === totalPending && this.activeUnsyncedNotificationId) {

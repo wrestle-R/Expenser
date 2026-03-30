@@ -63,6 +63,7 @@ export interface TransactionRow {
 export interface WorkflowRow {
   id: string;
   user_id: string;
+  client_request_id: string | null;
   name: string;
   type: TransactionType;
   amount: number;
@@ -131,6 +132,7 @@ export function mapWorkflowRow(row: WorkflowRow) {
   return {
     _id: row.id,
     userId: row.user_id,
+    clientRequestId: row.client_request_id ?? undefined,
     name: row.name,
     type: row.type,
     amount: Number(row.amount ?? 0),

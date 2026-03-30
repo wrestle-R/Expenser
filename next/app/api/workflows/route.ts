@@ -9,6 +9,7 @@ import {
 
 const PAYMENT_METHODS = ["bank", "cash", "splitwise"] as const;
 const TRANSACTION_TYPES = ["income", "expense"] as const;
+const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 function sanitizeText(
   value: unknown,
@@ -54,9 +55,13 @@ function parseWorkflowInput(body: Record<string, unknown>) {
     throw new Error("Invalid payment method");
   }
 
-  const amount = normalizeNumber(body.amount, Number.NaN);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error("amount must be greater than 0");
+  const rawAmount = body.amount;
+  const amount =
+    rawAmount == null || rawAmount === ""
+      ? 0
+      : normalizeNumber(rawAmount, Number.NaN);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error("amount must be 0 or greater");
   }
 
   const splitAmount = Math.max(0, normalizeNumber(body.splitAmount, 0));
@@ -87,7 +92,28 @@ function parseWorkflowInput(body: Record<string, unknown>) {
     }),
     paymentMethod: body.paymentMethod as "bank" | "cash" | "splitwise",
     splitAmount,
+    clientRequestId: parseClientRequestId(body.clientRequestId),
   };
+}
+
+function parseClientRequestId(value: unknown) {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  const normalized = sanitizeText(value, {
+    field: "clientRequestId",
+    maxLength: 128,
+    required: false,
+  });
+
+  if (!CLIENT_REQUEST_ID_PATTERN.test(normalized)) {
+    throw new Error(
+      "clientRequestId may only contain letters, numbers, hyphens, and underscores"
+    );
+  }
+
+  return normalized;
 }
 
 export async function GET() {
@@ -127,31 +153,72 @@ export async function POST(req: NextRequest) {
       (await req.json()) as Record<string, unknown>
     );
 
-    const insertedWorkflows = await sql<WorkflowRow[]>`
-      insert into workflows (
-        user_id,
-        name,
-        type,
-        amount,
-        description,
-        category,
-        payment_method,
-        split_amount
-      )
-      values (
-        ${userId},
-        ${payload.name},
-        ${payload.type},
-        ${payload.amount},
-        ${payload.description},
-        ${payload.category},
-        ${payload.paymentMethod},
-        ${payload.splitAmount}
-      )
-      returning *
-    `;
+    const result = await sql.begin(async (tx) => {
+      const trx = tx as unknown as typeof sql;
+      if (payload.clientRequestId) {
+        const existingWorkflows = (await trx`
+          select *
+          from workflows
+          where user_id = ${userId}
+            and client_request_id = ${payload.clientRequestId}
+          limit 1
+        `) as WorkflowRow[];
 
-    const workflow = insertedWorkflows[0];
+        const existing = existingWorkflows[0];
+        if (existing) {
+          return existing;
+        }
+      }
+
+      try {
+        const insertedWorkflows = (await trx`
+          insert into workflows (
+            user_id,
+            client_request_id,
+            name,
+            type,
+            amount,
+            description,
+            category,
+            payment_method,
+            split_amount
+          )
+          values (
+            ${userId},
+            ${payload.clientRequestId},
+            ${payload.name},
+            ${payload.type},
+            ${payload.amount},
+            ${payload.description},
+            ${payload.category},
+            ${payload.paymentMethod},
+            ${payload.splitAmount}
+          )
+          returning *
+        `) as WorkflowRow[];
+
+        return insertedWorkflows[0];
+      } catch (error: any) {
+        if (payload.clientRequestId && error?.code === "23505") {
+          const existingWorkflows = (await trx`
+            select *
+            from workflows
+            where user_id = ${userId}
+              and client_request_id = ${payload.clientRequestId}
+            limit 1
+          `) as WorkflowRow[];
+
+          const existing = existingWorkflows[0];
+          if (existing) {
+            return existing;
+          }
+        }
+
+        throw error;
+      }
+    });
+
+    const workflow = result;
     return NextResponse.json(
       { workflow: mapWorkflowRow(workflow) },
       { status: 201 }

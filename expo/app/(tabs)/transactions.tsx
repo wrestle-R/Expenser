@@ -342,18 +342,31 @@ export default function TransactionsScreen() {
                         }}
                       >
                         <Ionicons
-                          name="cloud-upload-outline"
+                          name={
+                            txn.syncStatus === "failed"
+                              ? "alert-circle-outline"
+                              : "cloud-upload-outline"
+                          }
                           size={12}
-                          color={colors.warning}
+                          color={
+                            txn.syncStatus === "failed"
+                              ? colors.error
+                              : colors.warning
+                          }
                         />
                         <Text
                           style={{
                             fontSize: 10,
-                            color: colors.warning,
+                            color:
+                              txn.syncStatus === "failed"
+                                ? colors.error
+                                : colors.warning,
                             marginLeft: 4,
                           }}
                         >
-                          Pending sync
+                          {txn.syncStatus === "failed"
+                            ? txn.syncError || "Sync failed"
+                            : "Pending sync"}
                         </Text>
                       </View>
                     )}

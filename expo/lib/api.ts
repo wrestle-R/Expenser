@@ -13,6 +13,16 @@ import {
 
 const REQUEST_TIMEOUT_MS = 10000;
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 class ApiService {
   private baseUrl: string;
   private token: string | null = null;
@@ -83,7 +93,7 @@ class ApiService {
       const errorData = await response.json().catch(() => ({}));
       const errMsg = errorData.error || `API Error: ${response.status} ${response.statusText}`;
       console.error(`[API] Error ${response.status}:`, errMsg, "URL:", url);
-      throw new Error(errMsg);
+      throw new ApiError(errMsg, response.status);
     }
 
     return response.json();

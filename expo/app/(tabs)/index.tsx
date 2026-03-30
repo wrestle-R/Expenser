@@ -439,7 +439,10 @@ export default function HomeScreen() {
                     </Text>
                     <Text style={{ fontSize: 12, color: colors.textMuted }}>
                       {paymentMethodConfig[txn.paymentMethod]?.label} · {formatDate(txn.date)}
-                      {txn.isLocal && " · Pending sync"}
+                      {txn.isLocal &&
+                        ` · ${
+                          txn.syncStatus === "failed" ? "Sync failed" : "Pending sync"
+                        }`}
                     </Text>
                   </View>
                 </View>

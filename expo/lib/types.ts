@@ -16,11 +16,13 @@ export interface ITransaction {
   // For offline sync
   isLocal?: boolean;
   syncStatus?: "pending" | "synced" | "failed";
+  syncError?: string;
 }
 
 export interface IWorkflow {
   _id: string;
   userId: string;
+  clientRequestId?: string;
   name: string;
   type: "income" | "expense";
   amount?: number;
@@ -33,6 +35,7 @@ export interface IWorkflow {
   // For offline sync
   isLocal?: boolean;
   syncStatus?: "pending" | "synced" | "failed";
+  syncError?: string;
 }
 
 export interface IUserProfile {
@@ -91,6 +94,7 @@ export interface CreateWorkflowPayload {
   category: string;
   paymentMethod: PaymentMethod;
   splitAmount?: number;
+  clientRequestId?: string;
 }
 
 // API Response types

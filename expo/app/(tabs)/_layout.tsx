@@ -1,17 +1,15 @@
 import { Tabs } from "expo-router";
 import React from "react";
-import { View, Platform } from "react-native";
+import { Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { HapticTab } from "../../components/haptic-tab";
 import { Colors } from "../../constants/theme";
 import { useTheme } from "../../context/ThemeContext";
-import { useUserContext } from "../../context/UserContext";
 
 export default function TabLayout() {
   const { isDark } = useTheme();
-  const { isOnline, pendingCount } = useUserContext();
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
 

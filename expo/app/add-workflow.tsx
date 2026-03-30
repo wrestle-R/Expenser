@@ -69,7 +69,7 @@ export default function AddWorkflowScreen() {
       });
       showToast("Workflow created successfully", "success");
       router.back();
-    } catch (error) {
+    } catch {
       showToast("Failed to create workflow", "error");
     } finally {
       setSaving(false);

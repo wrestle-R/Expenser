@@ -40,7 +40,7 @@ export default function SyncStatusBanner() {
     } else {
       pulseAnim.setValue(1);
     }
-  }, [isOnline, pendingCount]);
+  }, [isOnline, pendingCount, pulseAnim]);
 
   const handleRefresh = async () => {
     setRefreshing(true);

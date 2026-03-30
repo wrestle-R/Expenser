@@ -27,7 +27,6 @@ export default function WorkflowsScreen() {
   const {
     workflows,
     loading,
-    refreshWorkflows,
     deleteWorkflow,
     isOnline,
     syncing,
@@ -71,7 +70,7 @@ export default function WorkflowsScreen() {
             setDeleting(workflow._id);
             try {
               await deleteWorkflow(workflow._id);
-            } catch (error) {
+            } catch {
               Alert.alert("Error", "Failed to delete workflow");
             } finally {
               setDeleting(null);

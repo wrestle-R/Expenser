@@ -15,6 +15,7 @@ import { useTheme } from "../../context/ThemeContext";
 import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { formatCurrency, formatDate } from "../../lib/utils";
+import SyncStatusBanner from "../../components/SyncStatusBanner";
 
 export default function HomeScreen() {
   const { isDark } = useTheme();
@@ -28,8 +29,6 @@ export default function HomeScreen() {
     loading,
     syncing,
     isOnline,
-    pendingCount,
-    refreshAll,
     manualRefresh,
     getBalance,
     getTotalBalance,
@@ -126,6 +125,8 @@ export default function HomeScreen() {
           />
         }
       >
+        <SyncStatusBanner />
+
         {/* Greeting */}
         <View style={{ marginBottom: 24 }}>
           <Text

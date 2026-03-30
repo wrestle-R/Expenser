@@ -215,6 +215,16 @@ export async function getLocalBalances(): Promise<ILocalBalance> {
   }
 }
 
+export async function getStoredLocalBalances(): Promise<ILocalBalance | null> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.LOCAL_BALANCES);
+    return data ? JSON.parse(data) : null;
+  } catch (error) {
+    console.error("[Storage] Error getting stored local balances:", error);
+    return null;
+  }
+}
+
 export async function setLocalBalances(balances: ILocalBalance): Promise<void> {
   try {
     await AsyncStorage.setItem(KEYS.LOCAL_BALANCES, JSON.stringify(balances));

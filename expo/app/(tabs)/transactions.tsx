@@ -42,7 +42,6 @@ export default function TransactionsScreen() {
     profile,
     transactions,
     loading,
-    refreshTransactions,
     deleteTransaction,
     updateTransaction,
     isOnline,
@@ -89,7 +88,7 @@ export default function TransactionsScreen() {
     setDeleting(transactionToDelete._id);
     try {
       await deleteTransaction(transactionToDelete._id);
-    } catch (error) {
+    } catch {
       // Error handled
     } finally {
       setDeleting(null);

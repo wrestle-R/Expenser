@@ -30,7 +30,6 @@ export interface SyncStatus {
   lastSyncTime: number | null;
 }
 
-const AUTO_REFRESH_INTERVAL = 3000; // 3 seconds
 const NETINFO_TIMEOUT_MS = 3000;
 
 class SyncService {
@@ -38,7 +37,6 @@ class SyncService {
   private isSyncing = false;
   private listeners: ((status: SyncStatus) => void)[] = [];
   private unsubscribeNetInfo: (() => void) | null = null;
-  private autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private _isOnline = false;
 
   private async getNetworkStateWithTimeout() {
@@ -69,23 +67,12 @@ class SyncService {
 
       // Notify listeners about connectivity change
       this.notifyListeners();
-
-      // Start/stop auto-refresh based on connectivity
-      if (state.isConnected) {
-        this.startAutoRefresh();
-      } else {
-        this.stopAutoRefresh();
-      }
     });
 
-    // Check current network state and sync if online
+    // Check current network state
     try {
       const state = await this.getNetworkStateWithTimeout();
       this._isOnline = state.isConnected ?? false;
-      if (state.isConnected) {
-        this.syncAll();
-        this.startAutoRefresh();
-      }
     } catch (error) {
       console.warn("[Sync] Initial network check timed out, continuing offline mode");
     }
@@ -93,67 +80,7 @@ class SyncService {
     this.notifyListeners();
   }
 
-  private startAutoRefresh() {
-    if (this.autoRefreshTimer) return; // Already running
-    console.log("[Sync] Starting auto-refresh every 3s");
-    this.autoRefreshTimer = setInterval(() => {
-      if (this._isOnline && !this.isSyncing) {
-        this.silentRefresh();
-      }
-    }, AUTO_REFRESH_INTERVAL);
-  }
-
-  private stopAutoRefresh() {
-    if (this.autoRefreshTimer) {
-      console.log("[Sync] Stopping auto-refresh");
-      clearInterval(this.autoRefreshTimer);
-      this.autoRefreshTimer = null;
-    }
-  }
-
-  // Light refresh - just fetch latest data without full sync
-  private async silentRefresh() {
-    try {
-      const state = await this.getNetworkStateWithTimeout();
-      if (!state.isConnected) return;
-
-      // Check for pending items FIRST
-      const pendingTxns = await getPendingTransactions();
-      const pendingWorkflows = await getPendingWorkflows();
-      const pendingDeletes = await getPendingDeletes();
-      const hasPendingItems = pendingTxns.length > 0 || pendingWorkflows.length > 0 || pendingDeletes.length > 0;
-
-      // Only fetch, don't sync pending (that happens in syncAll)
-      const [transactions, workflows, profile] = await Promise.all([
-        api.getTransactions().catch(() => null),
-        api.getWorkflows().catch(() => null),
-        api.getProfile().catch(() => null),
-      ]);
-
-      if (transactions) await setStoredTransactions(transactions);
-      if (workflows) await setStoredWorkflows(workflows);
-      if (profile) {
-        await setStoredProfile(profile);
-        // ONLY update local balances from server if there are NO pending transactions
-        // Otherwise we would overwrite the user's local balance changes
-        if (!hasPendingItems) {
-          await setLocalBalances(profile.balances);
-        }
-      }
-
-      // Trigger full sync if there are pending items
-      if (hasPendingItems) {
-        this.syncAll(); // Full sync if there are pending items
-      }
-
-      this.notifyListeners();
-    } catch (error) {
-      // Silent fail - this is background refresh
-    }
-  }
-
   cleanup() {
-    this.stopAutoRefresh();
     if (this.unsubscribeNetInfo) {
       this.unsubscribeNetInfo();
       this.unsubscribeNetInfo = null;

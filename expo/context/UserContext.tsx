@@ -4,7 +4,6 @@ import React, {
   useState,
   useEffect,
   useCallback,
-  useRef,
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import { useAuth } from "@clerk/clerk-expo";
@@ -23,9 +22,11 @@ import {
   removePendingWorkflow,
   addPendingDelete,
   getLocalBalances,
-  setLocalBalances,
+  getStoredLocalBalances,
   getPendingTransactions,
   getPendingWorkflows,
+  getPendingDeletes,
+  getLastSyncTime,
 } from "../lib/storage";
 import { IUserProfile, ITransaction, IWorkflow, ILocalBalance, CreateTransactionPayload, CreateWorkflowPayload, UpdateTransactionPayload } from "../lib/types";
 import { generateTempId } from "../lib/utils";
@@ -45,6 +46,24 @@ function dedupeTransactions(items: ITransaction[]) {
 
   return Array.from(deduped.values()).sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+}
+
+function dedupeWorkflows(items: IWorkflow[]) {
+  const deduped = new Map<string, IWorkflow>();
+
+  for (const item of items) {
+    const existing = deduped.get(item._id);
+
+    if (!existing || (existing.isLocal && !item.isLocal)) {
+      deduped.set(item._id, item);
+    }
+  }
+
+  return Array.from(deduped.values()).sort(
+    (a, b) =>
+      new Date(b.updatedAt || b.createdAt).getTime() -
+      new Date(a.updatedAt || a.createdAt).getTime()
   );
 }
 
@@ -86,17 +105,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<IUserProfile | null>(null);
   const [transactions, setTransactions] = useState<ITransaction[]>([]);
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
-  const [localBalances, setLocalBalancesState] = useState<ILocalBalance>({
-    bank: 0,
-    cash: 0,
-    splitwise: 0,
-  });
+  const [localBalances, setLocalBalancesState] = useState<ILocalBalance | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSyncTime, setLastSyncTimeState] = useState<number | null>(null);
-  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Set API token getter for fresh tokens on every request
   useEffect(() => {
@@ -116,32 +130,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       setIsOnline(status.isOnline);
       setSyncing(status.isSyncing);
       setPendingCount(status.pendingCount);
-      if (status.lastSyncTime) setLastSyncTimeState(status.lastSyncTime);
+      setLastSyncTimeState(status.lastSyncTime);
 
       // Refresh local state after sync completes
-      if (!status.isSyncing && status.isOnline) {
+      if (!status.isSyncing) {
         await loadLocalData();
       }
     });
 
     return () => unsubscribe();
   }, []);
-
-  // Auto-refresh data from local storage every 3s (reads what sync service has fetched)
-  useEffect(() => {
-    if (!isSignedIn) return;
-
-    autoRefreshRef.current = setInterval(async () => {
-      await loadLocalData();
-    }, 3000);
-
-    return () => {
-      if (autoRefreshRef.current) {
-        clearInterval(autoRefreshRef.current);
-        autoRefreshRef.current = null;
-      }
-    };
-  }, [isSignedIn]);
 
   // Pause/resume auto-refresh on app background/foreground
   useEffect(() => {
@@ -159,117 +157,174 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   // Load local data on mount
   const loadLocalData = useCallback(async () => {
     try {
-      const [storedProfile, storedTxns, storedWorkflows, pendingTxns, pendingWorkflows, balances] =
+      const [
+        storedProfile,
+        storedTxns,
+        storedWorkflows,
+        pendingTxns,
+        pendingWorkflows,
+        pendingDeletes,
+        storedBalances,
+        liveBalances,
+        lastSync,
+      ] =
         await Promise.all([
           getStoredProfile(),
           getStoredTransactions(),
           getStoredWorkflows(),
           getPendingTransactions(),
           getPendingWorkflows(),
+          getPendingDeletes(),
+          getStoredLocalBalances(),
           getLocalBalances(),
+          getLastSyncTime(),
         ]);
 
-      if (storedProfile) setProfile(storedProfile);
-      
-      setTransactions(dedupeTransactions([...pendingTxns, ...storedTxns]));
-      
-      // Same deduplication for workflows
-      const storedWorkflowIds = new Set(storedWorkflows.map(w => w._id));
-      const uniquePendingWorkflows = pendingWorkflows.filter(w => !storedWorkflowIds.has(w._id));
-      setWorkflows([...uniquePendingWorkflows, ...storedWorkflows]);
-      
-      setLocalBalancesState(balances);
+      const pendingTransactionDeletes = new Set(
+        pendingDeletes
+          .filter((item) => item.type === "transaction")
+          .map((item) => item.id)
+      );
+      const pendingWorkflowDeletes = new Set(
+        pendingDeletes
+          .filter((item) => item.type === "workflow")
+          .map((item) => item.id)
+      );
+
+      const visibleStoredTransactions = storedTxns.filter(
+        (txn) => !pendingTransactionDeletes.has(txn._id)
+      );
+      const visiblePendingTransactions = pendingTxns.filter(
+        (txn) => !pendingTransactionDeletes.has(txn._id)
+      );
+      const visibleStoredWorkflows = storedWorkflows.filter(
+        (workflow) => !pendingWorkflowDeletes.has(workflow._id)
+      );
+      const visiblePendingWorkflows = pendingWorkflows.filter(
+        (workflow) => !pendingWorkflowDeletes.has(workflow._id)
+      );
+
+      setProfile(storedProfile ?? null);
+      setTransactions(
+        dedupeTransactions([
+          ...visiblePendingTransactions,
+          ...visibleStoredTransactions,
+        ])
+      );
+      setWorkflows(
+        dedupeWorkflows([
+          ...visiblePendingWorkflows,
+          ...visibleStoredWorkflows,
+        ])
+      );
+      setPendingCount(
+        pendingTxns.length + pendingWorkflows.length + pendingDeletes.length
+      );
+      setLastSyncTimeState(lastSync);
+      setLocalBalancesState(
+        storedBalances ?? (storedProfile ? storedProfile.balances : liveBalances)
+      );
+
+      return {
+        hasRenderableData:
+          Boolean(storedProfile) ||
+          visibleStoredTransactions.length > 0 ||
+          visibleStoredWorkflows.length > 0 ||
+          visiblePendingTransactions.length > 0 ||
+          visiblePendingWorkflows.length > 0,
+      };
     } catch (error) {
       console.error("[UserContext] Error loading local data:", error);
+      return { hasRenderableData: false };
     }
   }, []);
 
   // Initialize data on mount - OFFLINE FIRST
   useEffect(() => {
+    let cancelled = false;
+
     async function initialize() {
       if (!isSignedIn) {
+        setProfile(null);
+        setTransactions([]);
+        setWorkflows([]);
+        setLocalBalancesState(null);
+        setPendingCount(0);
+        setLastSyncTimeState(null);
         setLoading(false);
         return;
       }
 
       setLoading(true);
 
-      // Step 1: Load local data IMMEDIATELY (this is what makes it offline-first)
-      await loadLocalData();
-      setLoading(false); // Show UI right away with cached data
+      // Step 1: Hydrate cached data first
+      const localSnapshot = await loadLocalData();
+      if (cancelled) return;
+      if (localSnapshot.hasRenderableData) {
+        setLoading(false);
+      }
 
       // Step 2: Initialize sync service + notifications
-      syncService.initialize();
+      await syncService.initialize();
       notificationService.initialize().catch(console.error);
 
-      // Step 3: Try to fetch from server in background (non-blocking)
+      // Step 3: Reconcile with the server when possible
       try {
         const online = await syncService.isOnline();
         if (!online) {
           console.log("[UserContext] Offline on launch - staying on cached data");
+          if (!cancelled) {
+            setLoading(false);
+          }
           return;
         }
 
-        const [serverTxns, serverWorkflows, serverProfile] = await Promise.all([
-          syncService.fetchTransactions(),
-          syncService.fetchWorkflows(),
-          syncService.fetchProfile(),
-        ]);
-
-        if (serverProfile) setProfile(serverProfile);
-        if (serverTxns.length > 0 || serverWorkflows.length > 0) {
-          setTransactions(serverTxns);
-          setWorkflows(serverWorkflows);
-        }
-        if (online) {
-          setLastSyncTimeState(Date.now());
-        }
+        await syncService.syncAll();
+        await loadLocalData();
       } catch (error) {
         console.log("[UserContext] Offline - using cached data:", error);
-        // This is FINE - we already loaded local data above
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     initialize();
 
     return () => {
+      cancelled = true;
       syncService.cleanup();
       notificationService.cleanup();
-      if (autoRefreshRef.current) {
-        clearInterval(autoRefreshRef.current);
-      }
     };
   }, [isSignedIn, loadLocalData]);
 
   const refreshProfile = useCallback(async () => {
     try {
-      const serverProfile = await syncService.fetchProfile();
-      if (serverProfile) {
-        setProfile(serverProfile);
-        setLocalBalancesState(serverProfile.balances);
-      }
+      await syncService.fetchProfile();
+      await loadLocalData();
     } catch (error) {
       console.error("[UserContext] Error refreshing profile:", error);
     }
-  }, []);
+  }, [loadLocalData]);
 
   const refreshTransactions = useCallback(async () => {
     try {
-      const txns = await syncService.fetchTransactions();
-      setTransactions(txns);
+      await syncService.fetchTransactions();
+      await loadLocalData();
     } catch (error) {
       console.error("[UserContext] Error refreshing transactions:", error);
     }
-  }, []);
+  }, [loadLocalData]);
 
   const refreshWorkflows = useCallback(async () => {
     try {
-      const wfs = await syncService.fetchWorkflows();
-      setWorkflows(wfs);
+      await syncService.fetchWorkflows();
+      await loadLocalData();
     } catch (error) {
       console.error("[UserContext] Error refreshing workflows:", error);
     }
-  }, []);
+  }, [loadLocalData]);
 
   const refreshAll = useCallback(async () => {
     await Promise.all([refreshProfile(), refreshTransactions(), refreshWorkflows()]);
@@ -279,24 +334,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const manualRefresh = useCallback(async () => {
     setSyncing(true);
     try {
-      const result = await syncService.forceRefresh();
-      if (result) {
-        if (result.profile) {
-          setProfile(result.profile);
-          setLocalBalancesState(result.profile.balances);
-        }
-        setTransactions(result.transactions);
-        setWorkflows(result.workflows);
-        setLastSyncTimeState(Date.now());
-      } else {
-        // Offline - at least reload local data
-        await loadLocalData();
-      }
+      await syncService.forceRefresh();
     } catch (error) {
       console.error("[UserContext] Manual refresh failed:", error);
-      // Fall back to loading local data
-      await loadLocalData();
     } finally {
+      await loadLocalData();
       setSyncing(false);
     }
   }, [loadLocalData]);
@@ -316,6 +358,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             const updated = { ...profile, ...data };
             setProfile(updated);
             await setStoredProfile(updated);
+            if (updated.balances) {
+              setLocalBalancesState(updated.balances);
+            }
           }
         }
       } catch (error) {
@@ -326,7 +371,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     [profile]
   );
 
-      const addTransaction = useCallback(
+  const addTransaction = useCallback(
     async (payload: CreateTransactionPayload) => {
       const online = await syncService.isOnline();
       const clientRequestId = generateTempId();
@@ -412,6 +457,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         setTransactions((prev) =>
           prev.map((t) => (t._id === id ? updated : t))
         );
+        const storedTransactions = await getStoredTransactions();
+        await setStoredTransactions(
+          dedupeTransactions(
+            storedTransactions.map((t) => (t._id === id ? updated : t))
+          )
+        );
         
         // Refresh profile to get updated balances
         await refreshProfile();
@@ -430,6 +481,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const transaction = transactions.find((t) => t._id === id);
 
       setTransactions((prev) => prev.filter((t) => t._id !== id));
+      const storedTransactions = await getStoredTransactions();
+      await setStoredTransactions(storedTransactions.filter((t) => t._id !== id));
       if (transaction) {
         const nextBalances = await syncService.applyLocalTransactionImpact(
           transaction,
@@ -448,6 +501,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         } catch (error) {
           console.error("[UserContext] Error deleting transaction:", error);
           if (transaction) {
+            await setStoredTransactions(
+              dedupeTransactions([transaction, ...(await getStoredTransactions())])
+            );
             setTransactions((prev) => dedupeTransactions([transaction, ...prev]));
             const restoredBalances = await syncService.applyLocalTransactionImpact(
               transaction,
@@ -516,8 +572,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const deleteWorkflow = useCallback(async (id: string) => {
     const online = await syncService.isOnline();
     const isTemp = id.startsWith("temp_");
+    const workflow = workflows.find((w) => w._id === id);
 
     setWorkflows((prev) => prev.filter((w) => w._id !== id));
+    const storedWorkflows = await getStoredWorkflows();
+    await setStoredWorkflows(storedWorkflows.filter((w) => w._id !== id));
 
     if (isTemp) {
       // Just remove from pending (already handled by filter)
@@ -528,6 +587,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         await api.deleteWorkflow(id);
       } catch (error) {
         console.error("[UserContext] Error deleting workflow:", error);
+        if (workflow) {
+          await setStoredWorkflows(
+            dedupeWorkflows([workflow, ...(await getStoredWorkflows())])
+          );
+          setWorkflows((prev) => dedupeWorkflows([workflow, ...prev]));
+        }
         throw error;
       }
     } else {
@@ -537,13 +602,22 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         return prev + 1;
       });
     }
-  }, []);
+  }, [workflows]);
 
   const getBalance = useCallback(
     (method: "bank" | "cash" | "splitwise") => {
-      if (!profile) return 0;
-      // Use local balances which are updated for offline transactions
-      return localBalances[method] || profile.balances[method] || 0;
+      const localValue = localBalances?.[method];
+      const profileValue = profile?.balances?.[method];
+
+      if (typeof localValue === "number") {
+        return localValue;
+      }
+
+      if (typeof profileValue === "number") {
+        return profileValue;
+      }
+
+      return 0;
     },
     [profile, localBalances]
   );

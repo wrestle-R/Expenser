@@ -9,7 +9,6 @@ import {
   Alert,
   Switch,
 } from "react-native";
-import { useRouter } from "expo-router";
 import { useClerk, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -27,9 +26,8 @@ const paymentOptions = [
 ];
 
 export default function ProfileScreen() {
-  const { theme, isDark, toggleTheme } = useTheme();
+  const { isDark, toggleTheme } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { signOut } = useClerk();
   const { user } = useUser();
@@ -39,7 +37,6 @@ export default function ProfileScreen() {
     isOnline,
     pendingCount,
     updateProfile,
-    refreshProfile,
   } = useUserContext();
 
   const [name, setName] = useState("");
@@ -90,7 +87,7 @@ export default function ProfileScreen() {
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to save profile");
     } finally {
       setSaving(false);

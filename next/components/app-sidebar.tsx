@@ -52,6 +52,8 @@ export function AppSidebar() {
     router.push("/");
   };
 
+  const isProfileActive = pathname === "/dashboard/profile";
+
   return (
     <Sidebar collapsible="icon" className="border-r shadow-sm">
       {/* Header - Left aligned, no subtitle */}
@@ -74,6 +76,9 @@ export function AppSidebar() {
               {navItems.map((item) => {
                 const isActive = pathname === item.url || (item.url === "/dashboard" && pathname === "/dashboard");
                 const Icon = item.icon;
+                const itemStateClasses = isActive
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground font-semibold shadow-lg shadow-primary/20 translate-x-1 ring-1 ring-primary/25 dark:bg-accent dark:text-foreground dark:hover:bg-secondary dark:hover:text-foreground dark:ring-border dark:shadow-[0_12px_24px_-16px_rgba(0,0,0,0.8)]"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50";
                 return (
                   <SidebarMenuItem key={item.title}>
                     <Link href={item.url} className="w-full">
@@ -82,13 +87,11 @@ export function AppSidebar() {
                         isActive={isActive}
                         className={cn(
                           "w-full transition-all duration-300 group-data-[collapsible=icon]:justify-center",
-                          isActive 
-                            ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground font-semibold shadow-lg shadow-primary/20 translate-x-1" 
-                            : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                          itemStateClasses
                         )}
                       >
                         <div className="flex items-center justify-center w-5">
-                          <Icon className={cn("size-5 transition-transform duration-300 group-hover/menu-button:scale-110", isActive ? "text-primary-foreground" : "")} />
+                          <Icon className="size-5 transition-transform duration-300 group-hover/menu-button:scale-110" />
                         </div>
                         <span className="group-data-[collapsible=icon]:hidden ml-3">{item.title}</span>
                         {isActive && !pathname.includes("profile") && (
@@ -128,18 +131,18 @@ export function AppSidebar() {
             <Link href="/dashboard/profile" className="w-full">
               <SidebarMenuButton
                 tooltip="Profile"
-                isActive={pathname === "/dashboard/profile"}
+                isActive={isProfileActive}
                 className={cn(
                   "w-full group-data-[collapsible=icon]:justify-center transition-all duration-300",
-                  pathname === "/dashboard/profile" 
-                    ? "bg-primary text-primary-foreground font-semibold shadow-lg shadow-primary/20 translate-x-1" 
+                  isProfileActive
+                    ? "bg-primary text-primary-foreground font-semibold shadow-lg shadow-primary/20 translate-x-1 ring-1 ring-primary/25 dark:bg-accent dark:text-foreground dark:hover:bg-secondary dark:ring-border dark:shadow-[0_12px_24px_-16px_rgba(0,0,0,0.8)]"
                     : "text-muted-foreground hover:text-foreground hover:bg-accent"
                 )}
               >
                 <div className="flex items-center justify-center w-5">
-                  <Avatar className="size-6 shadow-sm ring-1 ring-border/50">
+                  <Avatar className={cn("size-6 shadow-sm ring-1", isProfileActive ? "ring-white/20" : "ring-border/50")}>
                     <AvatarImage src={user?.imageUrl} />
-                    <AvatarFallback className={cn("text-[10px] font-bold", pathname === "/dashboard/profile" ? "bg-white/20 text-white" : "bg-primary/10 text-primary")}>
+                    <AvatarFallback className={cn("text-[10px] font-bold", isProfileActive ? "bg-white/20 text-white" : "bg-primary/10 text-primary")}>
                       {user?.firstName?.[0] || "U"}
                     </AvatarFallback>
                   </Avatar>

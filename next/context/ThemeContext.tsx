@@ -41,6 +41,32 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setTheme(theme === "light" ? "dark" : "light");
   };
 
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target?.isContentEditable;
+
+      if (isTypingTarget || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+
+      if (event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        setTheme(theme === "light" ? "dark" : "light");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeydown);
+    };
+  }, [theme]);
+
   if (!mounted) {
     return <>{children}</>;
   }

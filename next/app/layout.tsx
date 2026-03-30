@@ -1,21 +1,21 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Public_Sans } from "next/font/google";
+import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { UserProvider } from "@/context/UserContext";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
-const publicSans = Public_Sans({ subsets: ["latin"], variable: "--font-sans" });
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const fontSans = IBM_Plex_Sans({
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-sans",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const fontMono = IBM_Plex_Mono({
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-mono",
 });
 
 export const metadata: Metadata = {
@@ -35,15 +35,15 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="en" className={publicSans.variable} suppressHydrationWarning>
-        <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-        >
+      <html
+        lang="en"
+        className={`${fontSans.variable} ${fontMono.variable}`}
+        suppressHydrationWarning
+      >
+        <body className="font-sans antialiased">
           <ThemeProvider>
             <UserProvider>
-              <TooltipProvider>
-                {children}
-              </TooltipProvider>
+              <TooltipProvider>{children}</TooltipProvider>
             </UserProvider>
           </ThemeProvider>
         </body>

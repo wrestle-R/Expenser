@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { connectDB } from "@/lib/mongodb";
-import Workflow from "@/lib/models/Workflow";
+import {
+  mapWorkflowRow,
+  normalizeNumber,
+  sql,
+  type WorkflowRow,
+} from "@/lib/db";
 
-// GET: Fetch all workflows for the authenticated user
 export async function GET() {
   try {
     const { userId } = await auth();
@@ -13,11 +16,18 @@ export async function GET() {
 
     console.log("[API /workflows GET] userId:", userId);
 
-    await connectDB();
-    const workflows = await Workflow.find({ userId }).sort({ createdAt: -1 });
+    const workflows = await sql<WorkflowRow[]>`
+      select *
+      from workflows
+      where user_id = ${userId}
+      order by created_at desc
+    `;
 
     console.log("[API /workflows GET] Found", workflows.length, "workflows");
-    return NextResponse.json({ workflows }, { status: 200 });
+    return NextResponse.json(
+      { workflows: workflows.map(mapWorkflowRow) },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("[API /workflows GET] Error:", error);
     return NextResponse.json(
@@ -27,7 +37,6 @@ export async function GET() {
   }
 }
 
-// POST: Create a new workflow
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
@@ -63,21 +72,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    await connectDB();
+    const insertedWorkflows = await sql<WorkflowRow[]>`
+      insert into workflows (
+        user_id,
+        name,
+        type,
+        amount,
+        description,
+        category,
+        payment_method,
+        split_amount
+      )
+      values (
+        ${userId},
+        ${name},
+        ${type},
+        ${normalizeNumber(amount, 0)},
+        ${description},
+        ${category || "General"},
+        ${paymentMethod},
+        ${normalizeNumber(splitAmount, 0)}
+      )
+      returning *
+    `;
 
-    const workflow = await Workflow.create({
-      userId,
-      name,
-      type,
-      amount: amount || 0,
-      description,
-      category: category || "General",
-      paymentMethod,
-      splitAmount: splitAmount || 0,
-    });
-
-    console.log("[API /workflows POST] Workflow created:", workflow._id);
-    return NextResponse.json({ workflow }, { status: 201 });
+    const workflow = insertedWorkflows[0];
+    console.log("[API /workflows POST] Workflow created:", workflow.id);
+    return NextResponse.json(
+      { workflow: mapWorkflowRow(workflow) },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("[API /workflows POST] Error:", error);
     return NextResponse.json(
@@ -87,7 +111,6 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// DELETE: Delete a workflow by ID
 export async function DELETE(req: NextRequest) {
   try {
     const { userId } = await auth();
@@ -107,8 +130,13 @@ export async function DELETE(req: NextRequest) {
 
     console.log("[API /workflows DELETE] Deleting workflow:", id);
 
-    await connectDB();
-    const workflow = await Workflow.findOneAndDelete({ _id: id, userId });
+    const deletedWorkflows = await sql<WorkflowRow[]>`
+      delete from workflows
+      where id = ${id} and user_id = ${userId}
+      returning *
+    `;
+
+    const workflow = deletedWorkflows[0];
 
     if (!workflow) {
       return NextResponse.json(
@@ -131,7 +159,6 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
-// PUT: Update a workflow by ID
 export async function PUT(req: NextRequest) {
   try {
     const { userId } = await auth();
@@ -162,20 +189,21 @@ export async function PUT(req: NextRequest) {
 
     console.log("[API /workflows PUT] Updating workflow:", id);
 
-    await connectDB();
-    const workflow = await Workflow.findOneAndUpdate(
-      { _id: id, userId },
-      {
-        name,
-        type,
-        amount: amount || 0,
-        description,
-        category: category || "General",
-        paymentMethod,
-        splitAmount: splitAmount || 0,
-      },
-      { new: true }
-    );
+    const updatedWorkflows = await sql<WorkflowRow[]>`
+      update workflows
+      set
+        name = ${name},
+        type = ${type},
+        amount = ${normalizeNumber(amount, 0)},
+        description = ${description},
+        category = ${category || "General"},
+        payment_method = ${paymentMethod},
+        split_amount = ${normalizeNumber(splitAmount, 0)}
+      where id = ${id} and user_id = ${userId}
+      returning *
+    `;
+
+    const workflow = updatedWorkflows[0];
 
     if (!workflow) {
       return NextResponse.json(
@@ -185,7 +213,10 @@ export async function PUT(req: NextRequest) {
     }
 
     console.log("[API /workflows PUT] Workflow updated successfully");
-    return NextResponse.json({ workflow }, { status: 200 });
+    return NextResponse.json(
+      { workflow: mapWorkflowRow(workflow) },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("[API /workflows PUT] Error:", error);
     return NextResponse.json(

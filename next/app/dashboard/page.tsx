@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useUserContext } from "@/context/UserContext";
+import { useStealthMode } from "@/context/StealthContext";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +15,7 @@ import {
   Plus,
 } from "lucide-react";
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 
 interface Transaction {
   _id: string;
@@ -48,7 +50,8 @@ const methodConfig = {
 
 export default function DashboardPage() {
   const { profile, loading } = useUserContext();
-  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
+  const { isStealthMode } = useStealthMode();
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loadingTxns, setLoadingTxns] = useState(true);
 
   useEffect(() => {
@@ -57,7 +60,7 @@ export default function DashboardPage() {
         const res = await fetch("/api/transactions");
         if (res.ok) {
           const data = await res.json();
-          setRecentTransactions(data.transactions.slice(0, 5));
+          setTransactions(data.transactions);
           console.log("[Dashboard] Fetched", data.transactions.length, "transactions");
         } else {
           const data = await res.json().catch(() => null);
@@ -90,6 +93,13 @@ export default function DashboardPage() {
     (profile.paymentMethods.includes("cash") ? profile.balances.cash : 0) +
     (profile.paymentMethods.includes("splitwise") ? profile.balances.splitwise : 0);
 
+  const recentTransactions = transactions.slice(0, 5);
+
+  const numberClassName = cn(
+    "transition-all duration-200",
+    isStealthMode && "blur-sm select-none"
+  );
+
   return (
     <div className="space-y-6">
       {/* Greeting */}
@@ -117,7 +127,7 @@ export default function DashboardPage() {
             </p>
             <p className="text-4xl font-bold mt-1 flex items-center gap-1">
               <IndianRupee className="size-8" />
-              {totalBalance.toLocaleString("en-IN")}
+              <span className={numberClassName}>{totalBalance.toLocaleString("en-IN")}</span>
             </p>
           </div>
           <div className="text-right">
@@ -144,7 +154,7 @@ export default function DashboardPage() {
               </div>
               <p className="text-2xl font-bold flex items-center gap-0.5">
                 <IndianRupee className="size-5" />
-                {balance.toLocaleString("en-IN")}
+                <span className={numberClassName}>{balance.toLocaleString("en-IN")}</span>
               </p>
             </Card>
           );
@@ -216,7 +226,7 @@ export default function DashboardPage() {
                     >
                       {txn.type === "income" ? "+" : "-"}
                       <IndianRupee className="size-3.5" />
-                      {txn.amount.toLocaleString("en-IN")}
+                      <span className={numberClassName}>{txn.amount.toLocaleString("en-IN")}</span>
                     </p>
                   </div>
                 );

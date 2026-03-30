@@ -12,13 +12,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTheme } from "../../context/ThemeContext";
+import { useStealthMode } from "../../context/StealthContext";
 import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { formatCurrency, formatDate } from "../../lib/utils";
-import SyncStatusBanner from "../../components/SyncStatusBanner";
 
 export default function HomeScreen() {
   const { isDark } = useTheme();
+  const { isStealthMode, toggleStealthMode } = useStealthMode();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -27,7 +28,6 @@ export default function HomeScreen() {
     transactions,
     workflows,
     loading,
-    syncing,
     isOnline,
     manualRefresh,
     getBalance,
@@ -92,17 +92,16 @@ export default function HomeScreen() {
           Expenser
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <TouchableOpacity
-            onPress={onRefresh}
-            disabled={refreshing || syncing}
-            style={{ padding: 4 }}
-          >
-            <Ionicons
-              name="refresh"
-              size={20}
-              color={syncing ? colors.textMuted : colors.text}
-            />
-          </TouchableOpacity>
+            <TouchableOpacity
+              onPress={toggleStealthMode}
+              style={{ padding: 4 }}
+            >
+              <Ionicons
+                name={isStealthMode ? "eye-off" : "eye"}
+                size={20}
+                color={colors.text}
+              />
+            </TouchableOpacity>
           <View
             style={{
               width: 10,
@@ -125,8 +124,6 @@ export default function HomeScreen() {
           />
         }
       >
-        <SyncStatusBanner />
-
         {/* Greeting */}
         <View style={{ marginBottom: 24 }}>
           <Text
@@ -169,7 +166,7 @@ export default function HomeScreen() {
             </Text>
             <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
               <Text style={{ fontSize: 32, fontWeight: "bold", color: colors.text }}>
-                ₹{formatCurrency(totalBalance)}
+                {isStealthMode ? "₹••••••" : `₹${formatCurrency(totalBalance)}`}
               </Text>
             </View>
           </View>
@@ -264,7 +261,7 @@ export default function HomeScreen() {
                 </Text>
               </View>
               <Text style={{ fontSize: 20, fontWeight: "bold", color: colors.text }}>
-                ₹{formatCurrency(balance)}
+                {isStealthMode ? "₹••••••" : `₹${formatCurrency(balance)}`}
               </Text>
             </View>
           );
@@ -348,7 +345,7 @@ export default function HomeScreen() {
                     }}
                   >
                     {workflow.type === "income" ? "+" : "-"}₹
-                    {formatCurrency(workflow.amount)}
+                    {isStealthMode ? "••••••" : formatCurrency(workflow.amount)}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -452,7 +449,7 @@ export default function HomeScreen() {
                     color: txn.type === "income" ? colors.success : colors.error,
                   }}
                 >
-                  {txn.type === "income" ? "+" : "-"}₹{formatCurrency(txn.amount)}
+                  {txn.type === "income" ? "+" : "-"}₹{isStealthMode ? "••••••" : formatCurrency(txn.amount)}
                 </Text>
               </View>
             ))

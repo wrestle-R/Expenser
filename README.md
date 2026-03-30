@@ -41,7 +41,7 @@ Expenser helps you track your income and expenses across multiple payment method
 - Hosted at: **https://expenser-rdp.vercel.app**
 
 ### Mobile
-- Download APK: **application-595887fa-39a9-4570-8dfc-e9e318ed8008.apkq**
+- Download the latest version: **https://github.com/wrestle-R/Expenser/releases**
 
 ## Tech Stack
 

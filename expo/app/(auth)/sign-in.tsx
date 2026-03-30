@@ -35,7 +35,7 @@ export default function SignInScreen() {
       console.log("[SignIn] User is signed in, navigating to tabs...");
       router.replace("/(tabs)");
     }
-  }, [isSignedIn]);
+  }, [isSignedIn, router]);
 
   const handleSignIn = async () => {
     if (!isLoaded) return;

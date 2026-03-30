@@ -9,10 +9,12 @@ import "react-native-reanimated";
 import "../global.css";
 
 import { ThemeProvider, useTheme } from "../context/ThemeContext";
+import { StealthProvider } from "../context/StealthContext";
 import { UserProvider } from "../context/UserContext";
 import { ToastProvider } from "../context/ToastContext";
 import { ENV } from "../env";
 import { Colors } from "../constants/theme";
+import { syncService } from "../lib/sync";
 
 const AUTH_LOAD_TIMEOUT_MS = 5000;
 
@@ -58,23 +60,44 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isLoaded || authTimedOut) return;
 
-    const inAuthGroup = segments[0] === "(auth)";
+    let cancelled = false;
 
-    console.log("[AuthGuard] isSignedIn:", isSignedIn, "inAuthGroup:", inAuthGroup, "segments:", segments);
+    const handleRouting = async () => {
+      const inAuthGroup = segments[0] === "(auth)";
 
-    if (isSignedIn && inAuthGroup) {
-      // Signed in but on auth screen -> go to tabs
-      console.log("[AuthGuard] Redirecting signed-in user to (tabs)");
-      setTimeout(() => {
-        router.replace("/(tabs)");
-      }, 100);
-    } else if (!isSignedIn && !inAuthGroup) {
-      // Not signed in and not on auth screen -> go to sign-in
-      console.log("[AuthGuard] Redirecting unauthenticated user to sign-in");
-      setTimeout(() => {
-        router.replace("/(auth)/sign-in");
-      }, 100);
-    }
+      console.log("[AuthGuard] isSignedIn:", isSignedIn, "inAuthGroup:", inAuthGroup, "segments:", segments);
+
+      if (isSignedIn && inAuthGroup) {
+        console.log("[AuthGuard] Redirecting signed-in user to (tabs)");
+        setTimeout(() => {
+          if (!cancelled) {
+            router.replace("/(tabs)");
+          }
+        }, 100);
+        return;
+      }
+
+      if (!isSignedIn && !inAuthGroup) {
+        const online = await syncService.isOnline();
+        if (!online) {
+          console.log("[AuthGuard] Offline with unknown auth state, keeping current screen");
+          return;
+        }
+
+        console.log("[AuthGuard] Redirecting unauthenticated user to sign-in");
+        setTimeout(() => {
+          if (!cancelled) {
+            router.replace("/(auth)/sign-in");
+          }
+        }, 100);
+      }
+    };
+
+    void handleRouting();
+
+    return () => {
+      cancelled = true;
+    };
   }, [isSignedIn, isLoaded, segments, authTimedOut, router]);
 
   if (!isLoaded && !authTimedOut) {
@@ -165,7 +188,9 @@ export default function RootLayout() {
   return (
     <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
       <ThemeProvider>
-        <InnerLayout />
+        <StealthProvider>
+          <InnerLayout />
+        </StealthProvider>
       </ThemeProvider>
     </ClerkProvider>
   );

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useUserContext } from "@/context/UserContext";
+import { useStealthMode } from "@/context/StealthContext";
 import { useSearchParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -101,6 +102,7 @@ const MAIN_CATEGORIES = [
 
 export default function TransactionsPage() {
   const { profile, refreshProfile } = useUserContext();
+  const { isStealthMode } = useStealthMode();
   const searchParams = useSearchParams();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
@@ -136,6 +138,11 @@ export default function TransactionsPage() {
   const [editIsSplit, setEditIsSplit] = useState(false);
   const [editSplitAmount, setEditSplitAmount] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+
+  const numberClassName = cn(
+    "transition-all duration-200",
+    isStealthMode && "blur-sm select-none"
+  );
 
   const fetchTransactions = useCallback(async () => {
     try {
@@ -551,7 +558,7 @@ export default function TransactionsPage() {
                         <div className="space-y-1.5">
                           <Label className="text-xs">Net expense</Label>
                           <div className="h-10 px-3 flex items-center font-bold text-sm bg-background/50 rounded-md border">
-                            ₹{(Number(newAmount || 0) - Number(splitAmount || 0)).toFixed(2)}
+                            <span className={numberClassName}>₹{(Number(newAmount || 0) - Number(splitAmount || 0)).toFixed(2)}</span>
                           </div>
                         </div>
                       </div>
@@ -649,12 +656,12 @@ export default function TransactionsPage() {
                         >
                           {txn.type === "income" ? "+" : "-"}
                           <IndianRupee className="size-3.5" />
-                          {txn.amount.toLocaleString("en-IN")}
+                          <span className={numberClassName}>{txn.amount.toLocaleString("en-IN")}</span>
                         </p>
                         {(txn.splitAmount || 0) > 0 && (
                             <p className="text-[10px] text-orange-500 flex items-center justify-end gap-1">
                                 <ArrowRightLeft className="size-2.5" />
-                                Gets back ₹{txn.splitAmount}
+                                Gets back <span className={numberClassName}>₹{txn.splitAmount}</span>
                             </p>
                         )}
                     </div>
@@ -859,7 +866,7 @@ export default function TransactionsPage() {
                       <div className="space-y-1.5">
                         <Label className="text-xs">Net expense</Label>
                         <div className="h-10 px-3 flex items-center font-bold text-sm bg-background/50 rounded-md border">
-                          ₹{(Number(editAmount || 0) - Number(editSplitAmount || 0)).toFixed(2)}
+                          <span className={numberClassName}>₹{(Number(editAmount || 0) - Number(editSplitAmount || 0)).toFixed(2)}</span>
                         </div>
                       </div>
                     </div>

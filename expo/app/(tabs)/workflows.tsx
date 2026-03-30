@@ -13,14 +13,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTheme } from "../../context/ThemeContext";
+import { useStealthMode } from "../../context/StealthContext";
 import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { formatCurrency } from "../../lib/utils";
 import { IWorkflow } from "../../lib/types";
-import SyncStatusBanner from "../../components/SyncStatusBanner";
 
 export default function WorkflowsScreen() {
   const { isDark } = useTheme();
+  const { isStealthMode, toggleStealthMode } = useStealthMode();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -29,7 +30,6 @@ export default function WorkflowsScreen() {
     loading,
     deleteWorkflow,
     isOnline,
-    syncing,
     manualRefresh,
   } = useUserContext();
 
@@ -118,14 +118,13 @@ export default function WorkflowsScreen() {
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <TouchableOpacity
-            onPress={onRefresh}
-            disabled={refreshing || syncing}
+            onPress={toggleStealthMode}
             style={{ padding: 4 }}
           >
             <Ionicons
-              name="refresh"
+              name={isStealthMode ? "eye-off" : "eye"}
               size={20}
-              color={syncing ? colors.textMuted : colors.text}
+              color={colors.text}
             />
           </TouchableOpacity>
           <View
@@ -172,9 +171,6 @@ export default function WorkflowsScreen() {
           />
         }
       >
-        {/* Sync Status Banner */}
-        <SyncStatusBanner />
-
         {workflows.length === 0 ? (
           <View
             style={{
@@ -378,7 +374,7 @@ export default function WorkflowsScreen() {
                                 color: colors.splitwise,
                               }}
                             >
-                              Split: ₹{formatCurrency(workflow.splitAmount)}
+                              Split: ₹{isStealthMode ? "••••••" : formatCurrency(workflow.splitAmount)}
                             </Text>
                           </View>
                         )}
@@ -443,7 +439,7 @@ export default function WorkflowsScreen() {
                           }}
                         >
                           {workflow.type === "income" ? "+" : "-"}₹
-                          {formatCurrency(workflow.amount)}
+                          {isStealthMode ? "••••••" : formatCurrency(workflow.amount)}
                         </Text>
                       )}
                       <TouchableOpacity

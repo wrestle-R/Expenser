@@ -111,7 +111,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [localBalances, setLocalBalancesState] = useState<ILocalBalance | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [isOnline, setIsOnline] = useState(true);
+  const [isOnline, setIsOnline] = useState(syncService.isOnlineSync());
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSyncTime, setLastSyncTimeState] = useState<number | null>(null);
   const [authTimedOut, setAuthTimedOut] = useState(false);
@@ -415,7 +415,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   const addTransaction = useCallback(
     async (payload: CreateTransactionPayload) => {
-      const online = await syncService.isOnline();
+      const online = syncService.isOnlineSync();
       const clientRequestId = generateTempId();
       const now = payload.date || new Date().toISOString();
 
@@ -444,13 +444,27 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       );
       setLocalBalancesState(newBalances);
 
-      if (online) {
+      await addPendingTransaction(tempTransaction);
+      setPendingCount((prev) => {
+        notificationService.onPendingItemAdded(prev + 1);
+        return prev + 1;
+      });
+
+      if (!online) {
+        return;
+      }
+
+      void (async () => {
         try {
           const created = await api.createTransaction({
             ...payload,
             date: now,
             clientRequestId,
           });
+
+          await removePendingTransaction(tempTransaction._id);
+          setPendingCount((prev) => Math.max(0, prev - 1));
+
           const storedTransactions = await getStoredTransactions();
           await setStoredTransactions(
             dedupeTransactions([created, ...storedTransactions])
@@ -460,18 +474,15 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               prev.map((t) => (t._id === tempTransaction._id ? created : t))
             )
           );
-          await refreshProfile();
-          return;
-        } catch (error) {
-          console.log("[UserContext] Failed immediate transaction sync, queueing:", error);
-        }
-      }
 
-      await addPendingTransaction(tempTransaction);
-      setPendingCount((prev) => {
-        notificationService.onPendingItemAdded(prev + 1);
-        return prev + 1;
-      });
+          void refreshProfile();
+        } catch (error) {
+          console.log(
+            "[UserContext] Failed immediate transaction sync, will retry later:",
+            error
+          );
+        }
+      })();
     },
     [profile, refreshProfile]
   );

@@ -11,8 +11,9 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, ArrowRightLeft, LogOut, Moon, Sun, Wallet, Workflow } from "lucide-react";
+import { LayoutDashboard, ArrowRightLeft, CalendarDays, Eye, EyeOff, LogOut, Moon, Sun, Wallet, Workflow } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import { useStealthMode } from "@/context/StealthContext";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useRouter, usePathname } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -36,6 +37,11 @@ const navItems = [
     url: "/dashboard/workflows",
     icon: Workflow,
   },
+  {
+    title: "Calendar",
+    url: "/dashboard/calendar",
+    icon: CalendarDays,
+  },
 ];
 
 export function AppSidebar() {
@@ -44,6 +50,7 @@ export function AppSidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
+  const { isStealthMode, toggleStealthMode } = useStealthMode();
 
   const handleSignOut = async () => {
     console.log("[AppSidebar] Signing out...");
@@ -111,6 +118,19 @@ export function AppSidebar() {
       <SidebarFooter className="border-t p-3 bg-muted/40">
         <SidebarMenu className="gap-2 px-1">
           {/* Theme Toggle */}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              onClick={toggleStealthMode}
+              tooltip={isStealthMode ? "Show Numbers" : "Hide Numbers"}
+              className="w-full group-data-[collapsible=icon]:justify-center transition-all duration-300 hover:bg-accent hover:text-foreground"
+            >
+              <div className="flex items-center justify-center w-5">
+                {isStealthMode ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
+              </div>
+              <span className="group-data-[collapsible=icon]:hidden ml-3 font-medium">Stealth Toggle</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={toggleTheme}

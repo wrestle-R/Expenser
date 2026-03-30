@@ -5,40 +5,40 @@
 
 import { Platform } from "react-native";
 
-// Primary colors matching the website
-const tintColorLight = "#1a1a2e"; // Primary dark
-const tintColorDark = "#e5e5f0"; // Primary light
+// Neutral palette aligned with the website theme variables
+const tintColorLight = "#666666";
+const tintColorDark = "#d1d1d1";
 
 export const Colors = {
   light: {
     // Base colors
-    text: "#1a1a2e",
-    textMuted: "#6b6b80",
-    background: "#ffffff",
-    backgroundSecondary: "#f5f5f7",
+    text: "#434343",
+    textMuted: "#737373",
+    background: "#f4f4f5",
+    backgroundSecondary: "#ececec",
     tint: tintColorLight,
 
     // Card colors
-    card: "#ffffff",
-    cardForeground: "#1a1a2e",
+    card: "#fafafa",
+    cardForeground: "#434343",
 
     // UI elements
-    border: "#e5e5ea",
-    input: "#e5e5ea",
-    icon: "#6b6b80",
-    tabIconDefault: "#6b6b80",
+    border: "#dadada",
+    input: "#e7e7e7",
+    icon: "#737373",
+    tabIconDefault: "#737373",
     tabIconSelected: tintColorLight,
 
     // Semantic colors
-    primary: "#1a1a2e",
+    primary: "#666666",
     primaryForeground: "#ffffff",
-    secondary: "#f5f5f7",
-    secondaryForeground: "#1a1a2e",
-    accent: "#1a1a2e",
+    secondary: "#e7e7e7",
+    secondaryForeground: "#434343",
+    accent: "#cecece",
     accentForeground: "#ffffff",
     destructive: "#ef4444",
-    muted: "#f5f5f7",
-    mutedForeground: "#6b6b80",
+    muted: "#ececec",
+    mutedForeground: "#737373",
 
     // Status colors
     success: "#22c55e",
@@ -60,33 +60,33 @@ export const Colors = {
   },
   dark: {
     // Base colors
-    text: "#f5f5f7",
-    textMuted: "#a1a1aa",
-    background: "#1a1a2e",
-    backgroundSecondary: "#252540",
+    text: "#ebebeb",
+    textMuted: "#adadad",
+    background: "#292929",
+    backgroundSecondary: "#333333",
     tint: tintColorDark,
 
     // Card colors
-    card: "#252540",
-    cardForeground: "#f5f5f7",
+    card: "#303030",
+    cardForeground: "#ebebeb",
 
     // UI elements
-    border: "rgba(255, 255, 255, 0.1)",
-    input: "rgba(255, 255, 255, 0.15)",
-    icon: "#a1a1aa",
-    tabIconDefault: "#a1a1aa",
+    border: "#4a4a4a",
+    input: "#454545",
+    icon: "#adadad",
+    tabIconDefault: "#adadad",
     tabIconSelected: tintColorDark,
 
     // Semantic colors
-    primary: "#e5e5f0",
-    primaryForeground: "#1a1a2e",
-    secondary: "#3a3a50",
-    secondaryForeground: "#f5f5f7",
-    accent: "#e5e5f0",
-    accentForeground: "#1a1a2e",
+    primary: "#d1d1d1",
+    primaryForeground: "#292929",
+    secondary: "#3f3f3f",
+    secondaryForeground: "#ebebeb",
+    accent: "#555555",
+    accentForeground: "#ebebeb",
     destructive: "#f87171",
-    muted: "#3a3a50",
-    mutedForeground: "#a1a1aa",
+    muted: "#3a3a3a",
+    mutedForeground: "#adadad",
 
     // Status colors
     success: "#4ade80",

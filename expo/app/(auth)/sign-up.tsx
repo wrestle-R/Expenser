@@ -40,7 +40,7 @@ export default function SignUpScreen() {
       console.log("[SignUp] User is signed in, navigating to tabs...");
       router.replace("/(tabs)");
     }
-  }, [isSignedIn]);
+  }, [isSignedIn, router]);
 
   const handleSignUp = async () => {
     if (!isLoaded) return;
@@ -238,7 +238,7 @@ export default function SignUpScreen() {
                 try {
                   await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
                   Alert.alert("Sent", "New code sent to " + email);
-                } catch (err) {
+                } catch {
                   Alert.alert("Error", "Failed to resend code");
                 }
               }}

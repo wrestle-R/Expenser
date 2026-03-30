@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useUserContext } from "@/context/UserContext";
+import { useStealthMode } from "@/context/StealthContext";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +79,7 @@ interface IWorkflow {
 
 export default function WorkflowsPage() {
   const { profile } = useUserContext();
+  const { isStealthMode } = useStealthMode();
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -93,6 +95,11 @@ export default function WorkflowsPage() {
   const [isSplit, setIsSplit] = useState(false);
   const [splitAmount, setSplitAmount] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const numberClassName = cn(
+    "transition-all duration-200",
+    isStealthMode && "blur-sm select-none"
+  );
 
   const fetchWorkflows = useCallback(async () => {
     try {
@@ -411,12 +418,12 @@ export default function WorkflowsPage() {
                         </Badge>
                         {wf.amount && wf.amount > 0 && (
                           <Badge variant="outline" className="text-xs">
-                            ₹{wf.amount}
+                            <span className={numberClassName}>₹{wf.amount}</span>
                           </Badge>
                         )}
                         {wf.splitAmount && wf.splitAmount > 0 && (
                           <Badge variant="outline" className="text-xs text-orange-500">
-                            Split ₹{wf.splitAmount}
+                            Split <span className={numberClassName}>₹{wf.splitAmount}</span>
                           </Badge>
                         )}
                         <span className="text-xs text-muted-foreground">

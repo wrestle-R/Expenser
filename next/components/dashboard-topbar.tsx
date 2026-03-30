@@ -15,6 +15,7 @@ import { usePathname } from "next/navigation";
 const breadcrumbMap: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/dashboard/transactions": "Transactions",
+  "/dashboard/calendar": "Calendar",
   "/dashboard/profile": "Profile",
 };
 

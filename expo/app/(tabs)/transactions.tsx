@@ -18,11 +18,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTheme } from "../../context/ThemeContext";
+import { useStealthMode } from "../../context/StealthContext";
 import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig, CATEGORIES } from "../../constants/theme";
 import { formatCurrency, formatDate } from "../../lib/utils";
 import { ITransaction, PaymentMethod, TransactionType } from "../../lib/types";
-import SyncStatusBanner from "../../components/SyncStatusBanner";
 import ConfirmModal from "../../components/ConfirmModal";
 
 const PAGE_SIZE = 10;
@@ -35,6 +35,7 @@ const paymentMethods: { id: PaymentMethod; label: string; icon: keyof typeof Ion
 
 export default function TransactionsScreen() {
   const { isDark } = useTheme();
+  const { isStealthMode, toggleStealthMode } = useStealthMode();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -45,7 +46,6 @@ export default function TransactionsScreen() {
     deleteTransaction,
     updateTransaction,
     isOnline,
-    syncing,
     manualRefresh,
   } = useUserContext();
 
@@ -177,14 +177,13 @@ export default function TransactionsScreen() {
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <TouchableOpacity
-            onPress={onRefresh}
-            disabled={refreshing || syncing}
+            onPress={toggleStealthMode}
             style={{ padding: 4 }}
           >
             <Ionicons
-              name="refresh"
+              name={isStealthMode ? "eye-off" : "eye"}
               size={20}
-              color={syncing ? colors.textMuted : colors.text}
+              color={colors.text}
             />
           </TouchableOpacity>
           <View
@@ -231,9 +230,6 @@ export default function TransactionsScreen() {
           />
         }
       >
-        {/* Sync Status Banner */}
-        <SyncStatusBanner />
-
         {transactions.length === 0 ? (
           <View
             style={{
@@ -383,7 +379,7 @@ export default function TransactionsScreen() {
                     }}
                   >
                     {txn.type === "income" ? "+" : "-"}₹
-                    {formatCurrency(txn.amount)}
+                    {isStealthMode ? "••••••" : formatCurrency(txn.amount)}
                   </Text>
                   {txn.splitAmount && txn.splitAmount > 0 && (
                     <Text
@@ -393,7 +389,7 @@ export default function TransactionsScreen() {
                         marginTop: 2,
                       }}
                     >
-                      Split: ₹{formatCurrency(txn.splitAmount)}
+                      Split: ₹{isStealthMode ? "••••••" : formatCurrency(txn.splitAmount)}
                     </Text>
                   )}
                 </View>

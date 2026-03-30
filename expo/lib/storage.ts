@@ -17,6 +17,7 @@ const KEYS = {
   PENDING_PROFILE: "@expenser_pending_profile",
   LAST_SYNC: "@expenser_last_sync",
   THEME: "@expenser_theme",
+  STEALTH_MODE: "@expenser_stealth_mode",
   LOCAL_BALANCES: "@expenser_local_balances",
 };
 
@@ -279,6 +280,25 @@ export async function setStoredTheme(theme: "light" | "dark"): Promise<void> {
     await AsyncStorage.setItem(KEYS.THEME, theme);
   } catch (error) {
     console.error("[Storage] Error setting theme:", error);
+  }
+}
+
+// === Stealth Mode ===
+export async function getStoredStealthMode(): Promise<boolean> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.STEALTH_MODE);
+    return data === "true";
+  } catch (error) {
+    console.error("[Storage] Error getting stealth mode:", error);
+    return false;
+  }
+}
+
+export async function setStoredStealthMode(enabled: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(KEYS.STEALTH_MODE, String(enabled));
+  } catch (error) {
+    console.error("[Storage] Error setting stealth mode:", error);
   }
 }
 

@@ -13,10 +13,121 @@ import {
   type UserRow,
 } from "@/lib/db";
 
+const PAYMENT_METHODS: PaymentMethod[] = ["bank", "cash", "splitwise"];
+const TRANSACTION_TYPES: TransactionType[] = ["income", "expense"];
+const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+function isPaymentMethod(value: unknown): value is PaymentMethod {
+  return PAYMENT_METHODS.includes(value as PaymentMethod);
+}
+
+function isTransactionType(value: unknown): value is TransactionType {
+  return TRANSACTION_TYPES.includes(value as TransactionType);
+}
+
+function sanitizeText(
+  value: unknown,
+  {
+    field,
+    maxLength,
+    fallback,
+    required = false,
+  }: {
+    field: string;
+    maxLength: number;
+    fallback?: string;
+    required?: boolean;
+  }
+) {
+  const normalized =
+    typeof value === "string" ? value.trim() : fallback ?? "";
+
+  if (!normalized) {
+    if (required) {
+      throw new Error(`${field} is required`);
+    }
+    return fallback ?? "";
+  }
+
+  if (normalized.length > maxLength) {
+    throw new Error(`${field} must be ${maxLength} characters or fewer`);
+  }
+
+  return normalized;
+}
+
+function normalizePositiveAmount(value: unknown, field: string) {
+  const amount = normalizeNumber(value, Number.NaN);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error(`${field} must be greater than 0`);
+  }
+
+  return amount;
+}
+
+function parseClientRequestId(value: unknown) {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  const normalized = sanitizeText(value, {
+    field: "clientRequestId",
+    maxLength: 128,
+    required: false,
+  });
+
+  if (!CLIENT_REQUEST_ID_PATTERN.test(normalized)) {
+    throw new Error(
+      "clientRequestId may only contain letters, numbers, hyphens, and underscores"
+    );
+  }
+
+  return normalized;
+}
+
+function parseTransactionInput(data: Record<string, unknown>) {
+  if (!isTransactionType(data.type)) {
+    throw new Error("Invalid transaction type");
+  }
+
+  if (!isPaymentMethod(data.paymentMethod)) {
+    throw new Error("Invalid payment method");
+  }
+
+  const amount = normalizePositiveAmount(data.amount, "amount");
+  const splitAmount = Math.max(0, normalizeNumber(data.splitAmount, 0));
+
+  if (data.type === "income" && splitAmount > 0) {
+    throw new Error("Income transactions cannot include a split amount");
+  }
+
+  if (data.type === "expense" && splitAmount >= amount) {
+    throw new Error("Split amount must be less than the total amount");
+  }
+
+  return {
+    type: data.type,
+    amount,
+    description: sanitizeText(data.description, {
+      field: "description",
+      maxLength: 200,
+      required: true,
+    }),
+    category: sanitizeText(data.category, {
+      field: "category",
+      maxLength: 80,
+      fallback: "General",
+    }),
+    paymentMethod: data.paymentMethod,
+    splitAmount,
+    date: normalizeDate(data.date),
+    clientRequestId: parseClientRequestId(data.clientRequestId),
+  };
+}
+
 export async function GET() {
   try {
     const { userId } = await auth();
-    console.log("[API /transactions GET] userId:", userId);
 
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -29,7 +140,6 @@ export async function GET() {
       order by date desc, created_at desc
     `;
 
-    console.log("[API /transactions GET] Found", transactions.length, "transactions");
     return NextResponse.json({
       transactions: transactions.map(mapTransactionRow),
     });
@@ -42,42 +152,80 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const { userId } = await auth();
-    console.log("[API /transactions POST] userId:", userId);
 
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const data = await req.json();
-    console.log("[API /transactions POST] Data:", data);
+    const data = (await req.json()) as Record<string, unknown>;
+    const payload = parseTransactionInput(data);
 
-    const createdTransaction = await sql.begin(async (tx) => {
+    const result = await sql.begin(async (tx) => {
       const trx = tx as unknown as typeof sql;
-      const insertedTransactions = (await trx`
-        insert into transactions (
-          clerk_id,
-          type,
-          amount,
-          description,
-          category,
-          payment_method,
-          split_amount,
-          date
-        )
-        values (
-          ${userId},
-          ${data.type as TransactionType},
-          ${normalizeNumber(data.amount)},
-          ${data.description},
-          ${data.category || "General"},
-          ${data.paymentMethod as PaymentMethod},
-          ${normalizeNumber(data.splitAmount, 0)},
-          ${normalizeDate(data.date)}
-        )
-        returning *
-      `) as TransactionRow[];
+      if (payload.clientRequestId) {
+        const existingTransactions = (await trx`
+          select *
+          from transactions
+          where clerk_id = ${userId}
+            and client_request_id = ${payload.clientRequestId}
+          limit 1
+        `) as TransactionRow[];
 
-      const transaction = insertedTransactions[0];
+        const existing = existingTransactions[0];
+        if (existing) {
+          return { transaction: existing, insertedNew: false };
+        }
+      }
+
+      let transaction: TransactionRow;
+
+      try {
+        const insertedTransactions = (await trx`
+          insert into transactions (
+            clerk_id,
+            client_request_id,
+            type,
+            amount,
+            description,
+            category,
+            payment_method,
+            split_amount,
+            date
+          )
+          values (
+            ${userId},
+            ${payload.clientRequestId},
+            ${payload.type},
+            ${payload.amount},
+            ${payload.description},
+            ${payload.category},
+            ${payload.paymentMethod},
+            ${payload.splitAmount},
+            ${payload.date}
+          )
+          returning *
+        `) as TransactionRow[];
+
+        transaction = insertedTransactions[0];
+      } catch (error: any) {
+        if (payload.clientRequestId && error?.code === "23505") {
+          const existingTransactions = (await trx`
+            select *
+            from transactions
+            where clerk_id = ${userId}
+              and client_request_id = ${payload.clientRequestId}
+            limit 1
+          `) as TransactionRow[];
+
+          const existing = existingTransactions[0];
+          if (existing) {
+            return { transaction: existing, insertedNew: false };
+          }
+        }
+
+        throw error;
+      }
+
       const users = (await trx`
         select *
         from users
@@ -107,17 +255,19 @@ export async function POST(req: Request) {
             balance_splitwise = ${balances.splitwise}
           where clerk_id = ${userId}
         `;
-        console.log("[API /transactions POST] Updated balances");
       }
 
-      return transaction;
+      return { transaction, insertedNew: true };
     });
 
-    console.log("[API /transactions POST] Created transaction:", createdTransaction.id);
     return NextResponse.json({
-      transaction: mapTransactionRow(createdTransaction),
-    });
+      transaction: mapTransactionRow(result.transaction),
+    }, { status: result.insertedNew ? 201 : 200 });
   } catch (error) {
+    if (error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
     console.error("[API /transactions POST] Error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
@@ -205,7 +355,6 @@ export async function DELETE(req: Request) {
 export async function PUT(req: Request) {
   try {
     const { userId } = await auth();
-    console.log("[API /transactions PUT] userId:", userId);
 
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -218,8 +367,7 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Transaction ID required" }, { status: 400 });
     }
 
-    const data = await req.json();
-    console.log("[API /transactions PUT] Data:", data);
+    const data = (await req.json()) as Record<string, unknown>;
 
     const updatedTransaction = await sql.begin(async (tx) => {
       const trx = tx as unknown as typeof sql;
@@ -235,19 +383,16 @@ export async function PUT(req: Request) {
         return null;
       }
 
-      const nextTransaction = {
-        type: (data.type ?? oldTransaction.type) as TransactionType,
-        amount: normalizeNumber(data.amount ?? oldTransaction.amount),
+      const nextTransaction = parseTransactionInput({
+        type: data.type ?? oldTransaction.type,
+        amount: data.amount ?? oldTransaction.amount,
         description: data.description ?? oldTransaction.description,
         category: data.category ?? oldTransaction.category,
-        paymentMethod: (data.paymentMethod ??
-          oldTransaction.payment_method) as PaymentMethod,
-        splitAmount: normalizeNumber(
-          data.splitAmount ?? oldTransaction.split_amount,
-          0
-        ),
-        date: normalizeDate(data.date ?? oldTransaction.date),
-      };
+        paymentMethod: data.paymentMethod ?? oldTransaction.payment_method,
+        splitAmount: data.splitAmount ?? oldTransaction.split_amount,
+        date: data.date ?? oldTransaction.date,
+        clientRequestId: oldTransaction.client_request_id,
+      });
 
       const users = (await trx`
         select *
@@ -280,7 +425,6 @@ export async function PUT(req: Request) {
             balance_splitwise = ${balances.splitwise}
           where clerk_id = ${userId}
         `;
-        console.log("[API /transactions PUT] Updated balances");
       }
 
       const updatedTransactions = (await trx`
@@ -304,11 +448,14 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
     }
 
-    console.log("[API /transactions PUT] Updated transaction:", updatedTransaction.id);
     return NextResponse.json({
       transaction: mapTransactionRow(updatedTransaction),
     });
   } catch (error) {
+    if (error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
     console.error("[API /transactions PUT] Error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }

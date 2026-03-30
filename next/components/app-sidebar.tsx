@@ -11,7 +11,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, ArrowRightLeft, Wallet, LogOut, Moon, Sun, Workflow } from "lucide-react";
+import { LayoutDashboard, ArrowRightLeft, LogOut, Moon, Sun, Wallet, Workflow } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useRouter, usePathname } from "next/navigation";

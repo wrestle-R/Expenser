@@ -90,21 +90,26 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (!isLoaded && authTimedOut) {
     return (
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
         <View
           style={{
-            paddingHorizontal: 12,
-            paddingVertical: 10,
+            width: "100%",
+            maxWidth: 420,
+            paddingHorizontal: 16,
+            paddingVertical: 16,
             backgroundColor: "#EFF6FF",
-            borderBottomWidth: 1,
-            borderBottomColor: "#BFDBFE",
+            borderWidth: 1,
+            borderColor: "#BFDBFE",
+            borderRadius: 16,
           }}
         >
-          <Text style={{ color: "#1D4ED8", fontWeight: "600", fontSize: 12 }}>
-            Offline auth fallback active. Showing locally cached data.
+          <Text style={{ color: "#1D4ED8", fontWeight: "700", fontSize: 14 }}>
+            Sign-in check is taking longer than expected
+          </Text>
+          <Text style={{ color: "#1E3A8A", marginTop: 8, lineHeight: 20 }}>
+            For security, Expenser keeps your cached financial data locked until your session is verified. Please reconnect and try again.
           </Text>
         </View>
-        {children}
       </View>
     );
   }

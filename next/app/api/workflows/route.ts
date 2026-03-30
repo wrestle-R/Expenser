@@ -7,6 +7,89 @@ import {
   type WorkflowRow,
 } from "@/lib/db";
 
+const PAYMENT_METHODS = ["bank", "cash", "splitwise"] as const;
+const TRANSACTION_TYPES = ["income", "expense"] as const;
+
+function sanitizeText(
+  value: unknown,
+  {
+    field,
+    maxLength,
+    fallback,
+    required = false,
+  }: {
+    field: string;
+    maxLength: number;
+    fallback?: string;
+    required?: boolean;
+  }
+) {
+  const normalized =
+    typeof value === "string" ? value.trim() : fallback ?? "";
+
+  if (!normalized) {
+    if (required) {
+      throw new Error(`${field} is required`);
+    }
+    return fallback ?? "";
+  }
+
+  if (normalized.length > maxLength) {
+    throw new Error(`${field} must be ${maxLength} characters or fewer`);
+  }
+
+  return normalized;
+}
+
+function parseWorkflowInput(body: Record<string, unknown>) {
+  if (!TRANSACTION_TYPES.includes(body.type as (typeof TRANSACTION_TYPES)[number])) {
+    throw new Error("Invalid workflow type");
+  }
+
+  if (
+    !PAYMENT_METHODS.includes(
+      body.paymentMethod as (typeof PAYMENT_METHODS)[number]
+    )
+  ) {
+    throw new Error("Invalid payment method");
+  }
+
+  const amount = normalizeNumber(body.amount, Number.NaN);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("amount must be greater than 0");
+  }
+
+  const splitAmount = Math.max(0, normalizeNumber(body.splitAmount, 0));
+  if (body.type === "income" && splitAmount > 0) {
+    throw new Error("Income workflows cannot include a split amount");
+  }
+  if (body.type === "expense" && splitAmount >= amount) {
+    throw new Error("Split amount must be less than the total amount");
+  }
+
+  return {
+    name: sanitizeText(body.name, {
+      field: "name",
+      maxLength: 120,
+      required: true,
+    }),
+    type: body.type as "income" | "expense",
+    amount,
+    description: sanitizeText(body.description, {
+      field: "description",
+      maxLength: 200,
+      required: true,
+    }),
+    category: sanitizeText(body.category, {
+      field: "category",
+      maxLength: 80,
+      fallback: "General",
+    }),
+    paymentMethod: body.paymentMethod as "bank" | "cash" | "splitwise",
+    splitAmount,
+  };
+}
+
 export async function GET() {
   try {
     const { userId } = await auth();
@@ -14,16 +97,12 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    console.log("[API /workflows GET] userId:", userId);
-
     const workflows = await sql<WorkflowRow[]>`
       select *
       from workflows
       where user_id = ${userId}
       order by created_at desc
     `;
-
-    console.log("[API /workflows GET] Found", workflows.length, "workflows");
     return NextResponse.json(
       { workflows: workflows.map(mapWorkflowRow) },
       { status: 200 }
@@ -44,33 +123,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await req.json();
-    const {
-      name,
-      type,
-      amount,
-      description,
-      category,
-      paymentMethod,
-      splitAmount,
-    } = body;
-
-    console.log("[API /workflows POST] Creating workflow:", {
-      userId,
-      name,
-      type,
-      amount,
-      category,
-      paymentMethod,
-      splitAmount,
-    });
-
-    if (!name || !type || !description || !paymentMethod) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
-    }
+    const payload = parseWorkflowInput(
+      (await req.json()) as Record<string, unknown>
+    );
 
     const insertedWorkflows = await sql<WorkflowRow[]>`
       insert into workflows (
@@ -85,24 +140,27 @@ export async function POST(req: NextRequest) {
       )
       values (
         ${userId},
-        ${name},
-        ${type},
-        ${normalizeNumber(amount, 0)},
-        ${description},
-        ${category || "General"},
-        ${paymentMethod},
-        ${normalizeNumber(splitAmount, 0)}
+        ${payload.name},
+        ${payload.type},
+        ${payload.amount},
+        ${payload.description},
+        ${payload.category},
+        ${payload.paymentMethod},
+        ${payload.splitAmount}
       )
       returning *
     `;
 
     const workflow = insertedWorkflows[0];
-    console.log("[API /workflows POST] Workflow created:", workflow.id);
     return NextResponse.json(
       { workflow: mapWorkflowRow(workflow) },
       { status: 201 }
     );
   } catch (error) {
+    if (error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
     console.error("[API /workflows POST] Error:", error);
     return NextResponse.json(
       { error: "Failed to create workflow" },
@@ -127,9 +185,6 @@ export async function DELETE(req: NextRequest) {
         { status: 400 }
       );
     }
-
-    console.log("[API /workflows DELETE] Deleting workflow:", id);
-
     const deletedWorkflows = await sql<WorkflowRow[]>`
       delete from workflows
       where id = ${id} and user_id = ${userId}
@@ -144,8 +199,6 @@ export async function DELETE(req: NextRequest) {
         { status: 404 }
       );
     }
-
-    console.log("[API /workflows DELETE] Workflow deleted successfully");
     return NextResponse.json(
       { message: "Workflow deleted successfully" },
       { status: 200 }
@@ -176,29 +229,20 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
-    const {
-      name,
-      type,
-      amount,
-      description,
-      category,
-      paymentMethod,
-      splitAmount,
-    } = body;
-
-    console.log("[API /workflows PUT] Updating workflow:", id);
+    const payload = parseWorkflowInput(
+      (await req.json()) as Record<string, unknown>
+    );
 
     const updatedWorkflows = await sql<WorkflowRow[]>`
       update workflows
       set
-        name = ${name},
-        type = ${type},
-        amount = ${normalizeNumber(amount, 0)},
-        description = ${description},
-        category = ${category || "General"},
-        payment_method = ${paymentMethod},
-        split_amount = ${normalizeNumber(splitAmount, 0)}
+        name = ${payload.name},
+        type = ${payload.type},
+        amount = ${payload.amount},
+        description = ${payload.description},
+        category = ${payload.category},
+        payment_method = ${payload.paymentMethod},
+        split_amount = ${payload.splitAmount}
       where id = ${id} and user_id = ${userId}
       returning *
     `;
@@ -211,13 +255,15 @@ export async function PUT(req: NextRequest) {
         { status: 404 }
       );
     }
-
-    console.log("[API /workflows PUT] Workflow updated successfully");
     return NextResponse.json(
       { workflow: mapWorkflowRow(workflow) },
       { status: 200 }
     );
   } catch (error) {
+    if (error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
     console.error("[API /workflows PUT] Error:", error);
     return NextResponse.json(
       { error: "Failed to update workflow" },

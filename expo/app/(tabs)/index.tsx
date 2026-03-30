@@ -138,7 +138,7 @@ export default function HomeScreen() {
             Welcome back, {profile?.name?.split(" ")[0] || "User"}!
           </Text>
           <Text style={{ color: colors.textMuted, marginTop: 4 }}>
-            Here's your financial overview
+            Here&apos;s your financial overview
           </Text>
         </View>
 

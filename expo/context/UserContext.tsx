@@ -31,6 +31,23 @@ import { IUserProfile, ITransaction, IWorkflow, ILocalBalance, CreateTransaction
 import { generateTempId } from "../lib/utils";
 import { notificationService } from "../lib/notifications";
 
+function dedupeTransactions(items: ITransaction[]) {
+  const deduped = new Map<string, ITransaction>();
+
+  for (const item of items) {
+    const key = item.clientRequestId || item._id;
+    const existing = deduped.get(key);
+
+    if (!existing || (existing.isLocal && !item.isLocal)) {
+      deduped.set(key, item);
+    }
+  }
+
+  return Array.from(deduped.values()).sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+}
+
 interface UserContextType {
   profile: IUserProfile | null;
   transactions: ITransaction[];
@@ -154,27 +171,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       if (storedProfile) setProfile(storedProfile);
       
-      // Merge pending with stored, pending first (newest)
-      // Deduplicate by _id to avoid showing same transaction twice
-      const storedTxnIds = new Set(storedTxns.map(t => t._id));
-      const uniquePendingTxns = pendingTxns.filter(t => !storedTxnIds.has(t._id));
-      
-      // Also check for potential duplicates based on content (same description, amount, and similar date)
-      // This handles the case where a transaction was synced but might still be in pending
-      const finalPendingTxns = uniquePendingTxns.filter(pending => {
-        // Check if there's a synced transaction that matches this pending one
-        const possibleDuplicate = storedTxns.find(stored => 
-          stored.description === pending.description &&
-          stored.amount === pending.amount &&
-          stored.type === pending.type &&
-          stored.paymentMethod === pending.paymentMethod &&
-          // Check if dates are within 1 minute of each other
-          Math.abs(new Date(stored.date).getTime() - new Date(pending.date).getTime()) < 60000
-        );
-        return !possibleDuplicate;
-      });
-      
-      setTransactions([...finalPendingTxns, ...storedTxns]);
+      setTransactions(dedupeTransactions([...pendingTxns, ...storedTxns]));
       
       // Same deduplication for workflows
       const storedWorkflowIds = new Set(storedWorkflows.map(w => w._id));
@@ -329,61 +326,65 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     [profile]
   );
 
-  const addTransaction = useCallback(
+      const addTransaction = useCallback(
     async (payload: CreateTransactionPayload) => {
       const online = await syncService.isOnline();
+      const clientRequestId = generateTempId();
+      const now = payload.date || new Date().toISOString();
 
-      // ALWAYS create a local transaction first for instant UI feedback
       const tempTransaction: ITransaction = {
-        _id: generateTempId(),
+        _id: clientRequestId,
         clerkId: profile?.clerkId || "",
+        clientRequestId,
         type: payload.type,
         amount: payload.amount,
         description: payload.description,
         category: payload.category,
         paymentMethod: payload.paymentMethod,
         splitAmount: payload.splitAmount || 0,
-        date: payload.date || new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        date: now,
+        createdAt: now,
+        updatedAt: now,
         isLocal: true,
         syncStatus: "pending",
       };
 
-      // Add to local state immediately
-      await addPendingTransaction(tempTransaction);
-      setTransactions((prev) => [tempTransaction, ...prev]);
+      setTransactions((prev) => dedupeTransactions([tempTransaction, ...prev]));
 
-      // Update local balance
-      const newBalances = await syncService.updateLocalBalance(
-        payload.paymentMethod,
-        payload.amount,
-        payload.type,
-        payload.splitAmount
+      const newBalances = await syncService.applyLocalTransactionImpact(
+        tempTransaction,
+        1
       );
       setLocalBalancesState(newBalances);
+
+      if (online) {
+        try {
+          const created = await api.createTransaction({
+            ...payload,
+            date: now,
+            clientRequestId,
+          });
+          const storedTransactions = await getStoredTransactions();
+          await setStoredTransactions(
+            dedupeTransactions([created, ...storedTransactions])
+          );
+          setTransactions((prev) =>
+            dedupeTransactions(
+              prev.map((t) => (t._id === tempTransaction._id ? created : t))
+            )
+          );
+          await refreshProfile();
+          return;
+        } catch (error) {
+          console.log("[UserContext] Failed immediate transaction sync, queueing:", error);
+        }
+      }
+
+      await addPendingTransaction(tempTransaction);
       setPendingCount((prev) => {
         notificationService.onPendingItemAdded(prev + 1);
         return prev + 1;
       });
-
-      if (online) {
-        // Try to sync immediately in background
-        try {
-          console.log("[UserContext] Syncing transaction online:", payload);
-          const created = await api.createTransaction(payload);
-          // Remove temp and replace with server version
-          await removePendingTransaction(tempTransaction._id);
-          setTransactions((prev) => 
-            prev.map((t) => t._id === tempTransaction._id ? created : t)
-          );
-          await refreshProfile(); // Refresh to get updated balances
-          setPendingCount((prev) => Math.max(0, prev - 1));
-        } catch (error) {
-          console.log("[UserContext] Failed to sync, will retry later:", error);
-          // Transaction is already saved locally - it will sync via auto-refresh
-        }
-      }
     },
     [profile, refreshProfile]
   );
@@ -426,24 +427,37 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     async (id: string) => {
       const online = await syncService.isOnline();
       const isTemp = id.startsWith("temp_");
+      const transaction = transactions.find((t) => t._id === id);
 
-      // Remove from local state immediately
       setTransactions((prev) => prev.filter((t) => t._id !== id));
+      if (transaction) {
+        const nextBalances = await syncService.applyLocalTransactionImpact(
+          transaction,
+          -1
+        );
+        setLocalBalancesState(nextBalances);
+      }
 
       if (isTemp) {
-        // Just remove from pending
         await removePendingTransaction(id);
         setPendingCount((prev) => Math.max(0, prev - 1));
       } else if (online) {
         try {
           await api.deleteTransaction(id);
-          await refreshProfile(); // Refresh to get updated balances
+          await refreshProfile();
         } catch (error) {
           console.error("[UserContext] Error deleting transaction:", error);
+          if (transaction) {
+            setTransactions((prev) => dedupeTransactions([transaction, ...prev]));
+            const restoredBalances = await syncService.applyLocalTransactionImpact(
+              transaction,
+              1
+            );
+            setLocalBalancesState(restoredBalances);
+          }
           throw error;
         }
       } else {
-        // Queue for deletion when online
         await addPendingDelete({ type: "transaction", id });
         setPendingCount((prev) => {
           notificationService.onPendingItemAdded(prev + 1);
@@ -451,7 +465,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         });
       }
     },
-    [refreshProfile]
+    [refreshProfile, transactions]
   );
 
   const addWorkflow = useCallback(

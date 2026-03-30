@@ -1,11 +1,11 @@
 'use client'
 import Link from 'next/link'
-import { Menu, X, Wallet } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/theme-toggle'
 import React from 'react'
-import { cn } from '@/lib/utils'
 import { SignedIn, SignedOut } from '@clerk/nextjs'
+import { LogoIcon } from '@/components/logo'
 
 export const HeroHeader = () => {
     const [menuState, setMenuState] = React.useState(false)
@@ -22,7 +22,7 @@ export const HeroHeader = () => {
                                 href="/"
                                 aria-label="home"
                                 className="flex items-center space-x-2">
-                                <Wallet className="size-6 text-primary" />
+                                <LogoIcon className="h-6 w-auto text-primary" />
                                 <span className="text-xl font-bold">Expenser</span>
                             </Link>
 

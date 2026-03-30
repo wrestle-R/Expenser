@@ -244,7 +244,7 @@ export default function SignUpScreen() {
               }}
             >
                <Text style={{ color: colors.textMuted, fontWeight: "500" }}>
-                Didn't receive a code? <Text style={{ color: colors.primary }}>Resend</Text>
+                Didn&apos;t receive a code? <Text style={{ color: colors.primary }}>Resend</Text>
               </Text>
             </TouchableOpacity>
 

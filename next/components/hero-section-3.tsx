@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { HeroHeader } from './header'
 import { ChevronRight, Wallet, TrendingUp, CreditCard, IndianRupee, PiggyBank, ArrowRightLeft, CheckCircle2 } from 'lucide-react'
 import { SignedIn, SignedOut } from '@clerk/nextjs'
-import Image from 'next/image'
 
 export default function HeroSection() {
     const features = [

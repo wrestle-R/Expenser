@@ -21,6 +21,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Expenser - Manage Your Finances",
   description: "Track your expenses, manage your balances, and take control of your financial life.",
+  icons: {
+    icon: "/logo.svg",
+    shortcut: "/logo.svg",
+    apple: "/logo.svg",
+  },
 };
 
 export default function RootLayout({

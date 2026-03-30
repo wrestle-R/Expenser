@@ -252,7 +252,7 @@ export default function SignInScreen() {
             marginTop: 24,
           }}
         >
-          <Text style={{ color: colors.textMuted }}>Don't have an account? </Text>
+          <Text style={{ color: colors.textMuted }}>Don&apos;t have an account? </Text>
           <Link href="/(auth)/sign-up" asChild>
             <TouchableOpacity>
               <Text style={{ color: colors.primary, fontWeight: "600" }}>

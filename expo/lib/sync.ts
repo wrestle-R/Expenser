@@ -5,12 +5,10 @@ import {
   getStoredTransactions,
   setStoredTransactions,
   getPendingTransactions,
-  clearPendingTransactions,
   removePendingTransaction,
   getStoredWorkflows,
   setStoredWorkflows,
   getPendingWorkflows,
-  clearPendingWorkflows,
   removePendingWorkflow,
   getPendingDeletes,
   getLastSyncTime,
@@ -36,6 +34,7 @@ const AUTO_REFRESH_INTERVAL = 3000; // 3 seconds
 const NETINFO_TIMEOUT_MS = 3000;
 
 class SyncService {
+  private initialized = false;
   private isSyncing = false;
   private listeners: ((status: SyncStatus) => void)[] = [];
   private unsubscribeNetInfo: (() => void) | null = null;
@@ -52,6 +51,12 @@ class SyncService {
   }
 
   async initialize() {
+    if (this.initialized) {
+      return;
+    }
+
+    this.initialized = true;
+
     // Listen for network state changes
     this.unsubscribeNetInfo = NetInfo.addEventListener((state) => {
       const wasOffline = !this._isOnline;
@@ -151,7 +156,9 @@ class SyncService {
     this.stopAutoRefresh();
     if (this.unsubscribeNetInfo) {
       this.unsubscribeNetInfo();
+      this.unsubscribeNetInfo = null;
     }
+    this.initialized = false;
   }
 
   subscribe(listener: (status: SyncStatus) => void) {
@@ -304,6 +311,7 @@ class SyncService {
           paymentMethod: txn.paymentMethod,
           splitAmount: txn.splitAmount,
           date: txn.date,
+          clientRequestId: txn.clientRequestId ?? txn._id,
         });
         await removePendingTransaction(txn._id);
       } catch (error) {
@@ -431,22 +439,50 @@ class SyncService {
   }
 
   // Update local balance when adding transaction offline
+  async applyLocalTransactionImpact(
+    transaction: Pick<
+      ITransaction,
+      "paymentMethod" | "amount" | "type" | "splitAmount"
+    >,
+    direction: 1 | -1
+  ) {
+    const balances = await getLocalBalances();
+    const signedAmount =
+      transaction.type === "income"
+        ? transaction.amount * direction
+        : -transaction.amount * direction;
+
+    balances[transaction.paymentMethod] =
+      (balances[transaction.paymentMethod] || 0) + signedAmount;
+
+    if (
+      transaction.type === "expense" &&
+      transaction.splitAmount &&
+      transaction.splitAmount > 0
+    ) {
+      balances.splitwise =
+        (balances.splitwise || 0) + transaction.splitAmount * direction;
+    }
+
+    await setLocalBalances(balances);
+    return balances;
+  }
+
   async updateLocalBalance(
     paymentMethod: "bank" | "cash" | "splitwise",
     amount: number,
     type: "income" | "expense",
     splitAmount?: number
   ) {
-    const balances = await getLocalBalances();
-    const amt = type === "income" ? amount : -amount;
-    balances[paymentMethod] = (balances[paymentMethod] || 0) + amt;
-
-    if (splitAmount && splitAmount > 0 && type === "expense") {
-      balances.splitwise = (balances.splitwise || 0) + splitAmount;
-    }
-
-    await setLocalBalances(balances);
-    return balances;
+    return this.applyLocalTransactionImpact(
+      {
+        paymentMethod,
+        amount,
+        type,
+        splitAmount,
+      },
+      1
+    );
   }
 }
 

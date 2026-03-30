@@ -144,6 +144,9 @@ export default function TransactionsPage() {
         const data = await res.json();
         setTransactions(data.transactions);
         console.log("[Transactions] Fetched", data.transactions.length, "transactions");
+      } else {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `Failed to fetch transactions (${res.status})`);
       }
     } catch (err) {
       console.error("[Transactions] Error:", err);
@@ -159,6 +162,9 @@ export default function TransactionsPage() {
         const data = await res.json();
         setWorkflows(data.workflows);
         console.log("[Transactions] Fetched", data.workflows.length, "workflows");
+      } else {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `Failed to fetch workflows (${res.status})`);
       }
     } catch (err) {
       console.error("[Transactions] Error fetching workflows:", err);

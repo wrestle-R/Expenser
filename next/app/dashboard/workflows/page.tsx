@@ -101,6 +101,9 @@ export default function WorkflowsPage() {
         const data = await res.json();
         setWorkflows(data.workflows);
         console.log("[Workflows] Fetched", data.workflows.length, "workflows");
+      } else {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `Failed to fetch workflows (${res.status})`);
       }
     } catch (err) {
       console.error("[Workflows] Error fetching:", err);

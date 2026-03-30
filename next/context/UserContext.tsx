@@ -44,6 +44,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const readErrorMessage = useCallback(async (res: Response) => {
+    const fallback = `Request failed with status ${res.status}`;
+
+    try {
+      const data = await res.json();
+      return data?.error || fallback;
+    } catch {
+      return fallback;
+    }
+  }, []);
+
   const fetchProfile = useCallback(async () => {
     if (!isSignedIn || !user) {
       setProfile(null);
@@ -66,7 +77,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         console.log("[UserContext] No profile found, user needs onboarding");
         setProfile(null);
       } else {
-        throw new Error("Failed to fetch profile");
+        throw new Error(await readErrorMessage(res));
       }
     } catch (err) {
       console.error("[UserContext] Error fetching profile:", err);
@@ -83,7 +94,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [isSignedIn, user]);
+  }, [isSignedIn, readErrorMessage, user]);
 
   const updateProfile = async (data: Partial<UserProfile>) => {
     try {
@@ -100,7 +111,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem("expenser-user-profile", JSON.stringify(result.profile));
         console.log("[UserContext] Profile updated:", result.profile);
       } else {
-        throw new Error("Failed to update profile");
+        throw new Error(await readErrorMessage(res));
       }
     } catch (err) {
       console.error("[UserContext] Error updating profile:", err);

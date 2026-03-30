@@ -59,6 +59,9 @@ export default function DashboardPage() {
           const data = await res.json();
           setRecentTransactions(data.transactions.slice(0, 5));
           console.log("[Dashboard] Fetched", data.transactions.length, "transactions");
+        } else {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error || `Failed to fetch transactions (${res.status})`);
         }
       } catch (err) {
         console.error("[Dashboard] Error fetching transactions:", err);

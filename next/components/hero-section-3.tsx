@@ -4,7 +4,7 @@ import React from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { HeroHeader } from './header'
-import { ChevronRight, Wallet, TrendingUp, CreditCard, IndianRupee, PiggyBank, ArrowRightLeft, CheckCircle2 } from 'lucide-react'
+import { ChevronRight, Wallet, CreditCard, IndianRupee, PiggyBank, ArrowRightLeft, CheckCircle2 } from 'lucide-react'
 import { SignedIn, SignedOut } from '@clerk/nextjs'
 
 export default function HeroSection() {

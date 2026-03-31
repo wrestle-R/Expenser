@@ -198,8 +198,9 @@ export async function POST(req: NextRequest) {
         `) as WorkflowRow[];
 
         return insertedWorkflows[0];
-      } catch (error: any) {
-        if (payload.clientRequestId && error?.code === "23505") {
+      } catch (error: unknown) {
+        const err = error as { code?: string };
+        if (payload.clientRequestId && err?.code === "23505") {
           const existingWorkflows = (await trx`
             select *
             from workflows

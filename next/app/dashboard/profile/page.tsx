@@ -29,9 +29,11 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (profile) {
-      setName(profile.name);
-      setOccupation(profile.occupation);
-      setSelectedMethods(profile.paymentMethods);
+      setTimeout(() => {
+        setName(profile.name);
+        setOccupation(profile.occupation);
+        setSelectedMethods(profile.paymentMethods);
+      }, 0);
     }
   }, [profile]);
 

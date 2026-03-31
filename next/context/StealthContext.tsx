@@ -18,7 +18,9 @@ export function StealthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const stored = localStorage.getItem(STEALTH_STORAGE_KEY);
     if (stored != null) {
-      setIsStealthMode(stored === "true");
+      setTimeout(() => {
+        setIsStealthMode(stored === "true");
+      }, 0);
     }
   }, []);
 

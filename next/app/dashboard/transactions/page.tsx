@@ -42,6 +42,8 @@ import {
   Utensils,
   Car,
   MoreHorizontal,
+  Briefcase,
+  Gift,
   Zap,
   Pencil,
 } from "lucide-react";
@@ -93,12 +95,22 @@ const methodConfig = {
   },
 };
 
-const MAIN_CATEGORIES = [
+const EXPENSE_CATEGORIES = [
   { id: "food", label: "Food", icon: Utensils, color: "text-orange-600" },
   { id: "transport", label: "Transport", icon: Car, color: "text-blue-600" },
   { id: "shopping", label: "Shopping", icon: ShoppingBag, color: "text-pink-600" },
   { id: "other", label: "Other", icon: MoreHorizontal, color: "text-gray-600" },
 ];
+
+const INCOME_CATEGORIES = [
+  { id: "salary", label: "Salary", icon: Briefcase, color: "text-emerald-600" },
+  { id: "gift", label: "Gift", icon: Gift, color: "text-violet-600" },
+  { id: "other", label: "Other", icon: MoreHorizontal, color: "text-gray-600" },
+];
+
+function getCategoriesForType(type: "income" | "expense") {
+  return type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+}
 
 export default function TransactionsPage() {
   const { profile, refreshProfile } = useUserContext();
@@ -195,6 +207,20 @@ export default function TransactionsPage() {
     }
   }, [profile, newMethod]);
 
+  useEffect(() => {
+    const validIds = getCategoriesForType(newType).map((cat) => cat.id);
+    if (newCategory && !validIds.includes(newCategory)) {
+      setNewCategory("other");
+    }
+  }, [newType, newCategory]);
+
+  useEffect(() => {
+    const validIds = getCategoriesForType(editType).map((cat) => cat.id);
+    if (editCategory && !validIds.includes(editCategory)) {
+      setEditCategory("other");
+    }
+  }, [editType, editCategory]);
+
   const resetForm = () => {
     setNewAmount("");
     setNewDescription("");
@@ -209,8 +235,8 @@ export default function TransactionsPage() {
     setNewAmount(workflow.amount ? workflow.amount.toString() : "");
     setNewDescription(workflow.description);
     
-    const mainCategoryIds = MAIN_CATEGORIES.map(c => c.id);
-    if (mainCategoryIds.includes(workflow.category.toLowerCase())) {
+    const categoryIdsForType = getCategoriesForType(workflow.type).map((c) => c.id);
+    if (categoryIdsForType.includes(workflow.category.toLowerCase())) {
       setNewCategory(workflow.category.toLowerCase());
       setCustomCategory("");
     } else {
@@ -235,8 +261,8 @@ export default function TransactionsPage() {
     setEditAmount(txn.amount.toString());
     setEditDescription(txn.description);
     
-    const mainCategoryIds = MAIN_CATEGORIES.map(c => c.id);
-    if (mainCategoryIds.includes(txn.category.toLowerCase())) {
+    const categoryIdsForType = getCategoriesForType(txn.type).map((c) => c.id);
+    if (categoryIdsForType.includes(txn.category.toLowerCase())) {
       setEditCategory(txn.category.toLowerCase());
       setEditCustomCategory("");
     } else {
@@ -256,7 +282,7 @@ export default function TransactionsPage() {
   };
 
   const handleUpdateTransaction = async () => {
-    if (!editingTransaction || !editAmount || !editDescription || !editMethod) return;
+    if (!editingTransaction || !editAmount || !editMethod) return;
     
     // Validate split amount
     if (editIsSplit && Number(editSplitAmount) >= Number(editAmount)) {
@@ -270,7 +296,7 @@ export default function TransactionsPage() {
     const payload = {
       type: editType,
       amount: Number(editAmount),
-      description: editDescription,
+      description: editDescription.trim() || "No description",
       category: finalCategory || "General",
       paymentMethod: editMethod,
       splitAmount: editIsSplit ? Number(editSplitAmount) : 0,
@@ -300,7 +326,7 @@ export default function TransactionsPage() {
   };
 
   const handleAddTransaction = async () => {
-    if (!newAmount || !newDescription || !newMethod) return;
+    if (!newAmount || !newMethod) return;
     
     // Validate split amount
     if (isSplit && Number(splitAmount) >= Number(newAmount)) {
@@ -314,7 +340,7 @@ export default function TransactionsPage() {
     const payload = {
       type: newType,
       amount: Number(newAmount),
-      description: newDescription,
+      description: newDescription.trim() || "No description",
       category: finalCategory || "General",
       paymentMethod: newMethod,
       splitAmount: isSplit ? Number(splitAmount) : 0,
@@ -450,9 +476,14 @@ export default function TransactionsPage() {
                   <Input
                     placeholder="0.00"
                     type="number"
-                    className="pl-9"
+                    min="0"
+                    step="any"
+                    className="pl-9 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     value={newAmount}
-                    onChange={(e) => setNewAmount(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "" || !isNaN(Number(val)) && Number(val) >= 0) setNewAmount(val);
+                    }}
                   />
                 </div>
               </div>
@@ -469,7 +500,7 @@ export default function TransactionsPage() {
               <div className="space-y-2">
                 <Label>Category</Label>
                 <div className="grid grid-cols-2 gap-2">
-                  {MAIN_CATEGORIES.map((cat) => {
+                  {getCategoriesForType(newType).map((cat) => {
                     const Icon = cat.icon;
                     return (
                       <button
@@ -547,11 +578,16 @@ export default function TransactionsPage() {
                           <div className="relative">
                             <IndianRupee className="absolute left-3 top-2.5 size-4 text-orange-500" />
                             <Input
-                              className="pl-9 border-orange-200/30"
+                              className="pl-9 border-orange-200/30 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               placeholder="0.00"
                               type="number"
+                              min="0"
+                              step="any"
                               value={splitAmount}
-                              onChange={(e) => setSplitAmount(e.target.value)}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === "" || (!isNaN(Number(val)) && Number(val) >= 0)) setSplitAmount(val);
+                              }}
                             />
                           </div>
                         </div>
@@ -570,7 +606,7 @@ export default function TransactionsPage() {
               <Button
                 className="w-full"
                 onClick={handleAddTransaction}
-                disabled={!newAmount || !newDescription || !newMethod || saving}
+                disabled={!newAmount || !newMethod || saving}
               >
                 {saving ? "Adding..." : "Add Transaction"}
               </Button>
@@ -690,7 +726,7 @@ export default function TransactionsPage() {
                         <AlertDialogHeader>
                           <AlertDialogTitle>Delete Transaction</AlertDialogTitle>
                           <AlertDialogDescription>
-                            Are you sure you want to delete "{txn.description}"? This action cannot be undone.
+                            Are you sure you want to delete &quot;{txn.description}&quot;? This action cannot be undone.
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
@@ -758,9 +794,14 @@ export default function TransactionsPage() {
                 <Input
                   placeholder="0.00"
                   type="number"
-                  className="pl-9"
+                  min="0"
+                  step="any"
+                  className="pl-9 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   value={editAmount}
-                  onChange={(e) => setEditAmount(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "" || (!isNaN(Number(val)) && Number(val) >= 0)) setEditAmount(val);
+                  }}
                 />
               </div>
             </div>
@@ -777,7 +818,7 @@ export default function TransactionsPage() {
             <div className="space-y-2">
               <Label>Category</Label>
               <div className="grid grid-cols-2 gap-2">
-                {MAIN_CATEGORIES.map((cat) => {
+                {getCategoriesForType(editType).map((cat) => {
                   const Icon = cat.icon;
                   return (
                     <button
@@ -855,11 +896,16 @@ export default function TransactionsPage() {
                         <div className="relative">
                           <IndianRupee className="absolute left-3 top-2.5 size-4 text-orange-500" />
                           <Input
-                            className="pl-9 border-orange-200/30"
+                            className="pl-9 border-orange-200/30 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             placeholder="0.00"
                             type="number"
+                            min="0"
+                            step="any"
                             value={editSplitAmount}
-                            onChange={(e) => setEditSplitAmount(e.target.value)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === "" || (!isNaN(Number(val)) && Number(val) >= 0)) setEditSplitAmount(val);
+                            }}
                           />
                         </div>
                       </div>
@@ -878,7 +924,7 @@ export default function TransactionsPage() {
             <Button
               className="w-full"
               onClick={handleUpdateTransaction}
-              disabled={!editAmount || !editDescription || !editMethod || editSaving}
+              disabled={!editAmount || !editMethod || editSaving}
             >
               {editSaving ? "Saving..." : "Save Changes"}
             </Button>

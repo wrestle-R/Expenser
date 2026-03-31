@@ -134,12 +134,21 @@ export const paymentMethodConfig = {
 };
 
 // Categories configuration
-export const CATEGORIES = [
+export const EXPENSE_CATEGORIES = [
   { id: "food", label: "Food", color: "#f97316" },
   { id: "transport", label: "Transport", color: "#3b82f6" },
   { id: "shopping", label: "Shopping", color: "#ec4899" },
   { id: "other", label: "Other", color: "#6b7280" },
 ];
+
+export const INCOME_CATEGORIES = [
+  { id: "salary", label: "Salary", color: "#22c55e" },
+  { id: "gift", label: "Gift", color: "#a855f7" },
+  { id: "other", label: "Other", color: "#6b7280" },
+];
+
+// Backward-compatible alias for existing screens.
+export const CATEGORIES = EXPENSE_CATEGORIES;
 
 export const Fonts = Platform.select({
   ios: {

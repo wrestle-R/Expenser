@@ -111,7 +111,7 @@ function parseTransactionInput(data: Record<string, unknown>) {
     description: sanitizeText(data.description, {
       field: "description",
       maxLength: 200,
-      required: true,
+      fallback: "No description",
     }),
     category: sanitizeText(data.category, {
       field: "category",
@@ -207,8 +207,9 @@ export async function POST(req: Request) {
         `) as TransactionRow[];
 
         transaction = insertedTransactions[0];
-      } catch (error: any) {
-        if (payload.clientRequestId && error?.code === "23505") {
+      } catch (error: unknown) {
+        const err = error as { code?: string };
+        if (payload.clientRequestId && err?.code === "23505") {
           const existingTransactions = (await trx`
             select *
             from transactions

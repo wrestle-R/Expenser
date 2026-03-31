@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -20,7 +20,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../../context/ThemeContext";
 import { useStealthMode } from "../../context/StealthContext";
 import { useUserContext } from "../../context/UserContext";
-import { Colors, paymentMethodConfig, CATEGORIES } from "../../constants/theme";
+import {
+  Colors,
+  paymentMethodConfig,
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+} from "../../constants/theme";
 import { formatCurrency, formatDate } from "../../lib/utils";
 import { ITransaction, PaymentMethod, TransactionType } from "../../lib/types";
 import ConfirmModal from "../../components/ConfirmModal";
@@ -69,6 +74,16 @@ export default function TransactionsScreen() {
   const [editIsSplit, setEditIsSplit] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const editCategories =
+    editType === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+
+  useEffect(() => {
+    const validIds = editCategories.map((cat) => cat.id);
+    if (editCategory && !validIds.includes(editCategory)) {
+      setEditCategory("other");
+    }
+  }, [editType, editCategory, editCategories]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await manualRefresh();
@@ -114,14 +129,14 @@ export default function TransactionsScreen() {
   };
 
   const handleSaveEdit = async () => {
-    if (!editingTxn || !editAmount || !editDescription) return;
+    if (!editingTxn || !editAmount) return;
     
     setSaving(true);
     try {
       await updateTransaction(editingTxn._id, {
         type: editType,
         amount: parseFloat(editAmount),
-        description: editDescription.trim(),
+        description: editDescription.trim() || "No description",
         category: editCategory || "General",
         paymentMethod: editPaymentMethod,
         splitAmount: editIsSplit ? parseFloat(editSplitAmount || "0") : 0,
@@ -590,7 +605,7 @@ export default function TransactionsScreen() {
                     <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Category</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
                       <View style={{ flexDirection: "row", gap: 8 }}>
-                        {CATEGORIES.map((cat) => (
+                        {editCategories.map((cat) => (
                           <TouchableOpacity
                             key={cat.id}
                             style={{
@@ -687,7 +702,7 @@ export default function TransactionsScreen() {
                         marginTop: 8,
                       }}
                       onPress={handleSaveEdit}
-                      disabled={saving || !editAmount || !editDescription}
+                      disabled={saving || !editAmount}
                     >
                       {saving ? (
                         <ActivityIndicator color="#fff" />

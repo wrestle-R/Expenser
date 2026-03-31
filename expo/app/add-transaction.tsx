@@ -16,7 +16,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import { useUserContext } from "../context/UserContext";
 import { useToast } from "../context/ToastContext";
-import { Colors, CATEGORIES, paymentMethodConfig } from "../constants/theme";
+import {
+  Colors,
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+  paymentMethodConfig,
+} from "../constants/theme";
 import { TransactionType, PaymentMethod } from "../lib/types";
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: string }[] = [
@@ -41,6 +46,15 @@ export default function AddTransactionScreen() {
   const [splitAmount, setSplitAmount] = useState("");
   const [isSplit, setIsSplit] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const categories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+
+  useEffect(() => {
+    const validIds = categories.map((cat) => cat.id);
+    if (!validIds.includes(category)) {
+      setCategory("other");
+    }
+  }, [type, category, categories]);
 
   // Pre-fill from workflow params
   useEffect(() => {
@@ -67,11 +81,6 @@ export default function AddTransactionScreen() {
       return;
     }
 
-    if (!description.trim()) {
-      showToast("Please enter a description", "error");
-      return;
-    }
-
     // Calculate net expense if split
     const payAmount = parseFloat(amount || "0");
     const split = parseFloat(splitAmount || "0");
@@ -88,7 +97,7 @@ export default function AddTransactionScreen() {
       const payload = {
         type,
         amount: payAmount,
-        description: description.trim(),
+        description: description.trim() || "No description",
         category: category || "General",
         paymentMethod,
         splitAmount: finalSplit,
@@ -278,7 +287,7 @@ export default function AddTransactionScreen() {
             Category
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {CATEGORIES.map((cat) => (
+            {categories.map((cat) => (
               <TouchableOpacity
                 key={cat.id}
                 style={{

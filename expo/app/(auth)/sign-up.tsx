@@ -58,6 +58,7 @@ export default function SignUpScreen() {
         lastName: lastName.trim() || undefined,
         username: username.trim(),
         emailAddress: email.trim(),
+        password,
       });
 
       console.log("[SignUp] Result status:", result.status);
@@ -108,6 +109,7 @@ export default function SignUpScreen() {
       if (result.status === "complete") {
         await setActive({ session: result.createdSessionId });
         router.replace("/(tabs)");
+      } else {
         console.log("[SignUp] Unexpected verification status:", result.status);
         Alert.alert("Error", "Verification incomplete. Please try again.");
       }

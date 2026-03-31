@@ -259,9 +259,14 @@ export default function WorkflowsPage() {
                   <Input
                     placeholder="0.00"
                     type="number"
-                    className="pl-9"
+                    min="0"
+                    step="any"
+                    className="pl-9 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     value={newAmount}
-                    onChange={(e) => setNewAmount(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "" || (!isNaN(Number(val)) && Number(val) >= 0)) setNewAmount(val);
+                    }}
                   />
                 </div>
               </div>
@@ -354,11 +359,16 @@ export default function WorkflowsPage() {
                         <div className="relative">
                           <IndianRupee className="absolute left-3 top-2.5 size-4 text-orange-500" />
                           <Input
-                            className="pl-9 border-orange-200/30"
+                            className="pl-9 border-orange-200/30 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             placeholder="0.00"
                             type="number"
+                            min="0"
+                            step="any"
                             value={splitAmount}
-                            onChange={(e) => setSplitAmount(e.target.value)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === "" || (!isNaN(Number(val)) && Number(val) >= 0)) setSplitAmount(val);
+                            }}
                           />
                         </div>
                       </div>

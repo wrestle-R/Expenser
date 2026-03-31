@@ -14,13 +14,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar as CalendarIcon,
-  IndianRupee,
   List,
   Grid2x2,
   Grid3x3,
   CalendarDays,
-  TrendingUp,
-  TrendingDown,
   Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -36,8 +33,6 @@ import {
   isSameMonth,
   isSameDay,
   isAfter,
-  startOfDay,
-  endOfDay,
 } from "date-fns";
 
 const TODAY = new Date();
@@ -247,7 +242,6 @@ export default function CalendarPage() {
           today={TODAY}
           selectedDate={selectedDate}
           setSelectedDate={setSelectedDate}
-          transactions={transactions}
           numberClassName={numberClassName}
         />
       )}
@@ -539,7 +533,6 @@ interface TwoColumnViewProps {
   today: Date;
   selectedDate: Date;
   setSelectedDate: (date: Date) => void;
-  transactions: Transaction[];
   numberClassName: string;
 }
 function TwoColumnView({ 
@@ -549,7 +542,6 @@ function TwoColumnView({
   today, 
   selectedDate, 
   setSelectedDate, 
-  transactions, 
   numberClassName 
 }: TwoColumnViewProps) {
   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -600,7 +592,7 @@ function TwoColumnView({
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1 mt-2">
-                    {dayEvents.slice(0, 10).map((event: any, i: number) => (
+                    {dayEvents.slice(0, 10).map((event: Transaction, i: number) => (
                       <div
                         key={i}
                         className={`w-2 h-2 rounded-full ${EVENT_DOT_COLORS[event.type as keyof typeof EVENT_DOT_COLORS]}`}
@@ -637,7 +629,7 @@ function TwoColumnView({
               </div>
             ) : (
               <div className="divide-y">
-                {selectedDayEvents.map((event: any) => (
+                {selectedDayEvents.map((event: Transaction) => (
                   <div
                     key={event._id}
                     className="flex items-center gap-3 p-4 hover:bg-accent/30 transition-colors"

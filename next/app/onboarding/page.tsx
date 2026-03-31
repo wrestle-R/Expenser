@@ -72,7 +72,9 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     if (user) {
-      setName(user.fullName || "");
+      setTimeout(() => {
+        setName(user.fullName || "");
+      }, 0);
       console.log("[Onboarding] Pre-filled name:", user.fullName);
     }
   }, [user]);

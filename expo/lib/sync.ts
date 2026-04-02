@@ -63,6 +63,42 @@ class SyncService {
     return pending ? { ...base, ...pending } : base;
   }
 
+  private mergeServerTransactions(
+    serverTransactions: ITransaction[],
+    failedLocalTransactions: ITransaction[]
+  ) {
+    return [
+      ...failedLocalTransactions,
+      ...serverTransactions.filter(
+        (transaction) =>
+          !failedLocalTransactions.some(
+            (failed) =>
+              failed._id === transaction._id ||
+              (failed.clientRequestId || failed._id) ===
+                (transaction.clientRequestId || transaction._id)
+          )
+      ),
+    ];
+  }
+
+  private mergeServerWorkflows(
+    serverWorkflows: IWorkflow[],
+    failedLocalWorkflows: IWorkflow[]
+  ) {
+    return [
+      ...failedLocalWorkflows,
+      ...serverWorkflows.filter(
+        (workflow) =>
+          !failedLocalWorkflows.some(
+            (failed) =>
+              failed._id === workflow._id ||
+              (failed.clientRequestId || failed._id) ===
+                (workflow.clientRequestId || workflow._id)
+          )
+      ),
+    ];
+  }
+
   private upsertStoredTransaction(transaction: ITransaction) {
     return getStoredTransactions().then(async (storedTransactions) => {
       const filtered = storedTransactions.filter(
@@ -329,6 +365,7 @@ class SyncService {
           category: txn.category,
           paymentMethod: txn.paymentMethod,
           splitAmount: txn.splitAmount,
+          exchangeExpenseId: txn.exchangeExpenseId,
           date: txn.date,
           clientRequestId: txn.clientRequestId ?? txn._id,
         });
@@ -406,37 +443,43 @@ class SyncService {
         (workflow) => workflow.isLocal && workflow.syncStatus === "failed"
       );
 
-      const [transactions, workflows, profile] = await Promise.all([
+      const [transactionsResult, workflowsResult, profileResult] = await Promise.allSettled([
         api.getTransactions(),
         api.getWorkflows(),
         api.getProfile(),
       ]);
 
-      // Store everything locally
-      await setStoredTransactions([
-        ...failedLocalTransactions,
-        ...transactions.filter(
-          (transaction) =>
-            !failedLocalTransactions.some(
-              (failed) =>
-                failed._id === transaction._id ||
-                (failed.clientRequestId || failed._id) ===
-                  (transaction.clientRequestId || transaction._id)
-            )
-        ),
-      ]);
-      await setStoredWorkflows([
-        ...failedLocalWorkflows,
-        ...workflows.filter(
-          (workflow) =>
-            !failedLocalWorkflows.some(
-              (failed) =>
-                failed._id === workflow._id ||
-                (failed.clientRequestId || failed._id) ===
-                  (workflow.clientRequestId || workflow._id)
-            )
-        ),
-      ]);
+      const transactions =
+        transactionsResult.status === "fulfilled" ? transactionsResult.value : null;
+      const workflows =
+        workflowsResult.status === "fulfilled" ? workflowsResult.value : null;
+      const profile =
+        profileResult.status === "fulfilled" ? profileResult.value : null;
+
+      if (!transactions && !workflows && !profile) {
+        throw new Error("Failed to fetch fresh data from the server");
+      }
+
+      if (transactionsResult.status === "rejected") {
+        console.error("[Sync] Error fetching transactions from server:", transactionsResult.reason);
+      }
+      if (workflowsResult.status === "rejected") {
+        console.error("[Sync] Error fetching workflows from server:", workflowsResult.reason);
+      }
+      if (profileResult.status === "rejected") {
+        console.error("[Sync] Error fetching profile from server:", profileResult.reason);
+      }
+
+      if (transactions) {
+        await setStoredTransactions(
+          this.mergeServerTransactions(transactions, failedLocalTransactions)
+        );
+      }
+      if (workflows) {
+        await setStoredWorkflows(
+          this.mergeServerWorkflows(workflows, failedLocalWorkflows)
+        );
+      }
       if (profile) {
         await setStoredProfile(this.mergeProfile(profile, pendingProfile) ?? profile);
         // Only reset local balances to server balances if there are NO pending transactions
@@ -446,7 +489,21 @@ class SyncService {
         }
       }
 
-      return { transactions, workflows, profile };
+      return {
+        transactions:
+          transactions ??
+          this.mergeServerTransactions(
+            await getStoredTransactions(),
+            failedLocalTransactions
+          ),
+        workflows:
+          workflows ??
+          this.mergeServerWorkflows(
+            await getStoredWorkflows(),
+            failedLocalWorkflows
+          ),
+        profile: profile ?? (await getStoredProfile()),
+      };
     } catch (error) {
       console.error("[Sync] Error fetching from server:", error);
       throw error;
@@ -462,18 +519,10 @@ class SyncService {
         const failedLocalTransactions = (await getStoredTransactions()).filter(
           (transaction) => transaction.isLocal && transaction.syncStatus === "failed"
         );
-        const mergedTransactions = [
-          ...failedLocalTransactions,
-          ...transactions.filter(
-            (transaction) =>
-              !failedLocalTransactions.some(
-                (failed) =>
-                  failed._id === transaction._id ||
-                  (failed.clientRequestId || failed._id) ===
-                    (transaction.clientRequestId || transaction._id)
-              )
-          ),
-        ];
+        const mergedTransactions = this.mergeServerTransactions(
+          transactions,
+          failedLocalTransactions
+        );
         await setStoredTransactions(mergedTransactions);
         return mergedTransactions;
       } catch (error) {
@@ -496,18 +545,10 @@ class SyncService {
         const failedLocalWorkflows = (await getStoredWorkflows()).filter(
           (workflow) => workflow.isLocal && workflow.syncStatus === "failed"
         );
-        const mergedWorkflows = [
-          ...failedLocalWorkflows,
-          ...workflows.filter(
-            (workflow) =>
-              !failedLocalWorkflows.some(
-                (failed) =>
-                  failed._id === workflow._id ||
-                  (failed.clientRequestId || failed._id) ===
-                    (workflow.clientRequestId || workflow._id)
-              )
-          ),
-        ];
+        const mergedWorkflows = this.mergeServerWorkflows(
+          workflows,
+          failedLocalWorkflows
+        );
         await setStoredWorkflows(mergedWorkflows);
         return mergedWorkflows;
       } catch (error) {

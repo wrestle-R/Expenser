@@ -4,6 +4,7 @@ export interface ITransaction {
   _id: string;
   clerkId: string;
   clientRequestId?: string;
+  exchangeExpenseId?: string;
   type: "income" | "expense";
   amount: number;
   description: string;
@@ -72,6 +73,7 @@ export interface CreateTransactionPayload {
   category: string;
   paymentMethod: PaymentMethod;
   splitAmount?: number;
+  exchangeExpenseId?: string;
   date?: string; // Optional, backend will default to current date
   clientRequestId?: string;
 }
@@ -83,6 +85,7 @@ export interface UpdateTransactionPayload {
   category?: string;
   paymentMethod?: PaymentMethod;
   splitAmount?: number;
+  exchangeExpenseId?: string;
   date?: string;
 }
 

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -15,7 +15,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import { useUserContext } from "../context/UserContext";
 import { useToast } from "../context/ToastContext";
-import { Colors, CATEGORIES, paymentMethodConfig } from "../constants/theme";
+import {
+  Colors,
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+  paymentMethodConfig,
+} from "../constants/theme";
 import { TransactionType, PaymentMethod } from "../lib/types";
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: string }[] = [
@@ -39,6 +44,14 @@ export default function AddWorkflowScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("bank");
   const [splitAmount, setSplitAmount] = useState("");
   const [saving, setSaving] = useState(false);
+  const categories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+
+  useEffect(() => {
+    const validIds = categories.map((item) => item.id);
+    if (!validIds.includes(category)) {
+      setCategory("other");
+    }
+  }, [categories, category]);
 
   // Filter payment methods based on user's profile
   const availableMethods = paymentMethods.filter(
@@ -276,7 +289,7 @@ export default function AddWorkflowScreen() {
             Category
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {CATEGORIES.map((cat) => (
+            {categories.map((cat) => (
               <TouchableOpacity
                 key={cat.id}
                 style={{

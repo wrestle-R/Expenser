@@ -23,6 +23,7 @@ import {
   paymentMethodConfig,
 } from "../constants/theme";
 import { TransactionType, PaymentMethod } from "../lib/types";
+import { getExpenseOffsetSummary, getSelectableExchangeExpenses } from "../lib/exchange";
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: string }[] = [
   { id: "bank", label: "Bank (UPI)", icon: "card" },
@@ -35,7 +36,7 @@ export default function AddTransactionScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { addTransaction, profile } = useUserContext();
+  const { addTransaction, profile, transactions } = useUserContext();
   const { showToast } = useToast();
 
   const [type, setType] = useState<TransactionType>("expense");
@@ -45,9 +46,11 @@ export default function AddTransactionScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("bank");
   const [splitAmount, setSplitAmount] = useState("");
   const [isSplit, setIsSplit] = useState(false);
+  const [exchangeExpenseId, setExchangeExpenseId] = useState("");
   const [saving, setSaving] = useState(false);
 
   const categories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const exchangeExpenseOptions = getSelectableExchangeExpenses(transactions);
 
   useEffect(() => {
     const validIds = categories.map((cat) => cat.id);
@@ -55,6 +58,12 @@ export default function AddTransactionScreen() {
       setCategory("other");
     }
   }, [type, category, categories]);
+
+  useEffect(() => {
+    if (!(type === "income" && category === "exchange")) {
+      setExchangeExpenseId("");
+    }
+  }, [type, category]);
 
   // Pre-fill from workflow params
   useEffect(() => {
@@ -92,6 +101,27 @@ export default function AddTransactionScreen() {
       return;
     }
 
+    if (type === "income" && category === "exchange") {
+      if (!exchangeExpenseId) {
+        showToast("Select the expense this exchange should offset", "error");
+        return;
+      }
+
+      const summary = getExpenseOffsetSummary(transactions, exchangeExpenseId);
+      if (!summary) {
+        showToast("Selected expense is no longer available", "error");
+        return;
+      }
+
+      if (payAmount > summary.remainingAmount) {
+        showToast(
+          `Exchange amount cannot exceed ₹${summary.remainingAmount.toFixed(2)}`,
+          "error"
+        );
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -101,6 +131,10 @@ export default function AddTransactionScreen() {
         category: category || "General",
         paymentMethod,
         splitAmount: finalSplit,
+        exchangeExpenseId:
+          type === "income" && category === "exchange"
+            ? exchangeExpenseId
+            : undefined,
       };
       console.log("[AddTransaction] Sending payload:", payload);
       await addTransaction(payload);
@@ -318,6 +352,74 @@ export default function AddTransactionScreen() {
             ))}
           </View>
         </View>
+
+        {type === "income" && category === "exchange" && (
+          <View style={{ marginBottom: 20 }}>
+            <Text
+              style={{
+                fontSize: 14,
+                fontWeight: "600",
+                color: colors.textMuted,
+                marginBottom: 8,
+              }}
+            >
+              Offsets Expense
+            </Text>
+            {exchangeExpenseOptions.length === 0 ? (
+              <View
+                style={{
+                  backgroundColor: colors.card,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  padding: 16,
+                }}
+              >
+                <Text style={{ color: colors.textMuted }}>
+                  No synced expense transactions are available yet. Add or sync an expense first.
+                </Text>
+              </View>
+            ) : (
+              <View style={{ gap: 8 }}>
+                {exchangeExpenseOptions.map(({ transaction, remainingAmount }) => (
+                  <TouchableOpacity
+                    key={transaction._id}
+                    style={{
+                      padding: 14,
+                      borderRadius: 12,
+                      backgroundColor:
+                        exchangeExpenseId === transaction._id
+                          ? colors.infoBg
+                          : colors.card,
+                      borderWidth: 1,
+                      borderColor:
+                        exchangeExpenseId === transaction._id
+                          ? colors.info
+                          : colors.border,
+                    }}
+                    onPress={() => setExchangeExpenseId(transaction._id)}
+                  >
+                    <Text
+                      style={{
+                        color: colors.text,
+                        fontWeight: "600",
+                        marginBottom: 4,
+                      }}
+                    >
+                      {transaction.description}
+                    </Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+                      {transaction.category} · {new Date(transaction.date).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                      })} · ₹{remainingAmount.toFixed(2)} left
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Payment Method */}
         <View style={{ marginBottom: 20 }}>

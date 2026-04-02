@@ -16,6 +16,8 @@ import {
 const PAYMENT_METHODS: PaymentMethod[] = ["bank", "cash", "splitwise"];
 const TRANSACTION_TYPES: TransactionType[] = ["income", "expense"];
 const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isPaymentMethod(value: unknown): value is PaymentMethod {
   return PAYMENT_METHODS.includes(value as PaymentMethod);
@@ -85,6 +87,45 @@ function parseClientRequestId(value: unknown) {
   return normalized;
 }
 
+function parseExchangeExpenseId(value: unknown) {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  const normalized = sanitizeText(value, {
+    field: "exchangeExpenseId",
+    maxLength: 64,
+    required: false,
+  });
+
+  if (!UUID_PATTERN.test(normalized)) {
+    throw new Error("exchangeExpenseId must be a valid transaction id");
+  }
+
+  return normalized;
+}
+
+function isExchangeCategory(
+  transaction: Pick<ReturnType<typeof parseTransactionInput>, "type" | "category">
+) {
+  return (
+    transaction.type === "income" &&
+    transaction.category.trim().toLowerCase() === "exchange"
+  );
+}
+
+function getExpenseBaseAmount(transaction: {
+  type: TransactionType;
+  amount: number;
+  splitAmount?: number;
+}) {
+  if (transaction.type !== "expense") {
+    return 0;
+  }
+
+  return Math.max(0, transaction.amount - Number(transaction.splitAmount ?? 0));
+}
+
 function parseTransactionInput(data: Record<string, unknown>) {
   if (!isTransactionType(data.type)) {
     throw new Error("Invalid transaction type");
@@ -120,9 +161,139 @@ function parseTransactionInput(data: Record<string, unknown>) {
     }),
     paymentMethod: data.paymentMethod,
     splitAmount,
+    exchangeExpenseId: parseExchangeExpenseId(data.exchangeExpenseId),
     date: normalizeDate(data.date),
     clientRequestId: parseClientRequestId(data.clientRequestId),
   };
+}
+
+async function validateExchangeExpenseLink(
+  trx: typeof sql,
+  userId: string,
+  payload: ReturnType<typeof parseTransactionInput>,
+  currentTransactionId?: string
+) {
+  const exchangeExpenseId = payload.exchangeExpenseId;
+
+  if (!isExchangeCategory(payload)) {
+    if (exchangeExpenseId) {
+      throw new Error("exchangeExpenseId is only allowed for exchange income");
+    }
+
+    return null;
+  }
+
+  if (!exchangeExpenseId) {
+    throw new Error("exchangeExpenseId is required for exchange income");
+  }
+
+  if (currentTransactionId && exchangeExpenseId === currentTransactionId) {
+    throw new Error("Exchange income cannot offset the same transaction");
+  }
+
+  const expenses = (await trx`
+    select *
+    from transactions
+    where id = ${exchangeExpenseId}
+      and clerk_id = ${userId}
+      and type = 'expense'
+    limit 1
+  `) as TransactionRow[];
+
+  const expense = expenses[0];
+  if (!expense) {
+    throw new Error("Selected expense transaction was not found");
+  }
+
+  const linkedExchanges = (currentTransactionId
+    ? await trx`
+        select coalesce(sum(amount), 0) as total
+        from transactions
+        where clerk_id = ${userId}
+          and type = 'income'
+          and lower(category) = 'exchange'
+          and exchange_expense_id = ${exchangeExpenseId}
+          and id <> ${currentTransactionId}
+      `
+    : await trx`
+        select coalesce(sum(amount), 0) as total
+        from transactions
+        where clerk_id = ${userId}
+          and type = 'income'
+          and lower(category) = 'exchange'
+          and exchange_expense_id = ${exchangeExpenseId}
+      `) as { total: number | string | null }[];
+
+  const alreadyApplied = Number(linkedExchanges[0]?.total ?? 0);
+  const remainingAmount = Math.max(
+    0,
+    getExpenseBaseAmount({
+      type: expense.type,
+      amount: Number(expense.amount),
+      splitAmount: Number(expense.split_amount ?? 0),
+    }) - alreadyApplied
+  );
+
+  if (payload.amount > remainingAmount) {
+    throw new Error(
+      `Exchange amount cannot exceed the remaining expense amount of ${remainingAmount.toFixed(2)}`
+    );
+  }
+
+  return expense;
+}
+
+async function assertExpenseCanSupportLinkedExchanges(
+  trx: typeof sql,
+  userId: string,
+  transactionId: string,
+  nextTransaction: ReturnType<typeof parseTransactionInput>
+) {
+  const linkedExchanges = (await trx`
+    select coalesce(sum(amount), 0) as total
+    from transactions
+    where clerk_id = ${userId}
+      and type = 'income'
+      and lower(category) = 'exchange'
+      and exchange_expense_id = ${transactionId}
+  `) as { total: number | string | null }[];
+
+  const linkedAmount = Number(linkedExchanges[0]?.total ?? 0);
+
+  if (linkedAmount <= 0) {
+    return;
+  }
+
+  if (nextTransaction.type !== "expense") {
+    throw new Error("Cannot convert an expense with linked exchange income");
+  }
+
+  const nextBaseAmount = getExpenseBaseAmount(nextTransaction);
+  if (linkedAmount > nextBaseAmount) {
+    throw new Error(
+      `This expense already has ${linkedAmount.toFixed(2)} linked exchange income`
+    );
+  }
+}
+
+async function assertExpenseCanBeDeleted(
+  trx: typeof sql,
+  userId: string,
+  transactionId: string
+) {
+  const linkedExchangeTransactions = (await trx`
+    select id
+    from transactions
+    where clerk_id = ${userId}
+      and type = 'income'
+      and lower(category) = 'exchange'
+      and exchange_expense_id = ${transactionId}
+    limit 1
+  `) as { id: string }[];
+
+  if (linkedExchangeTransactions[0]) {
+    throw new Error("Delete the linked exchange income before deleting this expense");
+  }
 }
 
 export async function GET() {
@@ -178,12 +349,14 @@ export async function POST(req: Request) {
       }
 
       let transaction: TransactionRow;
+      await validateExchangeExpenseLink(trx, userId, payload);
 
       try {
         const insertedTransactions = (await trx`
           insert into transactions (
             clerk_id,
             client_request_id,
+            exchange_expense_id,
             type,
             amount,
             description,
@@ -195,6 +368,7 @@ export async function POST(req: Request) {
           values (
             ${userId},
             ${payload.clientRequestId},
+            ${payload.exchangeExpenseId},
             ${payload.type},
             ${payload.amount},
             ${payload.description},
@@ -302,6 +476,10 @@ export async function DELETE(req: Request) {
         return null;
       }
 
+      if (transaction.type === "expense") {
+        await assertExpenseCanBeDeleted(trx, userId, id);
+      }
+
       const users = (await trx`
         select *
         from users
@@ -348,6 +526,10 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
     console.error("[API /transactions DELETE] Error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
@@ -391,9 +573,14 @@ export async function PUT(req: Request) {
         category: data.category ?? oldTransaction.category,
         paymentMethod: data.paymentMethod ?? oldTransaction.payment_method,
         splitAmount: data.splitAmount ?? oldTransaction.split_amount,
+        exchangeExpenseId:
+          data.exchangeExpenseId ?? oldTransaction.exchange_expense_id,
         date: data.date ?? oldTransaction.date,
         clientRequestId: oldTransaction.client_request_id,
       });
+
+      await validateExchangeExpenseLink(trx, userId, nextTransaction, id);
+      await assertExpenseCanSupportLinkedExchanges(trx, userId, id, nextTransaction);
 
       const users = (await trx`
         select *
@@ -437,6 +624,7 @@ export async function PUT(req: Request) {
           category = ${nextTransaction.category},
           payment_method = ${nextTransaction.paymentMethod},
           split_amount = ${nextTransaction.splitAmount},
+          exchange_expense_id = ${nextTransaction.exchangeExpenseId},
           date = ${nextTransaction.date}
         where id = ${id} and clerk_id = ${userId}
         returning *

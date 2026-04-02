@@ -287,10 +287,13 @@ export async function setStoredTheme(theme: "light" | "dark"): Promise<void> {
 export async function getStoredStealthMode(): Promise<boolean> {
   try {
     const data = await AsyncStorage.getItem(KEYS.STEALTH_MODE);
+    if (data == null) {
+      return true;
+    }
     return data === "true";
   } catch (error) {
     console.error("[Storage] Error getting stealth mode:", error);
-    return false;
+    return true;
   }
 }
 

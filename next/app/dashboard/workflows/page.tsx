@@ -32,6 +32,8 @@ import {
   Utensils,
   Car,
   MoreHorizontal,
+  Briefcase,
+  Gift,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -56,12 +58,23 @@ const methodConfig = {
   },
 };
 
-const MAIN_CATEGORIES = [
+const EXPENSE_CATEGORIES = [
   { id: "food", label: "Food", icon: Utensils, color: "text-orange-600" },
   { id: "transport", label: "Transport", icon: Car, color: "text-blue-600" },
   { id: "shopping", label: "Shopping", icon: ShoppingBag, color: "text-pink-600" },
   { id: "other", label: "Other", icon: MoreHorizontal, color: "text-gray-600" },
 ];
+
+const INCOME_CATEGORIES = [
+  { id: "salary", label: "Salary", icon: Briefcase, color: "text-emerald-600" },
+  { id: "gift", label: "Gift", icon: Gift, color: "text-violet-600" },
+  { id: "exchange", label: "Exchange", icon: ArrowRightLeft, color: "text-sky-600" },
+  { id: "other", label: "Other", icon: MoreHorizontal, color: "text-gray-600" },
+];
+
+function getCategoriesForType(type: "income" | "expense") {
+  return type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+}
 
 interface IWorkflow {
   _id: string;
@@ -128,6 +141,13 @@ export default function WorkflowsPage() {
       setNewMethod(profile.paymentMethods[0]);
     }
   }, [profile, newMethod]);
+
+  useEffect(() => {
+    const validIds = getCategoriesForType(newType).map((category) => category.id);
+    if (newCategory && !validIds.includes(newCategory)) {
+      setNewCategory("other");
+    }
+  }, [newType, newCategory]);
 
   const resetForm = () => {
     setWorkflowName("");
@@ -283,7 +303,7 @@ export default function WorkflowsPage() {
               <div className="space-y-2">
                 <Label>Category</Label>
                 <div className="grid grid-cols-2 gap-2">
-                  {MAIN_CATEGORIES.map((cat) => {
+                  {getCategoriesForType(newType).map((cat) => {
                     const Icon = cat.icon;
                     return (
                       <button

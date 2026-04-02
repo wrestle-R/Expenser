@@ -48,9 +48,16 @@ import {
   Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  type ExchangeAwareTransaction,
+  getExpenseOffsetSummary,
+  getOffsettableExpenses,
+  isExchangeTransaction,
+} from "@/lib/transaction-analysis";
 
 interface Transaction {
   _id: string;
+  exchangeExpenseId?: string;
   type: "income" | "expense";
   amount: number;
   description: string;
@@ -105,6 +112,7 @@ const EXPENSE_CATEGORIES = [
 const INCOME_CATEGORIES = [
   { id: "salary", label: "Salary", icon: Briefcase, color: "text-emerald-600" },
   { id: "gift", label: "Gift", icon: Gift, color: "text-violet-600" },
+  { id: "exchange", label: "Exchange", icon: ArrowRightLeft, color: "text-sky-600" },
   { id: "other", label: "Other", icon: MoreHorizontal, color: "text-gray-600" },
 ];
 
@@ -138,6 +146,7 @@ export default function TransactionsPage() {
   const [newMethod, setNewMethod] = useState("");
   const [isSplit, setIsSplit] = useState(false);
   const [splitAmount, setSplitAmount] = useState("");
+  const [newExchangeExpenseId, setNewExchangeExpenseId] = useState("");
   const [saving, setSaving] = useState(false);
   
   // Edit transaction form (mirrors the add form)
@@ -149,12 +158,45 @@ export default function TransactionsPage() {
   const [editMethod, setEditMethod] = useState("");
   const [editIsSplit, setEditIsSplit] = useState(false);
   const [editSplitAmount, setEditSplitAmount] = useState("");
+  const [editExchangeExpenseId, setEditExchangeExpenseId] = useState("");
   const [editSaving, setEditSaving] = useState(false);
 
   const numberClassName = cn(
     "transition-all duration-200",
     isStealthMode && "blur-sm select-none"
   );
+  const transactionMap = new Map(transactions.map((transaction) => [transaction._id, transaction]));
+  const exchangeExpenseOptions = getOffsettableExpenses(transactions);
+  const editExchangeExpenseOptions = transactions
+    .filter((transaction) => transaction.type === "expense")
+    .map((transaction) => {
+      const summary = getExpenseOffsetSummary(
+        transactions,
+        transaction._id,
+        isExchangeTransaction({
+          type: editType,
+          category: editCategory === "other" && editCustomCategory
+            ? editCustomCategory
+            : editCategory,
+        })
+          ? editingTransaction?._id
+          : undefined
+      );
+
+      return {
+        transaction,
+        remainingAmount: summary?.remainingAmount ?? 0,
+      };
+    })
+    .filter(
+      (item) =>
+        item.transaction._id === editExchangeExpenseId || item.remainingAmount > 0
+    )
+    .sort(
+      (left, right) =>
+        new Date(right.transaction.date).getTime() -
+        new Date(left.transaction.date).getTime()
+    );
 
   const fetchTransactions = useCallback(async () => {
     try {
@@ -215,9 +257,21 @@ export default function TransactionsPage() {
   }, [newType, newCategory]);
 
   useEffect(() => {
+    if (!(newType === "income" && newCategory === "exchange")) {
+      setNewExchangeExpenseId("");
+    }
+  }, [newType, newCategory]);
+
+  useEffect(() => {
     const validIds = getCategoriesForType(editType).map((cat) => cat.id);
     if (editCategory && !validIds.includes(editCategory)) {
       setEditCategory("other");
+    }
+  }, [editType, editCategory]);
+
+  useEffect(() => {
+    if (!(editType === "income" && editCategory === "exchange")) {
+      setEditExchangeExpenseId("");
     }
   }, [editType, editCategory]);
 
@@ -228,6 +282,7 @@ export default function TransactionsPage() {
     setCustomCategory(""); 
     setIsSplit(false);
     setSplitAmount("");
+    setNewExchangeExpenseId("");
   };
 
   const applyWorkflow = (workflow: IWorkflow) => {
@@ -252,6 +307,7 @@ export default function TransactionsPage() {
       setIsSplit(false);
       setSplitAmount("");
     }
+    setNewExchangeExpenseId("");
   };
 
   // Open edit dialog with transaction data
@@ -271,6 +327,7 @@ export default function TransactionsPage() {
     }
     
     setEditMethod(txn.paymentMethod);
+    setEditExchangeExpenseId(txn.exchangeExpenseId || "");
     if (txn.splitAmount && txn.splitAmount > 0) {
       setEditIsSplit(true);
       setEditSplitAmount(txn.splitAmount.toString());
@@ -281,6 +338,21 @@ export default function TransactionsPage() {
     setEditDialogOpen(true);
   };
 
+  const formatExpenseOptionLabel = (
+    transaction: Pick<
+      ExchangeAwareTransaction,
+      "_id" | "description" | "category" | "date"
+    >,
+    remainingAmount: number
+  ) => {
+    return `${transaction.description || "Expense"} • ${transaction.category || "General"} • ${new Date(
+      transaction.date || 0
+    ).toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+    })} • ₹${remainingAmount.toFixed(2)} left`;
+  };
+
   const handleUpdateTransaction = async () => {
     if (!editingTransaction || !editAmount || !editMethod) return;
     
@@ -288,6 +360,31 @@ export default function TransactionsPage() {
     if (editIsSplit && Number(editSplitAmount) >= Number(editAmount)) {
       alert("Split amount must be less than total amount");
       return;
+    }
+
+    if (editType === "income" && editCategory === "exchange" && !editExchangeExpenseId) {
+      alert("Select the expense transaction this exchange offsets");
+      return;
+    }
+
+    if (editType === "income" && editCategory === "exchange") {
+      const summary = getExpenseOffsetSummary(
+        transactions,
+        editExchangeExpenseId,
+        editingTransaction._id
+      );
+
+      if (!summary) {
+        alert("Selected expense is no longer available");
+        return;
+      }
+
+      if (Number(editAmount) > summary.remainingAmount) {
+        alert(
+          `Exchange amount cannot exceed ₹${summary.remainingAmount.toFixed(2)}`
+        );
+        return;
+      }
     }
 
     setEditSaving(true);
@@ -300,6 +397,10 @@ export default function TransactionsPage() {
       category: finalCategory || "General",
       paymentMethod: editMethod,
       splitAmount: editIsSplit ? Number(editSplitAmount) : 0,
+      exchangeExpenseId:
+        editType === "income" && finalCategory === "exchange"
+          ? editExchangeExpenseId
+          : undefined,
     };
 
     console.log("[Transactions] Updating transaction:", payload);
@@ -317,9 +418,13 @@ export default function TransactionsPage() {
         setEditingTransaction(null);
         await fetchTransactions();
         await refreshProfile();
+      } else {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Failed to update transaction");
       }
     } catch (err) {
       console.error("[Transactions] Error updating:", err);
+      alert(err instanceof Error ? err.message : "Failed to update transaction");
     } finally {
       setEditSaving(false);
     }
@@ -334,6 +439,27 @@ export default function TransactionsPage() {
       return;
     }
 
+    if (newType === "income" && newCategory === "exchange" && !newExchangeExpenseId) {
+      alert("Select the expense transaction this exchange offsets");
+      return;
+    }
+
+    if (newType === "income" && newCategory === "exchange") {
+      const summary = getExpenseOffsetSummary(transactions, newExchangeExpenseId);
+
+      if (!summary) {
+        alert("Selected expense is no longer available");
+        return;
+      }
+
+      if (Number(newAmount) > summary.remainingAmount) {
+        alert(
+          `Exchange amount cannot exceed ₹${summary.remainingAmount.toFixed(2)}`
+        );
+        return;
+      }
+    }
+
     setSaving(true);
     const finalCategory = newCategory === "other" && customCategory ? customCategory : newCategory;
     
@@ -344,6 +470,10 @@ export default function TransactionsPage() {
       category: finalCategory || "General",
       paymentMethod: newMethod,
       splitAmount: isSplit ? Number(splitAmount) : 0,
+      exchangeExpenseId:
+        newType === "income" && finalCategory === "exchange"
+          ? newExchangeExpenseId
+          : undefined,
     };
 
     console.log("[Transactions] Adding transaction:", payload);
@@ -361,9 +491,13 @@ export default function TransactionsPage() {
         setDialogOpen(false);
         await fetchTransactions();
         await refreshProfile();
+      } else {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Failed to add transaction");
       }
     } catch (err) {
       console.error("[Transactions] Error adding:", err);
+      alert(err instanceof Error ? err.message : "Failed to add transaction");
     } finally {
       setSaving(false);
     }
@@ -530,6 +664,27 @@ export default function TransactionsPage() {
                 )}
               </div>
 
+              {newType === "income" && newCategory === "exchange" && (
+                <div className="space-y-2">
+                  <Label>Offsets Expense</Label>
+                  <select
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                    value={newExchangeExpenseId}
+                    onChange={(event) => setNewExchangeExpenseId(event.target.value)}
+                  >
+                    <option value="">Select an expense transaction</option>
+                    {exchangeExpenseOptions.map(({ transaction, remainingAmount }) => (
+                      <option key={transaction._id} value={transaction._id}>
+                        {formatExpenseOptionLabel(transaction, remainingAmount)}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Exchange income reduces the selected expense in analysis only.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label>Payment Method</Label>
                 <div className="flex gap-2 flex-wrap">
@@ -634,6 +789,9 @@ export default function TransactionsPage() {
           <div className="divide-y">
             {transactions.map((txn) => {
               const config = methodConfig[txn.paymentMethod as keyof typeof methodConfig] || methodConfig.bank;
+              const linkedExpense = txn.exchangeExpenseId
+                ? transactionMap.get(txn.exchangeExpenseId)
+                : null;
               return (
                 <div
                   key={txn._id}
@@ -669,6 +827,11 @@ export default function TransactionsPage() {
                         {txn.category !== "General" && (
                           <Badge variant="outline" className="text-xs">
                             {txn.category}
+                          </Badge>
+                        )}
+                        {linkedExpense && (
+                          <Badge variant="outline" className="text-xs">
+                            Offsets {linkedExpense.category}
                           </Badge>
                         )}
                         <span className="text-xs text-muted-foreground">
@@ -847,6 +1010,27 @@ export default function TransactionsPage() {
                 />
               )}
             </div>
+
+            {editType === "income" && editCategory === "exchange" && (
+              <div className="space-y-2">
+                <Label>Offsets Expense</Label>
+                <select
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  value={editExchangeExpenseId}
+                  onChange={(event) => setEditExchangeExpenseId(event.target.value)}
+                >
+                  <option value="">Select an expense transaction</option>
+                  {editExchangeExpenseOptions.map(({ transaction, remainingAmount }) => (
+                    <option key={transaction._id} value={transaction._id}>
+                      {formatExpenseOptionLabel(transaction, remainingAmount)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Choose which expense this exchange income should offset in analysis.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Payment Method</Label>

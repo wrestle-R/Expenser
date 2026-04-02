@@ -144,6 +144,7 @@ export const EXPENSE_CATEGORIES = [
 export const INCOME_CATEGORIES = [
   { id: "salary", label: "Salary", color: "#22c55e" },
   { id: "gift", label: "Gift", color: "#a855f7" },
+  { id: "exchange", label: "Exchange", color: "#0ea5e9" },
   { id: "other", label: "Other", color: "#6b7280" },
 ];
 

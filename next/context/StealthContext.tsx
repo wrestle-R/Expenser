@@ -13,7 +13,7 @@ const STEALTH_STORAGE_KEY = "expenser-stealth-mode";
 const StealthContext = createContext<StealthContextType | undefined>(undefined);
 
 export function StealthProvider({ children }: { children: React.ReactNode }) {
-  const [isStealthMode, setIsStealthMode] = useState(false);
+  const [isStealthMode, setIsStealthMode] = useState(true);
 
   useEffect(() => {
     const stored = localStorage.getItem(STEALTH_STORAGE_KEY);
@@ -46,7 +46,7 @@ export function useStealthMode() {
   const context = useContext(StealthContext);
   if (!context) {
     return {
-      isStealthMode: false,
+      isStealthMode: true,
       toggleStealthMode: () => {},
       setStealthMode: () => {},
     };

@@ -65,10 +65,43 @@ export async function GET() {
         limit 1
       `;
 
-      const user = users[0];
+      let user = users[0];
 
       if (!user) {
-        return NextResponse.json({ error: "User not found" }, { status: 404 });
+        const clerkUser = await currentUser();
+        const email = clerkUser?.primaryEmailAddress?.emailAddress || "";
+        const fallbackName =
+          clerkUser?.fullName?.trim() ||
+          clerkUser?.firstName?.trim() ||
+          "";
+
+        const insertedUsers = await sql<UserRow[]>`
+          insert into users (
+            clerk_id,
+            email,
+            name,
+            occupation,
+            payment_methods,
+            balance_bank,
+            balance_cash,
+            balance_splitwise,
+            onboarded
+          )
+          values (
+            ${userId},
+            ${email},
+            ${fallbackName},
+            ${""},
+            ${[]},
+            ${0},
+            ${0},
+            ${0},
+            ${false}
+          )
+          returning *
+        `;
+
+        user = insertedUsers[0];
       }
 
       return NextResponse.json({ profile: mapUserRow(user) });

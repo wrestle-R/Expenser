@@ -93,6 +93,7 @@ interface UserContextType {
     data: UpdateTransactionPayload
   ) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
+  retryFailedTransaction: (id: string) => Promise<void>;
   addWorkflow: (
     data: CreateWorkflowPayload
   ) => Promise<void>;
@@ -429,6 +430,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         category: payload.category,
         paymentMethod: payload.paymentMethod,
         splitAmount: payload.splitAmount || 0,
+        exchangeExpenseId: payload.exchangeExpenseId,
         date: now,
         createdAt: now,
         updatedAt: now,
@@ -577,6 +579,100 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     [refreshProfile, transactions]
   );
 
+  const retryFailedTransaction = useCallback(
+    async (id: string) => {
+      const transaction = transactions.find((item) => item._id === id);
+
+      if (!transaction || transaction.syncStatus !== "failed" || !transaction.isLocal) {
+        throw new Error("Only failed local transactions can be retried");
+      }
+
+      const pendingTransaction: ITransaction = {
+        ...transaction,
+        syncStatus: "pending",
+        syncError: undefined,
+      };
+
+      const replaceLocalTransaction = async (nextTransaction: ITransaction) => {
+        const storedTransactions = await getStoredTransactions();
+        await setStoredTransactions(
+          dedupeTransactions(
+            storedTransactions.map((item) => {
+              const sameKey =
+                item._id === id ||
+                (item.clientRequestId || item._id) ===
+                  (transaction.clientRequestId || transaction._id);
+              return sameKey ? nextTransaction : item;
+            })
+          )
+        );
+        setTransactions((prev) =>
+          dedupeTransactions(
+            prev.map((item) => {
+              const sameKey =
+                item._id === id ||
+                (item.clientRequestId || item._id) ===
+                  (transaction.clientRequestId || transaction._id);
+              return sameKey ? nextTransaction : item;
+            })
+          )
+        );
+      };
+
+      const online = await syncService.isOnline();
+      if (!online) {
+        await removePendingTransaction(transaction._id);
+        await addPendingTransaction(pendingTransaction);
+        await replaceLocalTransaction(pendingTransaction);
+        setPendingCount((prev) => {
+          notificationService.onPendingItemAdded(prev + 1);
+          return prev + 1;
+        });
+        return;
+      }
+
+      await replaceLocalTransaction(pendingTransaction);
+
+      try {
+        const created = await api.createTransaction({
+          type: transaction.type,
+          amount: transaction.amount,
+          description: transaction.description,
+          category: transaction.category,
+          paymentMethod: transaction.paymentMethod,
+          splitAmount: transaction.splitAmount,
+          exchangeExpenseId: transaction.exchangeExpenseId,
+          date: transaction.date,
+          clientRequestId: transaction.clientRequestId ?? transaction._id,
+        });
+
+        const storedTransactions = await getStoredTransactions();
+        await setStoredTransactions(dedupeTransactions([created, ...storedTransactions]));
+        setTransactions((prev) =>
+          dedupeTransactions(
+            prev.map((item) => {
+              const sameKey =
+                item._id === id ||
+                (item.clientRequestId || item._id) ===
+                  (transaction.clientRequestId || transaction._id);
+              return sameKey ? created : item;
+            })
+          )
+        );
+        void refreshProfile();
+      } catch (error) {
+        const failedTransaction: ITransaction = {
+          ...transaction,
+          syncStatus: "failed",
+          syncError: error instanceof Error ? error.message : "Sync failed",
+        };
+        await replaceLocalTransaction(failedTransaction);
+        throw error;
+      }
+    },
+    [refreshProfile, transactions]
+  );
+
   const addWorkflow = useCallback(
     async (payload: CreateWorkflowPayload) => {
       const online = await syncService.isOnline();
@@ -718,6 +814,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         addTransaction,
         updateTransaction,
         deleteTransaction,
+        retryFailedTransaction,
         addWorkflow,
         deleteWorkflow,
         getBalance,

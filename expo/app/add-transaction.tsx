@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import {
 } from "../constants/theme";
 import { TransactionType, PaymentMethod } from "../lib/types";
 import { getExpenseOffsetSummary, getSelectableExchangeExpenses } from "../lib/exchange";
+import { api } from "../lib/api";
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: string }[] = [
   { id: "bank", label: "Bank (UPI)", icon: "card" },
@@ -48,9 +49,39 @@ export default function AddTransactionScreen() {
   const [isSplit, setIsSplit] = useState(false);
   const [exchangeExpenseId, setExchangeExpenseId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [syncedCategories, setSyncedCategories] = useState<
+    { id: string; label: string; color: string; type: TransactionType }[]
+  >([]);
 
-  const categories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const categories = useMemo(() => {
+    const baseCategories =
+      type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+    return [
+      ...baseCategories,
+      ...syncedCategories.filter(
+        (cat) =>
+          cat.type === type &&
+          !baseCategories.some((baseCategory) => baseCategory.id === cat.id)
+      ),
+    ];
+  }, [syncedCategories, type]);
   const exchangeExpenseOptions = getSelectableExchangeExpenses(transactions);
+
+  useEffect(() => {
+    api
+      .getCategories()
+      .then((items) =>
+        setSyncedCategories(
+          items.map((item) => ({
+            id: item.name,
+            label: item.name,
+            color: item.color,
+            type: item.type,
+          }))
+        )
+      )
+      .catch((error) => console.error("[AddTransaction] Categories:", error));
+  }, []);
 
   useEffect(() => {
     const validIds = categories.map((cat) => cat.id);

@@ -366,6 +366,12 @@ class SyncService {
           paymentMethod: txn.paymentMethod,
           splitAmount: txn.splitAmount,
           exchangeExpenseId: txn.exchangeExpenseId,
+          importSource: txn.importSource,
+          importSourceKey: txn.importSourceKey,
+          importedAccountSuffix: txn.importedAccountSuffix,
+          importedBankBalance: txn.importedBankBalance,
+          importedBankReference: txn.importedBankReference,
+          importedBankConfidence: txn.importedBankConfidence,
           date: txn.date,
           clientRequestId: txn.clientRequestId ?? txn._id,
         });

@@ -9,6 +9,8 @@ import {
   ProfileResponse,
   CreateTransactionPayload,
   CreateWorkflowPayload,
+  IUserCategory,
+  BalanceReconciliationAlert,
 } from "./types";
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -117,6 +119,49 @@ class ApiService {
       }
     );
     return data.transaction;
+  }
+
+  async getCategories(): Promise<IUserCategory[]> {
+    const data = await this.request<{ categories: IUserCategory[] }>("/api/categories");
+    return data.categories;
+  }
+
+  async saveCategory(payload: {
+    type: "income" | "expense";
+    name: string;
+    color: string;
+  }): Promise<IUserCategory> {
+    const data = await this.request<{ category: IUserCategory }>("/api/categories", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    return data.category;
+  }
+
+  async deleteCategory(id: string): Promise<void> {
+    await this.request(`/api/categories?id=${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getBalanceAlerts(): Promise<BalanceReconciliationAlert[]> {
+    const data = await this.request<{ alerts: BalanceReconciliationAlert[] }>(
+      "/api/bank-imports/reconcile"
+    );
+    return data.alerts;
+  }
+
+  async resolveBalanceAlert(
+    id: string,
+    action: "apply" | "keep"
+  ): Promise<{
+    alert: BalanceReconciliationAlert;
+    profile?: IUserProfile | null;
+  }> {
+    return this.request("/api/bank-imports/reconcile", {
+      method: "POST",
+      body: JSON.stringify({ id, action }),
+    });
   }
 
   async deleteTransaction(id: string): Promise<void> {

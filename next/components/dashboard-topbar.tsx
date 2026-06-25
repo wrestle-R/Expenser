@@ -18,6 +18,7 @@ const breadcrumbMap: Record<string, string> = {
   "/dashboard/workflows": "Workflows",
   "/dashboard/calendar": "Calendar",
   "/dashboard/analysis": "Analysis",
+  "/dashboard/setup": "Setup",
   "/dashboard/profile": "Profile",
 };
 

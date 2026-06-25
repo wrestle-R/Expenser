@@ -15,6 +15,7 @@ import { ToastProvider } from "../context/ToastContext";
 import { ENV } from "../env";
 import { Colors } from "../constants/theme";
 import { syncService } from "../lib/sync";
+import BalanceReconciliationPrompt from "../components/BalanceReconciliationPrompt";
 
 const AUTH_LOAD_TIMEOUT_MS = 5000;
 
@@ -144,6 +145,7 @@ function InnerLayout() {
       <UserProvider>
         <ToastProvider>
           <AuthGuard>
+            <BalanceReconciliationPrompt />
             <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="(auth)" options={{ headerShown: false }} />

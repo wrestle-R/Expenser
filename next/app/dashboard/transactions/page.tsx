@@ -116,8 +116,36 @@ const INCOME_CATEGORIES = [
   { id: "other", label: "Other", icon: MoreHorizontal, color: "text-gray-600" },
 ];
 
-function getCategoriesForType(type: "income" | "expense") {
-  return type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+type CategoryOption = {
+  id: string;
+  label: string;
+  icon: typeof MoreHorizontal;
+  color: string;
+};
+
+type UserCategory = {
+  _id: string;
+  type: "income" | "expense";
+  name: string;
+  color: string;
+};
+
+function getCategoriesForType(
+  type: "income" | "expense",
+  userCategories: UserCategory[]
+): CategoryOption[] {
+  const builtIns = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const builtInIds = new Set(builtIns.map((category) => category.id));
+  const customCategories = userCategories
+    .filter((category) => category.type === type && !builtInIds.has(category.name))
+    .map((category) => ({
+      id: category.name,
+      label: category.name,
+      icon: MoreHorizontal,
+      color: "text-gray-600",
+    }));
+
+  return [...builtIns, ...customCategories];
 }
 
 export default function TransactionsPage() {
@@ -126,6 +154,7 @@ export default function TransactionsPage() {
   const searchParams = useSearchParams();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
+  const [userCategories, setUserCategories] = useState<UserCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   
@@ -232,10 +261,23 @@ export default function TransactionsPage() {
     }
   }, []);
 
+  const fetchCategories = useCallback(async () => {
+    try {
+      const res = await fetch("/api/categories");
+      if (res.ok) {
+        const data = await res.json();
+        setUserCategories(data.categories ?? []);
+      }
+    } catch (err) {
+      console.error("[Transactions] Error fetching categories:", err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchTransactions();
     fetchWorkflows();
-  }, [fetchTransactions, fetchWorkflows]);
+    fetchCategories();
+  }, [fetchCategories, fetchTransactions, fetchWorkflows]);
 
   useEffect(() => {
     if (searchParams.get("new") === "true") {
@@ -250,11 +292,11 @@ export default function TransactionsPage() {
   }, [profile, newMethod]);
 
   useEffect(() => {
-    const validIds = getCategoriesForType(newType).map((cat) => cat.id);
+    const validIds = getCategoriesForType(newType, userCategories).map((cat) => cat.id);
     if (newCategory && !validIds.includes(newCategory)) {
       setNewCategory("other");
     }
-  }, [newType, newCategory]);
+  }, [newType, newCategory, userCategories]);
 
   useEffect(() => {
     if (!(newType === "income" && newCategory === "exchange")) {
@@ -263,11 +305,11 @@ export default function TransactionsPage() {
   }, [newType, newCategory]);
 
   useEffect(() => {
-    const validIds = getCategoriesForType(editType).map((cat) => cat.id);
+    const validIds = getCategoriesForType(editType, userCategories).map((cat) => cat.id);
     if (editCategory && !validIds.includes(editCategory)) {
       setEditCategory("other");
     }
-  }, [editType, editCategory]);
+  }, [editType, editCategory, userCategories]);
 
   useEffect(() => {
     if (!(editType === "income" && editCategory === "exchange")) {
@@ -290,7 +332,7 @@ export default function TransactionsPage() {
     setNewAmount(workflow.amount ? workflow.amount.toString() : "");
     setNewDescription(workflow.description);
     
-    const categoryIdsForType = getCategoriesForType(workflow.type).map((c) => c.id);
+    const categoryIdsForType = getCategoriesForType(workflow.type, userCategories).map((c) => c.id);
     if (categoryIdsForType.includes(workflow.category.toLowerCase())) {
       setNewCategory(workflow.category.toLowerCase());
       setCustomCategory("");
@@ -317,7 +359,7 @@ export default function TransactionsPage() {
     setEditAmount(txn.amount.toString());
     setEditDescription(txn.description);
     
-    const categoryIdsForType = getCategoriesForType(txn.type).map((c) => c.id);
+    const categoryIdsForType = getCategoriesForType(txn.type, userCategories).map((c) => c.id);
     if (categoryIdsForType.includes(txn.category.toLowerCase())) {
       setEditCategory(txn.category.toLowerCase());
       setEditCustomCategory("");
@@ -634,7 +676,7 @@ export default function TransactionsPage() {
               <div className="space-y-2">
                 <Label>Category</Label>
                 <div className="grid grid-cols-2 gap-2">
-                  {getCategoriesForType(newType).map((cat) => {
+                  {getCategoriesForType(newType, userCategories).map((cat) => {
                     const Icon = cat.icon;
                     return (
                       <button
@@ -981,7 +1023,7 @@ export default function TransactionsPage() {
             <div className="space-y-2">
               <Label>Category</Label>
               <div className="grid grid-cols-2 gap-2">
-                {getCategoriesForType(editType).map((cat) => {
+                {getCategoriesForType(editType, userCategories).map((cat) => {
                   const Icon = cat.icon;
                   return (
                     <button

@@ -13,22 +13,24 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("light");
-  const [mounted, setMounted] = useState(false);
+  const [theme, setThemeState] = useState<Theme>(() => {
+    if (typeof window === "undefined") {
+      return "light";
+    }
+
+    const stored = window.localStorage.getItem("expenser-theme") as Theme | null;
+    if (stored) {
+      return stored;
+    }
+
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  });
 
   useEffect(() => {
-    setMounted(true);
-    const stored = localStorage.getItem("expenser-theme") as Theme | null;
-    if (stored) {
-      setThemeState(stored);
-      document.documentElement.classList.toggle("dark", stored === "dark");
-    } else {
-      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      const initial = prefersDark ? "dark" : "light";
-      setThemeState(initial);
-      document.documentElement.classList.toggle("dark", initial === "dark");
-    }
-  }, []);
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }, [theme]);
 
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme);
@@ -40,36 +42,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const toggleTheme = () => {
     setTheme(theme === "light" ? "dark" : "light");
   };
-
-  useEffect(() => {
-    const handleKeydown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isTypingTarget =
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement ||
-        target?.isContentEditable;
-
-      if (isTypingTarget || event.metaKey || event.ctrlKey || event.altKey) {
-        return;
-      }
-
-      if (event.key.toLowerCase() === "d") {
-        event.preventDefault();
-        setTheme(theme === "light" ? "dark" : "light");
-      }
-    };
-
-    window.addEventListener("keydown", handleKeydown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeydown);
-    };
-  }, [theme]);
-
-  if (!mounted) {
-    return <>{children}</>;
-  }
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>

@@ -16,6 +16,8 @@ import {
 const PAYMENT_METHODS: PaymentMethod[] = ["bank", "cash", "splitwise"];
 const TRANSACTION_TYPES: TransactionType[] = ["income", "expense"];
 const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const IMPORT_SOURCE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const IMPORT_SOURCE_KEY_PATTERN = /^[A-Za-z0-9:_-]{1,256}$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -105,6 +107,81 @@ function parseExchangeExpenseId(value: unknown) {
   return normalized;
 }
 
+function parseImportMetadata(data: Record<string, unknown>) {
+  const importSource =
+    data.importSource == null || data.importSource === ""
+      ? null
+      : sanitizeText(data.importSource, {
+          field: "importSource",
+          maxLength: 64,
+          required: false,
+        });
+  const importSourceKey =
+    data.importSourceKey == null || data.importSourceKey === ""
+      ? null
+      : sanitizeText(data.importSourceKey, {
+          field: "importSourceKey",
+          maxLength: 256,
+          required: false,
+        });
+
+  if ((importSource && !importSourceKey) || (!importSource && importSourceKey)) {
+    throw new Error("importSource and importSourceKey must be provided together");
+  }
+
+  if (importSource && !IMPORT_SOURCE_PATTERN.test(importSource)) {
+    throw new Error(
+      "importSource may only contain letters, numbers, hyphens, and underscores"
+    );
+  }
+
+  if (importSourceKey && !IMPORT_SOURCE_KEY_PATTERN.test(importSourceKey)) {
+    throw new Error("importSourceKey contains unsupported characters");
+  }
+
+  const importedBankBalance =
+    data.importedBankBalance == null || data.importedBankBalance === ""
+      ? null
+      : normalizeNumber(data.importedBankBalance, Number.NaN);
+
+  if (
+    importedBankBalance != null &&
+    (!Number.isFinite(importedBankBalance) || importedBankBalance < 0)
+  ) {
+    throw new Error("importedBankBalance must be 0 or greater");
+  }
+
+  return {
+    importSource,
+    importSourceKey,
+    importedAccountSuffix:
+      data.importedAccountSuffix == null || data.importedAccountSuffix === ""
+        ? null
+        : sanitizeText(data.importedAccountSuffix, {
+            field: "importedAccountSuffix",
+            maxLength: 16,
+            required: false,
+          }),
+    importedBankBalance,
+    importedBankReference:
+      data.importedBankReference == null || data.importedBankReference === ""
+        ? null
+        : sanitizeText(data.importedBankReference, {
+            field: "importedBankReference",
+            maxLength: 64,
+            required: false,
+          }),
+    importedBankConfidence:
+      data.importedBankConfidence == null || data.importedBankConfidence === ""
+        ? null
+        : sanitizeText(data.importedBankConfidence, {
+            field: "importedBankConfidence",
+            maxLength: 24,
+            required: false,
+          }),
+  };
+}
+
 function isExchangeCategory(
   transaction: Pick<ReturnType<typeof parseTransactionInput>, "type" | "category">
 ) {
@@ -162,9 +239,49 @@ function parseTransactionInput(data: Record<string, unknown>) {
     paymentMethod: data.paymentMethod,
     splitAmount,
     exchangeExpenseId: parseExchangeExpenseId(data.exchangeExpenseId),
+    ...parseImportMetadata(data),
     date: normalizeDate(data.date),
     clientRequestId: parseClientRequestId(data.clientRequestId),
   };
+}
+
+async function createBalanceReconciliationAlertIfNeeded(
+  trx: typeof sql,
+  userId: string,
+  transaction: TransactionRow,
+  expectedBankBalance: number
+) {
+  if (
+    transaction.payment_method !== "bank" ||
+    transaction.imported_bank_balance == null
+  ) {
+    return;
+  }
+
+  const bankBalance = Number(transaction.imported_bank_balance);
+  const difference = Number((bankBalance - expectedBankBalance).toFixed(2));
+  if (Math.abs(difference) <= 0.01) {
+    return;
+  }
+
+  await trx`
+    insert into balance_reconciliation_alerts (
+      clerk_id,
+      transaction_id,
+      payment_method,
+      expected_balance,
+      bank_balance,
+      difference
+    )
+    values (
+      ${userId},
+      ${transaction.id},
+      'bank',
+      ${expectedBankBalance},
+      ${bankBalance},
+      ${difference}
+    )
+  `;
 }
 
 async function validateExchangeExpenseLink(
@@ -348,6 +465,22 @@ export async function POST(req: Request) {
         }
       }
 
+      if (payload.importSource && payload.importSourceKey) {
+        const existingImports = (await trx`
+          select *
+          from transactions
+          where clerk_id = ${userId}
+            and import_source = ${payload.importSource}
+            and import_source_key = ${payload.importSourceKey}
+          limit 1
+        `) as TransactionRow[];
+
+        const existing = existingImports[0];
+        if (existing) {
+          return { transaction: existing, insertedNew: false };
+        }
+      }
+
       let transaction: TransactionRow;
       await validateExchangeExpenseLink(trx, userId, payload);
 
@@ -357,6 +490,12 @@ export async function POST(req: Request) {
             clerk_id,
             client_request_id,
             exchange_expense_id,
+            import_source,
+            import_source_key,
+            imported_account_suffix,
+            imported_bank_balance,
+            imported_bank_reference,
+            imported_bank_confidence,
             type,
             amount,
             description,
@@ -369,6 +508,12 @@ export async function POST(req: Request) {
             ${userId},
             ${payload.clientRequestId},
             ${payload.exchangeExpenseId},
+            ${payload.importSource},
+            ${payload.importSourceKey},
+            ${payload.importedAccountSuffix},
+            ${payload.importedBankBalance},
+            ${payload.importedBankReference},
+            ${payload.importedBankConfidence},
             ${payload.type},
             ${payload.amount},
             ${payload.description},
@@ -383,18 +528,36 @@ export async function POST(req: Request) {
         transaction = insertedTransactions[0];
       } catch (error: unknown) {
         const err = error as { code?: string };
-        if (payload.clientRequestId && err?.code === "23505") {
-          const existingTransactions = (await trx`
-            select *
-            from transactions
-            where clerk_id = ${userId}
-              and client_request_id = ${payload.clientRequestId}
-            limit 1
-          `) as TransactionRow[];
+        if (err?.code === "23505") {
+          if (payload.importSource && payload.importSourceKey) {
+            const existingImports = (await trx`
+              select *
+              from transactions
+              where clerk_id = ${userId}
+                and import_source = ${payload.importSource}
+                and import_source_key = ${payload.importSourceKey}
+              limit 1
+            `) as TransactionRow[];
 
-          const existing = existingTransactions[0];
-          if (existing) {
-            return { transaction: existing, insertedNew: false };
+            const existing = existingImports[0];
+            if (existing) {
+              return { transaction: existing, insertedNew: false };
+            }
+          }
+
+          if (payload.clientRequestId) {
+            const existingTransactions = (await trx`
+              select *
+              from transactions
+              where clerk_id = ${userId}
+                and client_request_id = ${payload.clientRequestId}
+              limit 1
+            `) as TransactionRow[];
+
+            const existing = existingTransactions[0];
+            if (existing) {
+              return { transaction: existing, insertedNew: false };
+            }
           }
         }
 
@@ -430,6 +593,13 @@ export async function POST(req: Request) {
             balance_splitwise = ${balances.splitwise}
           where clerk_id = ${userId}
         `;
+
+        await createBalanceReconciliationAlertIfNeeded(
+          trx,
+          userId,
+          transaction,
+          balances.bank
+        );
       }
 
       return { transaction, insertedNew: true };

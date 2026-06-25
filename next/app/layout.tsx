@@ -3,6 +3,7 @@ import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { StealthProvider } from "@/context/StealthContext";
+import { ShortcutProvider } from "@/context/ShortcutContext";
 import { UserProvider } from "@/context/UserContext";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
@@ -44,9 +45,11 @@ export default function RootLayout({
         <body className="font-sans antialiased">
           <ThemeProvider>
             <StealthProvider>
-              <UserProvider>
-                <TooltipProvider>{children}</TooltipProvider>
-              </UserProvider>
+              <ShortcutProvider>
+                <UserProvider>
+                  <TooltipProvider>{children}</TooltipProvider>
+                </UserProvider>
+              </ShortcutProvider>
             </StealthProvider>
           </ThemeProvider>
         </body>

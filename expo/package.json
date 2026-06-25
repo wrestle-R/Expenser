@@ -21,6 +21,7 @@
     "@rn-primitives/slot": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "expenser-bank-notifications": "file:modules/expenser-bank-notifications",
     "expo": "~54.0.33",
     "expo-auth-session": "~7.0.10",
     "expo-constants": "~18.0.13",

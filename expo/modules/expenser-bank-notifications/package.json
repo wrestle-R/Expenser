@@ -1,0 +1,9 @@
+{
+  "name": "expenser-bank-notifications",
+  "version": "0.1.0",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "expo-module": {
+    "platforms": ["android"]
+  }
+}

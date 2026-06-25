@@ -34,6 +34,11 @@ import {
 import { IUserProfile, ITransaction, IWorkflow, ILocalBalance, CreateTransactionPayload, CreateWorkflowPayload, UpdateTransactionPayload } from "../lib/types";
 import { generateTempId } from "../lib/utils";
 import { notificationService } from "../lib/notifications";
+import {
+  bankImportToTransactionPayload,
+  clearQueuedBankImports,
+  getQueuedBankImports,
+} from "../lib/bank-imports";
 
 function dedupeTransactions(items: ITransaction[]) {
   const deduped = new Map<string, ITransaction>();
@@ -431,6 +436,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         paymentMethod: payload.paymentMethod,
         splitAmount: payload.splitAmount || 0,
         exchangeExpenseId: payload.exchangeExpenseId,
+        importSource: payload.importSource,
+        importSourceKey: payload.importSourceKey,
+        importedAccountSuffix: payload.importedAccountSuffix,
+        importedBankBalance: payload.importedBankBalance,
+        importedBankReference: payload.importedBankReference,
+        importedBankConfidence: payload.importedBankConfidence,
         date: now,
         createdAt: now,
         updatedAt: now,
@@ -488,6 +499,45 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     },
     [profile, refreshProfile]
   );
+
+  const importQueuedBankNotifications = useCallback(async () => {
+    if (!isSignedIn || !profile) {
+      return;
+    }
+
+    const queued = getQueuedBankImports();
+    if (queued.length === 0) {
+      return;
+    }
+
+    const importedKeys: string[] = [];
+    for (const item of queued) {
+      try {
+        await addTransaction(bankImportToTransactionPayload(item));
+        importedKeys.push(item.importSourceKey);
+      } catch (error) {
+        console.error("[UserContext] Failed to import bank notification:", error);
+      }
+    }
+
+    if (importedKeys.length > 0) {
+      clearQueuedBankImports(importedKeys);
+    }
+  }, [addTransaction, isSignedIn, profile]);
+
+  useEffect(() => {
+    if (isSignedIn && profile) {
+      importQueuedBankNotifications().catch(console.error);
+    }
+
+    const interval = setInterval(() => {
+      if (isSignedIn && profile) {
+        importQueuedBankNotifications().catch(console.error);
+      }
+    }, 30_000);
+
+    return () => clearInterval(interval);
+  }, [importQueuedBankNotifications, isSignedIn, profile]);
 
   const updateTransaction = useCallback(
     async (id: string, payload: UpdateTransactionPayload) => {
@@ -642,6 +692,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           paymentMethod: transaction.paymentMethod,
           splitAmount: transaction.splitAmount,
           exchangeExpenseId: transaction.exchangeExpenseId,
+          importSource: transaction.importSource,
+          importSourceKey: transaction.importSourceKey,
+          importedAccountSuffix: transaction.importedAccountSuffix,
+          importedBankBalance: transaction.importedBankBalance,
+          importedBankReference: transaction.importedBankReference,
+          importedBankConfidence: transaction.importedBankConfidence,
           date: transaction.date,
           clientRequestId: transaction.clientRequestId ?? transaction._id,
         });

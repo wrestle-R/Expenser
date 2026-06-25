@@ -5,6 +5,12 @@ export interface ITransaction {
   clerkId: string;
   clientRequestId?: string;
   exchangeExpenseId?: string;
+  importSource?: string;
+  importSourceKey?: string;
+  importedAccountSuffix?: string;
+  importedBankBalance?: number;
+  importedBankReference?: string;
+  importedBankConfidence?: string;
   type: "income" | "expense";
   amount: number;
   description: string;
@@ -74,6 +80,12 @@ export interface CreateTransactionPayload {
   paymentMethod: PaymentMethod;
   splitAmount?: number;
   exchangeExpenseId?: string;
+  importSource?: string;
+  importSourceKey?: string;
+  importedAccountSuffix?: string;
+  importedBankBalance?: number;
+  importedBankReference?: string;
+  importedBankConfidence?: string;
   date?: string; // Optional, backend will default to current date
   clientRequestId?: string;
 }
@@ -86,6 +98,12 @@ export interface UpdateTransactionPayload {
   paymentMethod?: PaymentMethod;
   splitAmount?: number;
   exchangeExpenseId?: string;
+  importSource?: string;
+  importSourceKey?: string;
+  importedAccountSuffix?: string;
+  importedBankBalance?: number;
+  importedBankReference?: string;
+  importedBankConfidence?: string;
   date?: string;
 }
 
@@ -111,4 +129,28 @@ export interface WorkflowsResponse {
 
 export interface ProfileResponse {
   profile: IUserProfile;
+}
+
+export interface IUserCategory {
+  _id: string;
+  clerkId: string;
+  type: TransactionType;
+  name: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BalanceReconciliationAlert {
+  _id: string;
+  clerkId: string;
+  transactionId?: string;
+  paymentMethod: PaymentMethod;
+  expectedBalance: number;
+  bankBalance: number;
+  difference: number;
+  status: "pending" | "applied" | "kept";
+  source: string;
+  createdAt: string;
+  resolvedAt?: string;
 }

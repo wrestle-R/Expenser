@@ -39,7 +39,7 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const { user, isLoaded: isClerkLoaded } = useUser();
-  const { isSignedIn, getToken } = useAuth();
+  const { isSignedIn } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

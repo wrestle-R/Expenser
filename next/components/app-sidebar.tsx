@@ -11,7 +11,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, ArrowRightLeft, CalendarDays, ChartPie, Eye, EyeOff, LogOut, Moon, Sun, Wallet, Workflow } from "lucide-react";
+import { LayoutDashboard, ArrowRightLeft, CalendarDays, ChartPie, Eye, EyeOff, LogOut, Moon, Settings, Sun, Wallet, Workflow } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useStealthMode } from "@/context/StealthContext";
 import { useClerk, useUser } from "@clerk/nextjs";
@@ -46,6 +46,11 @@ const navItems = [
     title: "Analysis",
     url: "/dashboard/analysis",
     icon: ChartPie,
+  },
+  {
+    title: "Setup",
+    url: "/dashboard/setup",
+    icon: Settings,
   },
 ];
 

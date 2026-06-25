@@ -50,6 +50,12 @@ export interface TransactionRow {
   clerk_id: string;
   client_request_id: string | null;
   exchange_expense_id: string | null;
+  import_source: string | null;
+  import_source_key: string | null;
+  imported_account_suffix: string | null;
+  imported_bank_balance: number | null;
+  imported_bank_reference: string | null;
+  imported_bank_confidence: string | null;
   type: TransactionType;
   amount: number;
   description: string;
@@ -93,6 +99,30 @@ export interface UserProfile {
   updatedAt: string;
 }
 
+export interface UserCategoryRow {
+  id: string;
+  clerk_id: string;
+  type: TransactionType;
+  name: string;
+  color: string;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
+export interface BalanceReconciliationAlertRow {
+  id: string;
+  clerk_id: string;
+  transaction_id: string | null;
+  payment_method: PaymentMethod;
+  expected_balance: number;
+  bank_balance: number;
+  difference: number;
+  status: "pending" | "applied" | "kept";
+  source: string;
+  created_at: string | Date;
+  resolved_at: string | Date | null;
+}
+
 export function mapUserRow(row: UserRow): UserProfile {
   return {
     _id: row.id,
@@ -118,6 +148,15 @@ export function mapTransactionRow(row: TransactionRow) {
     clerkId: row.clerk_id,
     clientRequestId: row.client_request_id ?? undefined,
     exchangeExpenseId: row.exchange_expense_id ?? undefined,
+    importSource: row.import_source ?? undefined,
+    importSourceKey: row.import_source_key ?? undefined,
+    importedAccountSuffix: row.imported_account_suffix ?? undefined,
+    importedBankBalance:
+      row.imported_bank_balance == null
+        ? undefined
+        : Number(row.imported_bank_balance),
+    importedBankReference: row.imported_bank_reference ?? undefined,
+    importedBankConfidence: row.imported_bank_confidence ?? undefined,
     type: row.type,
     amount: Number(row.amount),
     description: row.description,
@@ -127,6 +166,38 @@ export function mapTransactionRow(row: TransactionRow) {
     date: new Date(row.date).toISOString(),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
+  };
+}
+
+export function mapUserCategoryRow(row: UserCategoryRow) {
+  return {
+    _id: row.id,
+    clerkId: row.clerk_id,
+    type: row.type,
+    name: row.name,
+    color: row.color,
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+  };
+}
+
+export function mapBalanceReconciliationAlertRow(
+  row: BalanceReconciliationAlertRow
+) {
+  return {
+    _id: row.id,
+    clerkId: row.clerk_id,
+    transactionId: row.transaction_id ?? undefined,
+    paymentMethod: row.payment_method,
+    expectedBalance: Number(row.expected_balance),
+    bankBalance: Number(row.bank_balance),
+    difference: Number(row.difference),
+    status: row.status,
+    source: row.source,
+    createdAt: new Date(row.created_at).toISOString(),
+    resolvedAt: row.resolved_at
+      ? new Date(row.resolved_at).toISOString()
+      : undefined,
   };
 }
 

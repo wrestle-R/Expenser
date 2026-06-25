@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -31,6 +31,7 @@ import { formatCurrency, formatDate } from "../../lib/utils";
 import { ITransaction, PaymentMethod, TransactionType } from "../../lib/types";
 import ConfirmModal from "../../components/ConfirmModal";
 import { getExpenseOffsetSummary } from "../../lib/exchange";
+import { api } from "../../lib/api";
 
 const PAGE_SIZE = 10;
 
@@ -78,9 +79,22 @@ export default function TransactionsScreen() {
   const [editIsSplit, setEditIsSplit] = useState(false);
   const [editExchangeExpenseId, setEditExchangeExpenseId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [syncedCategories, setSyncedCategories] = useState<
+    { id: string; label: string; color: string; type: TransactionType }[]
+  >([]);
 
-  const editCategories =
-    editType === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const editCategories = useMemo(() => {
+    const baseCategories =
+      editType === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+    return [
+      ...baseCategories,
+      ...syncedCategories.filter(
+        (cat) =>
+          cat.type === editType &&
+          !baseCategories.some((baseCategory) => baseCategory.id === cat.id)
+      ),
+    ];
+  }, [editType, syncedCategories]);
   const editExchangeExpenseOptions = transactions
     .filter((transaction) => transaction.type === "expense" && !transaction.isLocal)
     .map((transaction) => {
@@ -104,6 +118,22 @@ export default function TransactionsScreen() {
         new Date(right.transaction.date).getTime() -
         new Date(left.transaction.date).getTime()
     );
+
+  useEffect(() => {
+    api
+      .getCategories()
+      .then((items) =>
+        setSyncedCategories(
+          items.map((item) => ({
+            id: item.name,
+            label: item.name,
+            color: item.color,
+            type: item.type,
+          }))
+        )
+      )
+      .catch((error) => console.error("[Transactions] Categories:", error));
+  }, []);
 
   useEffect(() => {
     const validIds = editCategories.map((cat) => cat.id);

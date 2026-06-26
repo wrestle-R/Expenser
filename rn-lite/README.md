@@ -59,6 +59,18 @@ ANDROID_KEY_ALIAS
 ANDROID_KEY_PASSWORD
 ```
 
+Create `ANDROID_KEYSTORE_BASE64` from the real binary keystore file, not from a
+PEM/private-key text file:
+
+```bash
+base64 -w 0 release.keystore
+```
+
+The workflow decodes this value, verifies that `ANDROID_KEY_ALIAS` exists in the
+keystore with `ANDROID_KEYSTORE_PASSWORD`, then builds the APK. If the alias is
+blank or the secret is not a JKS/PKCS12 keystore, the workflow fails before the
+Gradle build starts.
+
 Tag command for the user to run manually:
 
 ```bash

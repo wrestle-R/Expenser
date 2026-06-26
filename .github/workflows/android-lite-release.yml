@@ -34,11 +34,38 @@ jobs:
         working-directory: rn-lite
         run: npm ci
 
+      - name: Test release keystore decoder
+        working-directory: rn-lite
+        run: npm test -- __tests__/decodeAndroidKeystore.test.js --runInBand
+
       - name: Decode release keystore
         working-directory: rn-lite
-        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
+        run: node scripts/decodeAndroidKeystore.js android/app/release.keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+      - name: Verify release signing config
+        working-directory: rn-lite
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for name in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name is missing or empty"
+              exit 1
+            fi
+          done
+
+          keytool -list \
+            -keystore android/app/release.keystore \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" \
+            >/dev/null
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Build release APK
         working-directory: rn-lite/android

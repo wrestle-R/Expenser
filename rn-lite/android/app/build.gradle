@@ -59,6 +59,25 @@ react {
  */
 def enableProguardInReleaseBuilds = true
 def releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_FILE") ?: "release.keystore"
+def releaseSigningEnvNames = [
+        "ANDROID_KEYSTORE_PASSWORD",
+        "ANDROID_KEY_ALIAS",
+        "ANDROID_KEY_PASSWORD"
+]
+def releaseSigningEnvPresent = releaseSigningEnvNames.collectEntries { name ->
+    [(name): System.getenv(name)?.trim()]
+}
+def releaseSigningEnabled = releaseSigningEnvPresent.every { _, value -> value }
+def anyReleaseSigningEnvSet = releaseSigningEnvPresent.any { _, value -> value } || System.getenv("ANDROID_KEYSTORE_FILE")?.trim()
+
+if (anyReleaseSigningEnvSet && !releaseSigningEnabled) {
+    def missingReleaseSigningEnv = releaseSigningEnvPresent.findAll { _, value -> !value }.keySet().join(", ")
+    throw new GradleException("Release signing is incomplete. Missing: ${missingReleaseSigningEnv}")
+}
+
+if (releaseSigningEnabled && !file(releaseKeystorePath).isFile()) {
+    throw new GradleException("Release keystore not found at android/app/${releaseKeystorePath}")
+}
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -94,7 +113,7 @@ android {
             keyPassword 'android'
         }
         release {
-            if (System.getenv("ANDROID_KEYSTORE_PASSWORD") != null) {
+            if (releaseSigningEnabled) {
                 storeFile file(releaseKeystorePath)
                 storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
                 keyAlias System.getenv("ANDROID_KEY_ALIAS")
@@ -107,7 +126,7 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig System.getenv("ANDROID_KEYSTORE_PASSWORD") != null ? signingConfigs.release : signingConfigs.debug
+            signingConfig releaseSigningEnabled ? signingConfigs.release : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }

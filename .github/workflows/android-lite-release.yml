@@ -38,13 +38,37 @@ jobs:
         working-directory: rn-lite
         run: npm test -- __tests__/decodeAndroidKeystore.test.js --runInBand
 
+      - name: Detect release signing secrets
+        id: signing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] && \
+             [ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ] && \
+             [ -n "${ANDROID_KEY_ALIAS:-}" ] && \
+             [ -n "${ANDROID_KEY_PASSWORD:-}" ]; then
+            echo "use_release_signing=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::warning::Release signing secrets are missing. Building the Lite APK with the debug keystore fallback."
+          echo "use_release_signing=false" >> "$GITHUB_OUTPUT"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
       - name: Decode release keystore
+        if: steps.signing.outputs.use_release_signing == 'true'
         working-directory: rn-lite
         run: node scripts/decodeAndroidKeystore.js android/app/release.keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
 
       - name: Verify release signing config
+        if: steps.signing.outputs.use_release_signing == 'true'
         working-directory: rn-lite
         shell: bash
         run: |
@@ -67,7 +91,8 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
-      - name: Build release APK
+      - name: Build release APK with release signing
+        if: steps.signing.outputs.use_release_signing == 'true'
         working-directory: rn-lite/android
         run: ./gradlew assembleRelease
         env:
@@ -75,6 +100,11 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Build release APK with debug signing fallback
+        if: steps.signing.outputs.use_release_signing != 'true'
+        working-directory: rn-lite/android
+        run: ./gradlew assembleRelease
 
       - name: Rename APK
         working-directory: rn-lite

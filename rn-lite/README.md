@@ -50,7 +50,7 @@ rn-lite/android/app/build/outputs/apk/release/app-release.apk
 
 The workflow at `.github/workflows/android-lite-release.yml` runs when a tag matching `v*.*.*` is pushed. It builds only the Lite APK and uploads it to GitHub Releases.
 
-Required repository secrets:
+Optional repository secrets for release signing:
 
 ```txt
 ANDROID_KEYSTORE_BASE64
@@ -66,10 +66,13 @@ PEM/private-key text file:
 base64 -w 0 release.keystore
 ```
 
-The workflow decodes this value, verifies that `ANDROID_KEY_ALIAS` exists in the
-keystore with `ANDROID_KEYSTORE_PASSWORD`, then builds the APK. If the alias is
-blank or the secret is not a JKS/PKCS12 keystore, the workflow fails before the
-Gradle build starts.
+When all four secrets are present, the workflow decodes this value, verifies
+that `ANDROID_KEY_ALIAS` exists in the keystore with
+`ANDROID_KEYSTORE_PASSWORD`, then builds a release-signed APK.
+
+If any signing secret is missing, the workflow skips keystore decoding and
+builds the Lite APK with the existing debug-keystore fallback so tagged
+releases still complete.
 
 Tag command for the user to run manually:
 

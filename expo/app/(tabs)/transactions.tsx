@@ -32,6 +32,7 @@ import { ITransaction, PaymentMethod, TransactionType } from "../../lib/types";
 import ConfirmModal from "../../components/ConfirmModal";
 import { getExpenseOffsetSummary } from "../../lib/exchange";
 import { api } from "../../lib/api";
+import { getTransactionDisplayFields } from "../../lib/transaction-review";
 
 const PAGE_SIZE = 10;
 
@@ -185,7 +186,7 @@ export default function TransactionsScreen() {
     setEditType(txn.type);
     setEditAmount(txn.amount.toString());
     setEditDescription(txn.description);
-    setEditCategory(txn.category);
+    setEditCategory(txn.reviewStatus === "pending" ? txn.category : txn.category);
     setEditPaymentMethod(txn.paymentMethod);
     setEditExchangeExpenseId(txn.exchangeExpenseId || "");
     setEditSplitAmount((txn.splitAmount || 0).toString());
@@ -228,11 +229,18 @@ export default function TransactionsScreen() {
     
     setSaving(true);
     try {
+      const allowsPendingReview = Boolean(
+        editingTxn.importSource || editingTxn.reviewStatus === "pending"
+      );
       await updateTransaction(editingTxn._id, {
         type: editType,
         amount: parseFloat(editAmount),
-        description: editDescription.trim() || "No description",
-        category: editCategory || "General",
+        description: allowsPendingReview
+          ? editDescription.trim()
+          : editDescription.trim() || "No description",
+        category: allowsPendingReview
+          ? editCategory.trim()
+          : editCategory || "General",
         paymentMethod: editPaymentMethod,
         splitAmount: editIsSplit ? parseFloat(editSplitAmount || "0") : 0,
         exchangeExpenseId:
@@ -302,6 +310,9 @@ export default function TransactionsScreen() {
           </Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <TouchableOpacity onPress={onRefresh} style={{ padding: 4 }}>
+            <Ionicons name="refresh-outline" size={20} color={colors.text} />
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={toggleStealthMode}
             style={{ padding: 4 }}
@@ -402,7 +413,10 @@ export default function TransactionsScreen() {
               overflow: "hidden",
             }}
           >
-            {paginatedTransactions.map((txn, index) => (
+            {paginatedTransactions.map((txn, index) => {
+              const display = getTransactionDisplayFields(txn);
+
+              return (
               <View
                 key={txn._id}
                 style={{
@@ -443,7 +457,7 @@ export default function TransactionsScreen() {
                       }}
                       numberOfLines={1}
                     >
-                      {txn.description}
+                      {display.description}
                     </Text>
                     <Text
                       style={{
@@ -453,8 +467,20 @@ export default function TransactionsScreen() {
                       }}
                     >
                       {paymentMethodConfig[txn.paymentMethod]?.label} ·{" "}
-                      {txn.category} · {formatDate(txn.date)}
+                      {display.category} · {formatDate(txn.date)}
                     </Text>
+                    {txn.reviewStatus === "pending" && (
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          color: colors.warning,
+                          marginTop: 2,
+                          fontWeight: "600",
+                        }}
+                      >
+                        Pending review
+                      </Text>
+                    )}
                     {txn.exchangeExpenseId && (
                       <Text
                         style={{
@@ -565,7 +591,8 @@ export default function TransactionsScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
-            ))}
+              );
+            })}
           </View>
         )}
 
@@ -602,7 +629,11 @@ export default function TransactionsScreen() {
         }}
         onConfirm={handleConfirmDelete}
         title="Delete Transaction"
-        message={`Are you sure you want to delete "${transactionToDelete?.description}"? This action cannot be undone.`}
+        message={`Are you sure you want to delete "${
+          transactionToDelete
+            ? getTransactionDisplayFields(transactionToDelete).description
+            : "this transaction"
+        }"? This action cannot be undone.`}
         confirmText="Delete"
         cancelText="Cancel"
         confirmColor="destructive"

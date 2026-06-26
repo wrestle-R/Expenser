@@ -29,6 +29,7 @@ if (process.env.NODE_ENV !== "production") {
 
 export type PaymentMethod = "bank" | "cash" | "splitwise";
 export type TransactionType = "income" | "expense";
+export type TransactionReviewStatus = "pending" | "complete";
 
 export interface UserRow {
   id: string;
@@ -60,6 +61,7 @@ export interface TransactionRow {
   amount: number;
   description: string;
   category: string;
+  review_status: TransactionReviewStatus;
   payment_method: PaymentMethod;
   split_amount: number;
   date: string | Date;
@@ -161,6 +163,7 @@ export function mapTransactionRow(row: TransactionRow) {
     amount: Number(row.amount),
     description: row.description,
     category: row.category,
+    reviewStatus: row.review_status,
     paymentMethod: row.payment_method,
     splitAmount: Number(row.split_amount ?? 0),
     date: new Date(row.date).toISOString(),

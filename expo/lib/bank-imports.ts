@@ -28,15 +28,11 @@ export function clearQueuedBankImports(sourceKeys: string[]) {
 export function bankImportToTransactionPayload(
   item: NativeBankImport
 ): CreateTransactionPayload {
-  const description =
-    item.payee ||
-    `${item.bankName || "Union Bank"} ${item.type === "expense" ? "debit" : "credit"}`;
-
   return {
     type: item.type,
     amount: Number(item.amount),
-    description,
-    category: "other",
+    description: "",
+    category: "",
     paymentMethod: "bank",
     splitAmount: 0,
     date: item.occurredAt,

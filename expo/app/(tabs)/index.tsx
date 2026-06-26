@@ -16,6 +16,7 @@ import { useStealthMode } from "../../context/StealthContext";
 import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { formatCurrency, formatDate } from "../../lib/utils";
+import { getTransactionDisplayFields } from "../../lib/transaction-review";
 
 export default function HomeScreen() {
   const { isDark } = useTheme();
@@ -400,7 +401,9 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            recentTransactions.map((txn, index) => (
+            recentTransactions.map((txn, index) => {
+              const display = getTransactionDisplayFields(txn);
+              return (
               <View
                 key={txn._id}
                 style={{
@@ -432,10 +435,11 @@ export default function HomeScreen() {
                       style={{ fontWeight: "500", color: colors.text }}
                       numberOfLines={1}
                     >
-                      {txn.description}
+                      {display.description}
                     </Text>
                     <Text style={{ fontSize: 12, color: colors.textMuted }}>
                       {paymentMethodConfig[txn.paymentMethod]?.label} · {formatDate(txn.date)}
+                      {txn.reviewStatus === "pending" && " · Pending review"}
                       {txn.isLocal &&
                         ` · ${
                           txn.syncStatus === "failed" ? "Sync failed" : "Pending sync"
@@ -452,7 +456,8 @@ export default function HomeScreen() {
                   {txn.type === "income" ? "+" : "-"}₹{isStealthMode ? "••••••" : formatCurrency(txn.amount)}
                 </Text>
               </View>
-            ))
+              );
+            })
           )}
         </View>
       </View>

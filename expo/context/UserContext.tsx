@@ -39,6 +39,7 @@ import {
   clearQueuedBankImports,
   getQueuedBankImports,
 } from "../lib/bank-imports";
+import { getPendingReviewStatus } from "../lib/transaction-review";
 
 function dedupeTransactions(items: ITransaction[]) {
   const deduped = new Map<string, ITransaction>();
@@ -441,6 +442,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         amount: payload.amount,
         description: payload.description,
         category: payload.category,
+        reviewStatus: getPendingReviewStatus(payload),
         paymentMethod: payload.paymentMethod,
         splitAmount: payload.splitAmount || 0,
         exchangeExpenseId: payload.exchangeExpenseId,

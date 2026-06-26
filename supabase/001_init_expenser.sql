@@ -32,6 +32,7 @@ create table if not exists public.transactions (
   amount double precision not null default 0,
   description text not null,
   category text not null default 'General',
+  review_status text not null default 'complete' check (review_status in ('pending', 'complete')),
   payment_method text not null check (payment_method in ('bank', 'cash', 'splitwise')),
   split_amount double precision not null default 0,
   date timestamptz not null default timezone('utc', now()),

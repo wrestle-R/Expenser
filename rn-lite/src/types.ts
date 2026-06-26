@@ -7,6 +7,7 @@ export interface Transaction {
   amount: number;
   description: string;
   category: string;
+  reviewStatus?: "pending" | "complete";
   paymentMethod: PaymentMethod;
   date: string;
   createdAt: string;

@@ -15,6 +15,7 @@ export interface ITransaction {
   amount: number;
   description: string;
   category: string;
+  reviewStatus?: "pending" | "complete";
   paymentMethod: "bank" | "cash" | "splitwise";
   splitAmount?: number;
   date: string;

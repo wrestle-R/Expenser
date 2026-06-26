@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -18,12 +18,20 @@ import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { clearAllData } from "../../lib/storage";
 import ConfirmModal from "../../components/ConfirmModal";
+import { api } from "../../lib/api";
+import { IUserCategory } from "../../lib/types";
+import {
+  getBankNotificationAccessEnabled,
+  getQueuedBankImports,
+  openBankNotificationAccessSettings,
+} from "../../lib/bank-imports";
 
 const paymentOptions = [
   { id: "bank", label: "Bank (UPI)", icon: "card" as const },
   { id: "cash", label: "Cash", icon: "cash" as const },
   { id: "splitwise", label: "Splitwise", icon: "swap-horizontal" as const },
 ];
+const COLOR_OPTIONS = ["#6b7280", "#f97316", "#3b82f6", "#ec4899", "#22c55e", "#a855f7"];
 
 export default function ProfileScreen() {
   const { isDark, toggleTheme } = useTheme();
@@ -46,6 +54,14 @@ export default function ProfileScreen() {
   const [saved, setSaved] = useState(false);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+  const [notificationEnabled, setNotificationEnabled] = useState(false);
+  const [queuedCount, setQueuedCount] = useState(0);
+  const [categories, setCategories] = useState<IUserCategory[]>([]);
+  const [categoryType, setCategoryType] = useState<"expense" | "income">("expense");
+  const [categoryName, setCategoryName] = useState("");
+  const [categoryColor, setCategoryColor] = useState(COLOR_OPTIONS[0]);
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryLoading, setCategoryLoading] = useState(true);
 
   useEffect(() => {
     if (profile) {
@@ -54,6 +70,23 @@ export default function ProfileScreen() {
       setSelectedMethods(profile.paymentMethods || []);
     }
   }, [profile]);
+
+  const refreshSetup = useCallback(async () => {
+    setNotificationEnabled(getBankNotificationAccessEnabled());
+    setQueuedCount(getQueuedBankImports().length);
+    try {
+      const nextCategories = await api.getCategories();
+      setCategories(nextCategories);
+    } catch (error) {
+      console.error("[Profile] Failed to load setup data:", error);
+    } finally {
+      setCategoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshSetup();
+  }, [refreshSetup]);
 
   const toggleMethod = (id: string) => {
     setSelectedMethods((prev) =>
@@ -108,6 +141,39 @@ export default function ProfileScreen() {
     }
   };
 
+  const saveCategory = async () => {
+    if (!categoryName.trim()) {
+      Alert.alert("Error", "Please enter a category name");
+      return;
+    }
+
+    setCategorySaving(true);
+    try {
+      await api.saveCategory({
+        type: categoryType,
+        name: categoryName.trim(),
+        color: categoryColor,
+      });
+      setCategoryName("");
+      await refreshSetup();
+    } catch (error) {
+      console.error("[Profile] Failed to save category:", error);
+      Alert.alert("Error", "Failed to save category");
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const deleteCategory = async (id: string) => {
+    try {
+      await api.deleteCategory(id);
+      await refreshSetup();
+    } catch (error) {
+      console.error("[Profile] Failed to delete category:", error);
+      Alert.alert("Error", "Failed to delete category");
+    }
+  };
+
   if (loading) {
     return (
       <View
@@ -126,27 +192,32 @@ export default function ProfileScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
       {/* Top Bar with Internet Status */}
-      <View
-        style={{
-          flexDirection: "row",
-          justifyContent: "space-between",
-          alignItems: "center",
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
           paddingHorizontal: 16,
           paddingVertical: 12,
         }}
-      >
-        <Text style={{ fontSize: 24, fontWeight: "bold", color: colors.text }}>
-          Profile
-        </Text>
-        <View
-          style={{
-            width: 12,
-            height: 12,
-            borderRadius: 6,
-            backgroundColor: isOnline ? colors.success : colors.error,
-          }}
-        />
-      </View>
+        >
+          <Text style={{ fontSize: 24, fontWeight: "bold", color: colors.text }}>
+            Profile
+          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <TouchableOpacity onPress={refreshSetup} style={{ padding: 4 }}>
+              <Ionicons name="refresh-outline" size={20} color={colors.text} />
+            </TouchableOpacity>
+            <View
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 6,
+                backgroundColor: isOnline ? colors.success : colors.error,
+              }}
+            />
+          </View>
+        </View>
 
       <ScrollView
         style={{ flex: 1 }}
@@ -155,10 +226,10 @@ export default function ProfileScreen() {
         {/* Header */}
         <View style={{ marginBottom: 24 }}>
           <Text style={{ fontSize: 28, fontWeight: "bold", color: colors.text }}>
-            Profile Settings
+            Profile
           </Text>
           <Text style={{ color: colors.textMuted, marginTop: 4 }}>
-            Manage your personal information and preferences
+            Manage your personal information, imports, and categories
           </Text>
         </View>
 
@@ -510,6 +581,183 @@ export default function ProfileScreen() {
           </View>
         )}
       </TouchableOpacity>
+
+      {/* Bank SMS Import */}
+      <View
+        style={{
+          backgroundColor: colors.card,
+          borderRadius: 16,
+          padding: 20,
+          marginBottom: 16,
+          borderWidth: 1,
+          borderColor: colors.border,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 18,
+            fontWeight: "600",
+            color: colors.text,
+            marginBottom: 12,
+          }}
+        >
+          Bank SMS Import
+        </Text>
+        <Text style={{ color: colors.textMuted }}>
+          Notification access: {notificationEnabled ? "enabled" : "not enabled"}
+        </Text>
+        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
+          Queued imports: {queuedCount}
+        </Text>
+        <TouchableOpacity
+          style={{
+            backgroundColor: colors.primary,
+            borderRadius: 12,
+            paddingVertical: 14,
+            alignItems: "center",
+            marginTop: 14,
+          }}
+          onPress={openBankNotificationAccessSettings}
+        >
+          <Text style={{ color: colors.primaryForeground, fontWeight: "600" }}>
+            Open Android Notification Access
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Categories */}
+      <View
+        style={{
+          backgroundColor: colors.card,
+          borderRadius: 16,
+          padding: 20,
+          marginBottom: 16,
+          borderWidth: 1,
+          borderColor: colors.border,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 18,
+            fontWeight: "600",
+            color: colors.text,
+            marginBottom: 16,
+          }}
+        >
+          Categories
+        </Text>
+        <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+          {(["expense", "income"] as const).map((item) => (
+            <TouchableOpacity
+              key={item}
+              onPress={() => setCategoryType(item)}
+              style={{
+                flex: 1,
+                borderRadius: 10,
+                paddingVertical: 10,
+                alignItems: "center",
+                backgroundColor:
+                  categoryType === item ? colors.primary : colors.backgroundSecondary,
+              }}
+            >
+              <Text
+                style={{
+                  color:
+                    categoryType === item
+                      ? colors.primaryForeground
+                      : colors.text,
+                  fontWeight: "700",
+                  textTransform: "capitalize",
+                }}
+              >
+                {item}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TextInput
+          value={categoryName}
+          onChangeText={setCategoryName}
+          placeholder="category name"
+          placeholderTextColor={colors.textMuted}
+          style={{
+            backgroundColor: colors.backgroundSecondary,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: colors.border,
+            paddingVertical: 12,
+            paddingHorizontal: 16,
+            fontSize: 16,
+            color: colors.text,
+          }}
+        />
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+          {COLOR_OPTIONS.map((item) => (
+            <TouchableOpacity
+              key={item}
+              onPress={() => setCategoryColor(item)}
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 15,
+                backgroundColor: item,
+                borderColor: categoryColor === item ? colors.text : "transparent",
+                borderWidth: 2,
+              }}
+            />
+          ))}
+        </View>
+        <TouchableOpacity
+          onPress={saveCategory}
+          disabled={categorySaving || !categoryName.trim()}
+          style={{
+            marginTop: 14,
+            backgroundColor: colors.primary,
+            borderRadius: 12,
+            opacity: categorySaving || !categoryName.trim() ? 0.6 : 1,
+            paddingVertical: 14,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: colors.primaryForeground, fontWeight: "600" }}>
+            Add Category
+          </Text>
+        </TouchableOpacity>
+        {categoryLoading ? (
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+        ) : (
+          <View style={{ marginTop: 16, gap: 10 }}>
+            {categories
+              .filter((category) => category.type === categoryType)
+              .map((category) => (
+                <TouchableOpacity
+                  key={category._id}
+                  onPress={() => deleteCategory(category._id)}
+                  style={{
+                    alignItems: "center",
+                    borderColor: colors.border,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    flexDirection: "row",
+                    gap: 10,
+                    padding: 12,
+                  }}
+                >
+                  <View
+                    style={{
+                      backgroundColor: category.color,
+                      borderRadius: 6,
+                      height: 12,
+                      width: 12,
+                    }}
+                  />
+                  <Text style={{ color: colors.text, flex: 1 }}>{category.name}</Text>
+                  <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              ))}
+          </View>
+        )}
+      </View>
 
       {/* Sign Out */}
       <TouchableOpacity

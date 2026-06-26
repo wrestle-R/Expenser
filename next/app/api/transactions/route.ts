@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getApiErrorResponse } from "@/lib/api-errors";
+import { deriveTransactionReviewState } from "@/lib/transaction-review.js";
 import {
   mapTransactionRow,
   mapUserRow,
@@ -229,23 +230,32 @@ function parseTransactionInput(data: Record<string, unknown>) {
     throw new Error("Split amount must be less than the total amount");
   }
 
+  const importMetadata = parseImportMetadata(data);
+  const reviewState = deriveTransactionReviewState({
+    description: data.description,
+    category: data.category,
+    importSource: importMetadata.importSource,
+    importSourceKey: importMetadata.importSourceKey,
+  });
+
   return {
     type: data.type,
     amount,
-    description: sanitizeText(data.description, {
+    description: sanitizeText(reviewState.description, {
       field: "description",
       maxLength: 200,
-      fallback: "No description",
+      required: false,
     }),
-    category: sanitizeText(data.category, {
+    category: sanitizeText(reviewState.category, {
       field: "category",
       maxLength: 80,
-      fallback: "General",
+      required: false,
     }),
+    reviewStatus: reviewState.reviewStatus,
     paymentMethod: data.paymentMethod,
     splitAmount,
     exchangeExpenseId: parseExchangeExpenseId(data.exchangeExpenseId),
-    ...parseImportMetadata(data),
+    ...importMetadata,
     date: normalizeDate(data.date),
     clientRequestId: parseClientRequestId(data.clientRequestId),
   };
@@ -506,6 +516,7 @@ export async function POST(req: Request) {
             amount,
             description,
             category,
+            review_status,
             payment_method,
             split_amount,
             date
@@ -524,6 +535,7 @@ export async function POST(req: Request) {
             ${payload.amount},
             ${payload.description},
             ${payload.category},
+            ${payload.reviewStatus},
             ${payload.paymentMethod},
             ${payload.splitAmount},
             ${payload.date}
@@ -739,6 +751,8 @@ export async function PUT(req: Request) {
         amount: data.amount ?? oldTransaction.amount,
         description: data.description ?? oldTransaction.description,
         category: data.category ?? oldTransaction.category,
+        importSource: oldTransaction.import_source,
+        importSourceKey: oldTransaction.import_source_key,
         paymentMethod: data.paymentMethod ?? oldTransaction.payment_method,
         splitAmount: data.splitAmount ?? oldTransaction.split_amount,
         exchangeExpenseId:
@@ -790,6 +804,7 @@ export async function PUT(req: Request) {
           amount = ${nextTransaction.amount},
           description = ${nextTransaction.description},
           category = ${nextTransaction.category},
+          review_status = ${nextTransaction.reviewStatus},
           payment_method = ${nextTransaction.paymentMethod},
           split_amount = ${nextTransaction.splitAmount},
           exchange_expense_id = ${nextTransaction.exchangeExpenseId},

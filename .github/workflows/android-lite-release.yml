@@ -67,26 +67,12 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
 
-      - name: Verify release signing config
+      - name: Validate release signing config
         if: steps.signing.outputs.use_release_signing == 'true'
         working-directory: rn-lite
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          for name in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::$name is missing or empty"
-              exit 1
-            fi
-          done
-
-          keytool -list \
-            -keystore android/app/release.keystore \
-            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -alias "$ANDROID_KEY_ALIAS" \
-            >/dev/null
+        run: node scripts/validateAndroidSigning.js android/app/release.keystore
         env:
+          ANDROID_KEYSTORE_FILE: release.keystore
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}

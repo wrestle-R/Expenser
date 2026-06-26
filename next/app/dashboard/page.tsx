@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { getTransactionDisplayFields } from "@/lib/transaction-review.js";
 
 interface Transaction {
   _id: string;
@@ -23,6 +24,7 @@ interface Transaction {
   amount: number;
   description: string;
   category: string;
+  reviewStatus: "pending" | "complete";
   paymentMethod: "bank" | "cash" | "splitwise";
   date: string;
 }
@@ -185,6 +187,7 @@ export default function DashboardPage() {
             <div className="divide-y">
               {recentTransactions.map((txn) => {
                 const config = methodConfig[txn.paymentMethod];
+                const display = getTransactionDisplayFields(txn);
                 return (
                   <div
                     key={txn._id}
@@ -206,7 +209,7 @@ export default function DashboardPage() {
                       </div>
                       <div>
                         <p className="font-medium text-sm">
-                          {txn.description}
+                          {display.description}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {config.label} &middot;{" "}
@@ -215,6 +218,9 @@ export default function DashboardPage() {
                             month: "short",
                           })}
                         </p>
+                        {txn.reviewStatus === "pending" && (
+                          <p className="text-xs text-amber-600">Pending review</p>
+                        )}
                       </div>
                     </div>
                     <p

@@ -46,8 +46,10 @@ import {
   Gift,
   Zap,
   Pencil,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getTransactionDisplayFields } from "@/lib/transaction-review.js";
 import {
   type ExchangeAwareTransaction,
   getExpenseOffsetSummary,
@@ -58,10 +60,12 @@ import {
 interface Transaction {
   _id: string;
   exchangeExpenseId?: string;
+  importSource?: string;
   type: "income" | "expense";
   amount: number;
   description: string;
   category: string;
+  reviewStatus: "pending" | "complete";
   paymentMethod: "bank" | "cash" | "splitwise";
   splitAmount?: number;
   date: string;
@@ -273,6 +277,16 @@ export default function TransactionsPage() {
     }
   }, []);
 
+  const refreshTransactionPage = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([
+      fetchTransactions(),
+      fetchWorkflows(),
+      fetchCategories(),
+      refreshProfile(),
+    ]);
+  }, [fetchCategories, fetchTransactions, fetchWorkflows, refreshProfile]);
+
   useEffect(() => {
     fetchTransactions();
     fetchWorkflows();
@@ -358,16 +372,22 @@ export default function TransactionsPage() {
     setEditType(txn.type);
     setEditAmount(txn.amount.toString());
     setEditDescription(txn.description);
-    
-    const categoryIdsForType = getCategoriesForType(txn.type, userCategories).map((c) => c.id);
-    if (categoryIdsForType.includes(txn.category.toLowerCase())) {
-      setEditCategory(txn.category.toLowerCase());
+
+    const normalizedCategory = txn.category.trim().toLowerCase();
+    if (!normalizedCategory && txn.reviewStatus === "pending") {
+      setEditCategory("");
       setEditCustomCategory("");
     } else {
-      setEditCategory("other");
-      setEditCustomCategory(txn.category);
+      const categoryIdsForType = getCategoriesForType(txn.type, userCategories).map((c) => c.id);
+      if (categoryIdsForType.includes(normalizedCategory)) {
+        setEditCategory(normalizedCategory);
+        setEditCustomCategory("");
+      } else {
+        setEditCategory("other");
+        setEditCustomCategory(txn.category);
+      }
     }
-    
+
     setEditMethod(txn.paymentMethod);
     setEditExchangeExpenseId(txn.exchangeExpenseId || "");
     if (txn.splitAmount && txn.splitAmount > 0) {
@@ -387,7 +407,12 @@ export default function TransactionsPage() {
     >,
     remainingAmount: number
   ) => {
-    return `${transaction.description || "Expense"} • ${transaction.category || "General"} • ${new Date(
+    const display = getTransactionDisplayFields({
+      description: transaction.description,
+      category: transaction.category,
+      reviewStatus: "complete",
+    });
+    return `${display.description} • ${display.category} • ${new Date(
       transaction.date || 0
     ).toLocaleDateString("en-IN", {
       day: "numeric",
@@ -397,7 +422,7 @@ export default function TransactionsPage() {
 
   const handleUpdateTransaction = async () => {
     if (!editingTransaction || !editAmount || !editMethod) return;
-    
+
     // Validate split amount
     if (editIsSplit && Number(editSplitAmount) >= Number(editAmount)) {
       alert("Split amount must be less than total amount");
@@ -431,12 +456,19 @@ export default function TransactionsPage() {
 
     setEditSaving(true);
     const finalCategory = editCategory === "other" && editCustomCategory ? editCustomCategory : editCategory;
-    
+    const allowsPendingReview = Boolean(editingTransaction.importSource);
+    const nextDescription = allowsPendingReview
+      ? editDescription.trim()
+      : editDescription.trim() || "No description";
+    const nextCategory = allowsPendingReview
+      ? finalCategory?.trim() || ""
+      : finalCategory || "General";
+
     const payload = {
       type: editType,
       amount: Number(editAmount),
-      description: editDescription.trim() || "No description",
-      category: finalCategory || "General",
+      description: nextDescription,
+      category: nextCategory,
       paymentMethod: editMethod,
       splitAmount: editIsSplit ? Number(editSplitAmount) : 0,
       exchangeExpenseId:
@@ -575,15 +607,20 @@ export default function TransactionsPage() {
             View and manage all your transactions
           </p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger
-            render={
-              <Button onClick={resetForm}>
-                <Plus className="size-4 mr-1" />
-                Add Transaction
-              </Button>
-            }
-          />
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => void refreshTransactionPage()}>
+            <RotateCcw className="mr-2 size-4" />
+            Refresh
+          </Button>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger
+              render={
+                <Button onClick={resetForm}>
+                  <Plus className="size-4 mr-1" />
+                  Add Transaction
+                </Button>
+              }
+            />
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Add Transaction</DialogTitle>
@@ -809,7 +846,8 @@ export default function TransactionsPage() {
               </Button>
             </div>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       {/* Transactions list */}
@@ -831,8 +869,12 @@ export default function TransactionsPage() {
           <div className="divide-y">
             {transactions.map((txn) => {
               const config = methodConfig[txn.paymentMethod as keyof typeof methodConfig] || methodConfig.bank;
+              const display = getTransactionDisplayFields(txn);
               const linkedExpense = txn.exchangeExpenseId
                 ? transactionMap.get(txn.exchangeExpenseId)
+                : null;
+              const linkedExpenseDisplay = linkedExpense
+                ? getTransactionDisplayFields(linkedExpense as Transaction)
                 : null;
               return (
                 <div
@@ -855,25 +897,30 @@ export default function TransactionsPage() {
                     </div>
                     <div>
                       <p className="font-medium text-sm">
-                        {txn.description}
+                        {display.description}
                         {(txn.splitAmount || 0) > 0 && (
                            <span className="ml-2 inline-flex items-center rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium text-orange-500 ring-1 ring-inset ring-orange-500/20">
                              Split
                            </span>
+                        )}
+                        {txn.reviewStatus === "pending" && (
+                          <span className="ml-2 inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20">
+                            Pending review
+                          </span>
                         )}
                       </p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <Badge variant="secondary" className="text-xs">
                           {config.label}
                         </Badge>
-                        {txn.category !== "General" && (
+                        {display.category !== "General" && (
                           <Badge variant="outline" className="text-xs">
-                            {txn.category}
+                            {display.category}
                           </Badge>
                         )}
-                        {linkedExpense && (
+                        {linkedExpenseDisplay && (
                           <Badge variant="outline" className="text-xs">
-                            Offsets {linkedExpense.category}
+                            Offsets {linkedExpenseDisplay.category}
                           </Badge>
                         )}
                         <span className="text-xs text-muted-foreground">
@@ -931,7 +978,7 @@ export default function TransactionsPage() {
                         <AlertDialogHeader>
                           <AlertDialogTitle>Delete Transaction</AlertDialogTitle>
                           <AlertDialogDescription>
-                            Are you sure you want to delete &quot;{txn.description}&quot;? This action cannot be undone.
+                            Are you sure you want to delete &quot;{display.description}&quot;? This action cannot be undone.
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>

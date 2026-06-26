@@ -34,16 +34,11 @@ export async function clearQueuedImports(sourceKeys: string[]) {
 }
 
 export function toTransactionPayload(item: QueuedBankImport): TransactionPayload {
-  const description =
-    item.payee && item.payee.trim().length > 0
-      ? `Union Bank UPI - ${item.payee.trim()}`
-      : `Union Bank ${item.type === "expense" ? "debit" : "credit"}`;
-
   return {
     type: item.type,
     amount: item.amount,
-    description,
-    category: "other",
+    description: "",
+    category: "",
     paymentMethod: "bank",
     date: item.occurredAt,
     importSource: item.importSource,

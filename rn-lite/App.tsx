@@ -29,6 +29,7 @@ import {
 import { getSessionToken, loadAuthState, signInWithPassword, signInWithSessionToken, signOut } from "./src/auth";
 import { money, paymentLabel, sortTransactions } from "./src/format";
 import type { PaymentMethod, Transaction, TransactionPayload, TransactionType, UserCategory, UserProfile } from "./src/types";
+import { getTransactionDisplayFields } from "./src/transactionReview";
 
 type Tab = "dashboard" | "transactions" | "setup";
 type Palette = ReturnType<typeof getPalette>;
@@ -346,7 +347,10 @@ function MainApp({
   }
 
   async function handleDelete(transaction: Transaction) {
-    Alert.alert("Delete transaction?", transaction.description || "This transaction", [
+    Alert.alert(
+      "Delete transaction?",
+      getTransactionDisplayFields(transaction).description || "This transaction",
+      [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
@@ -414,6 +418,7 @@ function MainApp({
             onAdd={() => setFormTransaction(null)}
             onEdit={setFormTransaction}
             onDelete={handleDelete}
+            onRefresh={refresh}
           />
         )}
         {tab === "setup" && (
@@ -523,6 +528,7 @@ function Transactions({
   onAdd,
   onEdit,
   onDelete,
+  onRefresh,
 }: {
   palette: Palette;
   transactions: Transaction[];
@@ -530,12 +536,16 @@ function Transactions({
   onAdd: () => void;
   onEdit: (transaction: Transaction) => void;
   onDelete: (transaction: Transaction) => void;
+  onRefresh: () => Promise<void>;
 }) {
   return (
     <View>
       <View style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, { color: palette.text }]}>Transactions</Text>
-        <MiniButton palette={palette} label="Add" onPress={onAdd} />
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <MiniButton palette={palette} label="Refresh" onPress={() => void onRefresh()} />
+          <MiniButton palette={palette} label="Add" onPress={onAdd} />
+        </View>
       </View>
       {transactions.map(item => (
         <Pressable
@@ -681,24 +691,32 @@ function TransactionModal({
 
   async function submit() {
     const amount = Number(form.amount);
+    const allowsPendingReview = Boolean(
+      transaction?.importSource || transaction?.reviewStatus === "pending"
+    );
     if (!Number.isFinite(amount) || amount <= 0) {
       Alert.alert("Invalid amount", "Enter a valid amount.");
       return;
     }
-    if (!form.description.trim()) {
+    if (!allowsPendingReview && !form.description.trim()) {
       Alert.alert("Description required", "Enter a description.");
       return;
     }
     setSaving(true);
     try {
-      await onSave({
+      const payload = {
         type: form.type,
         amount,
-        description: form.description.trim(),
-        category: form.category.trim() || "other",
+        description: allowsPendingReview
+          ? form.description.trim()
+          : form.description.trim(),
+        category: allowsPendingReview
+          ? form.category.trim()
+          : form.category.trim() || "other",
         paymentMethod: form.paymentMethod,
         date: new Date(form.date).toISOString(),
-      });
+      };
+      await onSave(payload);
     } finally {
       setSaving(false);
     }
@@ -801,15 +819,19 @@ function TransactionRow({ palette, transaction, stealth }: { palette: Palette; t
 
 function TransactionRowContent({ palette, transaction, stealth }: { palette: Palette; transaction: Transaction; stealth: boolean }) {
   const amountColor = transaction.type === "income" ? palette.success : palette.danger;
+  const display = getTransactionDisplayFields(transaction);
   return (
     <View style={styles.rowContent}>
       <View style={styles.rowMain}>
         <Text style={[styles.rowTitle, { color: palette.text }]} numberOfLines={1}>
-          {transaction.description || "Untitled"}
+          {display.description}
         </Text>
         <Text style={[styles.rowMeta, { color: palette.muted }]} numberOfLines={1}>
-          {transaction.category || "other"} • {paymentLabel(transaction.paymentMethod)}
+          {display.category} • {paymentLabel(transaction.paymentMethod)}
         </Text>
+        {transaction.reviewStatus === "pending" && (
+          <Text style={[styles.rowMeta, { color: palette.primary }]}>Pending review</Text>
+        )}
       </View>
       <Text style={[styles.rowAmount, { color: amountColor }]}>
         {transaction.type === "income" ? "+" : "-"} Rs {money(transaction.amount, stealth)}

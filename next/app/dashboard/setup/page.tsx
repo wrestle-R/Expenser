@@ -172,7 +172,7 @@ export default function SetupPage() {
             Categories
           </h2>
           <p className="text-sm text-muted-foreground">
-            These sync to Android and web. SMS imports start as Other until edited.
+            These sync to Android and web. SMS imports stay in pending review until category and description are filled.
           </p>
         </div>
         <div className="mb-5 grid gap-3 md:grid-cols-[160px_1fr_120px_auto]">

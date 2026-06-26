@@ -53,30 +53,32 @@ function validateSigningConfig({
   );
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "expenser-signing-"));
-  const tempKeystorePath = path.join(tempDir, "validation-output.p12");
+  const tempJarPath = path.join(tempDir, "validation-input.jar");
+  const signedJarPath = path.join(tempDir, "validation-signed.jar");
+  const tempPayloadPath = path.join(tempDir, "payload.txt");
 
   try {
+    fs.writeFileSync(tempPayloadPath, "Expenser signing validation\n");
+
     execFileSyncImpl(
-      "keytool",
+      "jar",
+      ["--create", "--file", tempJarPath, "-C", tempDir, "payload.txt"],
+      { stdio: "pipe" }
+    );
+
+    execFileSyncImpl(
+      "jarsigner",
       [
-        "-importkeystore",
-        "-noprompt",
-        "-srckeystore",
+        "-keystore",
         resolvedKeystorePath,
-        "-srcstorepass",
+        "-storepass",
         normalizedStorePassword,
-        "-srcalias",
-        normalizedKeyAlias,
-        "-srckeypass",
+        "-keypass",
         normalizedKeyPassword,
-        "-destkeystore",
-        tempKeystorePath,
-        "-deststoretype",
-        "PKCS12",
-        "-deststorepass",
-        "expenser-temp-pass",
-        "-destkeypass",
-        "expenser-temp-pass",
+        "-signedjar",
+        signedJarPath,
+        tempJarPath,
+        normalizedKeyAlias,
       ],
       { stdio: "pipe" }
     );

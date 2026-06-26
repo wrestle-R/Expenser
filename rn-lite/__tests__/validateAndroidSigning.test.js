@@ -18,7 +18,7 @@ describe("validateAndroidSigning", () => {
       execFileSync,
     });
 
-    expect(execFileSync).toHaveBeenCalledTimes(2);
+    expect(execFileSync).toHaveBeenCalledTimes(3);
     expect(execFileSync.mock.calls[0][0]).toBe("keytool");
     expect(execFileSync.mock.calls[0][1]).toEqual(
       expect.arrayContaining([
@@ -31,18 +31,23 @@ describe("validateAndroidSigning", () => {
         "androiddebugkey",
       ])
     );
-    expect(execFileSync.mock.calls[1][0]).toBe("keytool");
+    expect(execFileSync.mock.calls[1][0]).toBe("jar");
     expect(execFileSync.mock.calls[1][1]).toEqual(
       expect.arrayContaining([
-        "-importkeystore",
-        "-srckeystore",
+        "--create",
+        "--file",
+      ])
+    );
+    expect(execFileSync.mock.calls[2][0]).toBe("jarsigner");
+    expect(execFileSync.mock.calls[2][1]).toEqual(
+      expect.arrayContaining([
+        "-keystore",
         path.join(__dirname, "..", "android", "app", "debug.keystore"),
-        "-srcstorepass",
+        "-storepass",
         "android",
-        "-srcalias",
+        "-keypass",
+        "android",
         "androiddebugkey",
-        "-srckeypass",
-        "android",
       ])
     );
   });
@@ -57,6 +62,7 @@ describe("validateAndroidSigning", () => {
     );
     const execFileSync = jest
       .fn()
+      .mockImplementationOnce(() => {})
       .mockImplementationOnce(() => {})
       .mockImplementationOnce(() => {
         throw new Error("java.security.UnrecoverableKeyException");

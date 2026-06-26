@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { getApiErrorResponse } from "@/lib/api-errors";
 import {
   mapWorkflowRow,
   normalizeNumber,
@@ -10,6 +11,11 @@ import {
 const PAYMENT_METHODS = ["bank", "cash", "splitwise"] as const;
 const TRANSACTION_TYPES = ["income", "expense"] as const;
 const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+function jsonApiError(error: unknown, fallbackMessage: string) {
+  const response = getApiErrorResponse(error, fallbackMessage);
+  return NextResponse.json(response.body, { status: response.status });
+}
 
 function sanitizeText(
   value: unknown,
@@ -225,15 +231,8 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
-    if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
     console.error("[API /workflows POST] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to create workflow" },
-      { status: 500 }
-    );
+    return jsonApiError(error, "Failed to create workflow");
   }
 }
 
@@ -328,14 +327,7 @@ export async function PUT(req: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
     console.error("[API /workflows PUT] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to update workflow" },
-      { status: 500 }
-    );
+    return jsonApiError(error, "Failed to update workflow");
   }
 }

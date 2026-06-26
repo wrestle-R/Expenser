@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { getApiErrorResponse } from "@/lib/api-errors";
 import {
   mapTransactionRow,
   mapUserRow,
@@ -20,6 +21,11 @@ const IMPORT_SOURCE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const IMPORT_SOURCE_KEY_PATTERN = /^[A-Za-z0-9:_-]{1,256}$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function jsonApiError(error: unknown, fallbackMessage: string) {
+  const response = getApiErrorResponse(error, fallbackMessage);
+  return NextResponse.json(response.body, { status: response.status });
+}
 
 function isPaymentMethod(value: unknown): value is PaymentMethod {
   return PAYMENT_METHODS.includes(value as PaymentMethod);
@@ -609,12 +615,8 @@ export async function POST(req: Request) {
       transaction: mapTransactionRow(result.transaction),
     }, { status: result.insertedNew ? 201 : 200 });
   } catch (error) {
-    if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
     console.error("[API /transactions POST] Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    return jsonApiError(error, "Internal Server Error");
   }
 }
 
@@ -696,12 +698,8 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
     console.error("[API /transactions DELETE] Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    return jsonApiError(error, "Internal Server Error");
   }
 }
 
@@ -811,11 +809,7 @@ export async function PUT(req: Request) {
       transaction: mapTransactionRow(updatedTransaction),
     });
   } catch (error) {
-    if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
     console.error("[API /transactions PUT] Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    return jsonApiError(error, "Internal Server Error");
   }
 }

@@ -498,7 +498,7 @@ export default function TransactionsScreen() {
                           }}
                         >
                           {txn.syncStatus === "failed"
-                            ? txn.syncError || "Sync failed"
+                            ? "Sync failed. Tap retry."
                             : "Pending sync"}
                         </Text>
                       </View>

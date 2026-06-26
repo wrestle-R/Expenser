@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { getApiErrorResponse } from "@/lib/api-errors";
 import {
   mapUserCategoryRow,
   sql,
@@ -9,6 +10,11 @@ import {
 
 const CATEGORY_TYPES: TransactionType[] = ["income", "expense"];
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+
+function jsonApiError(error: unknown, fallbackMessage: string) {
+  const response = getApiErrorResponse(error, fallbackMessage);
+  return NextResponse.json(response.body, { status: response.status });
+}
 
 const DEFAULT_CATEGORIES: Record<TransactionType, { name: string; color: string }[]> = {
   expense: [
@@ -110,11 +116,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ category: mapUserCategoryRow(rows[0]) }, { status: 201 });
   } catch (error) {
-    if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
     console.error("[API /categories POST] Error:", error);
-    return NextResponse.json({ error: "Failed to save category" }, { status: 500 });
+    return jsonApiError(error, "Failed to save category");
   }
 }
 

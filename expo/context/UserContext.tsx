@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import { useAuth } from "@clerk/clerk-expo";
-import { api } from "../lib/api";
+import { ApiError, api } from "../lib/api";
 import { syncService } from "../lib/sync";
 import {
   getStoredProfile,
@@ -73,6 +73,14 @@ function dedupeWorkflows(items: IWorkflow[]) {
       new Date(b.updatedAt || b.createdAt).getTime() -
       new Date(a.updatedAt || a.createdAt).getTime()
   );
+}
+
+function isRetryableSyncError(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.status >= 500 || [408, 409, 429].includes(error.status);
+  }
+
+  return true;
 }
 
 interface UserContextType {
@@ -717,6 +725,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         );
         void refreshProfile();
       } catch (error) {
+        if (isRetryableSyncError(error)) {
+          await removePendingTransaction(transaction._id);
+          await addPendingTransaction(pendingTransaction);
+          await replaceLocalTransaction(pendingTransaction);
+          setPendingCount((prev) => {
+            notificationService.onPendingItemAdded(prev + 1);
+            return prev + 1;
+          });
+          return;
+        }
+
         const failedTransaction: ITransaction = {
           ...transaction,
           syncStatus: "failed",

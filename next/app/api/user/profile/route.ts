@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { getApiErrorResponse } from "@/lib/api-errors";
 import { mapUserRow, sql, type UserRow } from "@/lib/db";
 
 const PAYMENT_METHODS = ["bank", "cash", "splitwise"] as const;
+
+function jsonApiError(error: unknown, fallbackMessage: string) {
+  const response = getApiErrorResponse(error, fallbackMessage);
+  return NextResponse.json(response.body, { status: response.status });
+}
 
 function sanitizeText(
   value: unknown,
@@ -241,11 +247,7 @@ export async function PUT(req: Request) {
     const user = updatedUsers[0];
     return NextResponse.json({ profile: mapUserRow(user) });
   } catch (error) {
-    if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
     console.error("[API /user/profile PUT] Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    return jsonApiError(error, "Internal Server Error");
   }
 }

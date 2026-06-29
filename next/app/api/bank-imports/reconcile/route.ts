@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  getBalanceReconciliationStats,
+  sortBalanceReconciliationHistory,
+} from "@/lib/balance-reconciliation";
 import { auth } from "@clerk/nextjs/server";
 import {
   mapBalanceReconciliationAlertRow,
@@ -8,12 +12,14 @@ import {
   type UserRow,
 } from "@/lib/db";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const { userId } = await auth();
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const includeHistory =
+      new URL(req.url).searchParams.get("includeHistory") === "true";
 
     const alerts = await sql<BalanceReconciliationAlertRow[]>`
       select *
@@ -23,8 +29,26 @@ export async function GET() {
       order by created_at desc
     `;
 
+    const mappedAlerts = alerts.map(mapBalanceReconciliationAlertRow);
+    if (!includeHistory) {
+      return NextResponse.json({ alerts: mappedAlerts });
+    }
+
+    const historyRows = await sql<BalanceReconciliationAlertRow[]>`
+      select *
+      from balance_reconciliation_alerts
+      where clerk_id = ${userId}
+      order by created_at desc
+    `;
+    const fullHistory = sortBalanceReconciliationHistory(
+      historyRows.map(mapBalanceReconciliationAlertRow)
+    );
+    const history = fullHistory.slice(0, 20);
+
     return NextResponse.json({
-      alerts: alerts.map(mapBalanceReconciliationAlertRow),
+      alerts: mappedAlerts,
+      history,
+      stats: getBalanceReconciliationStats(fullHistory),
     });
   } catch (error) {
     console.error("[API /bank-imports/reconcile GET] Error:", error);

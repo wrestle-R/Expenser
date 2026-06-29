@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Check, CreditCard, PiggyBank, ArrowRightLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
+import { ProfileSetupPanel } from "@/components/profile-setup-panel";
 
 const paymentOptions = [
   { id: "bank", label: "Bank (UPI)", icon: CreditCard, color: "text-blue-500", bg: "bg-blue-500/10" },
@@ -173,6 +174,10 @@ export default function ProfilePage() {
           </div>
         </Card>
       </div>
+
+      <Separator className="opacity-50" />
+
+      <ProfileSetupPanel />
     </div>
   );
 }

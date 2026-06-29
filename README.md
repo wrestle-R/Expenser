@@ -21,7 +21,7 @@ Expenser helps you track your income and expenses across multiple payment method
 
 ## App Components
 
-### Mobile (React Native + Expo)
+### Mobile (Expo)
 - **Authentication**: Clerk-based sign in/up
 - **Home Dashboard**: Overview of balances and recent transactions
 - **Transactions**: View, add, edit, and delete transactions
@@ -41,13 +41,13 @@ Expenser helps you track your income and expenses across multiple payment method
 - Hosted at: **https://expenser-rdp.vercel.app**
 
 ### Mobile
-- Download the latest version: **https://github.com/wrestle-R/Expenser/releases**
+- Built from the Expo app in `expo/`.
 
 ## Tech Stack
 
-- **Frontend**: React Native (Mobile), Next.js (Web)
+- **Frontend**: Expo (Mobile), Next.js (Web)
 - **Authentication**: Clerk
-- **Database**: MongoDB
+- **Database**: Supabase Postgres
 
 ---
 

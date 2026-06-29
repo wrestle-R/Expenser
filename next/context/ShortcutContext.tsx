@@ -36,7 +36,7 @@ const ROUTES: Partial<Record<ShortcutAction, string>> = {
   workflows: "/dashboard/workflows",
   calendar: "/dashboard/calendar",
   analysis: "/dashboard/analysis",
-  setup: "/dashboard/setup",
+  setup: "/dashboard/profile",
 };
 
 type ShortcutContextType = {

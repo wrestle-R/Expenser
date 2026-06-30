@@ -37,9 +37,16 @@ test("maps invalid api key auth errors to a clearer message", () => {
   );
 });
 
-test("keeps normal auth errors unchanged", () => {
+test("maps invalid login credentials to a clearer message", () => {
   assert.equal(
     getAuthErrorMessage("Invalid login credentials"),
-    "Invalid login credentials"
+    "Incorrect email or password."
+  );
+});
+
+test("maps rate limit error to a clearer message", () => {
+  assert.equal(
+    getAuthErrorMessage("email rate limit exceeded"),
+    "Too many attempts. Please wait a few minutes before trying again."
   );
 });

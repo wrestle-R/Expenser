@@ -1,21 +1,24 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/config";
 
 const protectedPagePattern = /^\/(dashboard|onboarding)(\/.*)?$/;
+const authPagePattern = /^\/sign-(in|up)(\/.*)?$/;
 
 export default async function proxy(req: NextRequest) {
   const res = NextResponse.next({
     request: req,
   });
 
-  if (!protectedPagePattern.test(req.nextUrl.pathname)) {
+  const isProtectedPage = protectedPagePattern.test(req.nextUrl.pathname);
+  const isAuthPage = authPagePattern.test(req.nextUrl.pathname);
+
+  if (!isProtectedPage && !isAuthPage) {
     return res;
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseAnonKey = getSupabaseAnonKey();
 
   if (!supabaseUrl || !supabaseAnonKey) {
     return res;
@@ -38,10 +41,16 @@ export default async function proxy(req: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  if (!user && isProtectedPage) {
     const redirectUrl = req.nextUrl.clone();
     redirectUrl.pathname = "/sign-in";
     redirectUrl.searchParams.set("next", req.nextUrl.pathname);
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  if (user && isAuthPage) {
+    const redirectUrl = req.nextUrl.clone();
+    redirectUrl.pathname = "/dashboard";
     return NextResponse.redirect(redirectUrl);
   }
 

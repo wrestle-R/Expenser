@@ -3,7 +3,7 @@ import {
   getBalanceReconciliationStats,
   sortBalanceReconciliationHistory,
 } from "@/lib/balance-reconciliation";
-import { auth } from "@clerk/nextjs/server";
+import { getAuthenticatedUser } from "@/lib/auth";
 import {
   mapBalanceReconciliationAlertRow,
   mapUserRow,
@@ -14,17 +14,18 @@ import {
 
 export async function GET(req: Request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
+    const authUser = await getAuthenticatedUser(req);
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = authUser.userId;
     const includeHistory =
       new URL(req.url).searchParams.get("includeHistory") === "true";
 
     const alerts = await sql<BalanceReconciliationAlertRow[]>`
       select *
       from balance_reconciliation_alerts
-      where clerk_id = ${userId}
+      where user_id = ${userId}
         and status = 'pending'
       order by created_at desc
     `;
@@ -37,7 +38,7 @@ export async function GET(req: Request) {
     const historyRows = await sql<BalanceReconciliationAlertRow[]>`
       select *
       from balance_reconciliation_alerts
-      where clerk_id = ${userId}
+      where user_id = ${userId}
       order by created_at desc
     `;
     const fullHistory = sortBalanceReconciliationHistory(
@@ -58,10 +59,11 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
+    const authUser = await getAuthenticatedUser(req);
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = authUser.userId;
 
     const body = (await req.json()) as Record<string, unknown>;
     const id = typeof body.id === "string" ? body.id : "";
@@ -79,7 +81,7 @@ export async function POST(req: Request) {
         select *
         from balance_reconciliation_alerts
         where id = ${id}
-          and clerk_id = ${userId}
+          and user_id = ${userId}
           and status = 'pending'
         limit 1
         for update
@@ -95,7 +97,7 @@ export async function POST(req: Request) {
         const users = (await trx`
           update users
           set balance_bank = ${Number(alert.bank_balance)}
-          where clerk_id = ${userId}
+          where user_id = ${userId}
           returning *
         `) as UserRow[];
         profile = users[0] ? mapUserRow(users[0]) : null;
@@ -107,7 +109,7 @@ export async function POST(req: Request) {
           status = ${action === "apply" ? "applied" : "kept"},
           resolved_at = timezone('utc', now())
         where id = ${id}
-          and clerk_id = ${userId}
+          and user_id = ${userId}
         returning *
       `) as BalanceReconciliationAlertRow[];
 

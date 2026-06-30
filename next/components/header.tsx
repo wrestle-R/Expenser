@@ -4,11 +4,12 @@ import { Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/theme-toggle'
 import React from 'react'
-import { SignedIn, SignedOut } from '@clerk/nextjs'
+import { useUserContext } from '@/context/UserContext'
 import { LogoIcon } from '@/components/logo'
 
 export const HeroHeader = () => {
     const [menuState, setMenuState] = React.useState(false)
+    const { isSignedIn } = useUserContext()
 
     return (
         <header>
@@ -43,13 +44,14 @@ export const HeroHeader = () => {
                                 <ThemeToggle />
                             </div>
                             <div className="flex w-full flex-col space-y-3 sm:flex-row sm:gap-3 sm:space-y-0 md:w-fit">
-                                <SignedOut>
+                                {!isSignedIn ? (
+                                  <>
                                     <Button variant="ghost" size="sm" render={<Link href="/sign-in" />} nativeButton={false}><span>Login</span></Button>
                                     <Button size="sm" render={<Link href="/sign-up" />} nativeButton={false}><span>Sign Up</span></Button>
-                                </SignedOut>
-                                <SignedIn>
+                                  </>
+                                ) : (
                                     <Button size="sm" render={<Link href="/dashboard" />} nativeButton={false}><span>Dashboard</span></Button>
-                                </SignedIn>
+                                )}
                             </div>
                         </div>
                     </div>

@@ -22,7 +22,7 @@ Expenser helps you track your income and expenses across multiple payment method
 ## App Components
 
 ### Mobile (Expo)
-- **Authentication**: Clerk-based sign in/up
+- **Authentication**: Supabase email/password sign in/up
 - **Home Dashboard**: Overview of balances and recent transactions
 - **Transactions**: View, add, edit, and delete transactions
 - **Workflows**: Manage templates for quick transaction creation
@@ -46,7 +46,7 @@ Expenser helps you track your income and expenses across multiple payment method
 ## Tech Stack
 
 - **Frontend**: Expo (Mobile), Next.js (Web)
-- **Authentication**: Clerk
+- **Authentication**: Supabase Auth
 - **Database**: Supabase Postgres
 
 ---

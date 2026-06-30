@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { getAuthenticatedUser } from "@/lib/auth";
 import { getApiErrorResponse } from "@/lib/api-errors";
 import { mapUserRow, sql, type UserRow } from "@/lib/db";
 
@@ -55,11 +55,11 @@ function parsePaymentMethods(value: unknown) {
   );
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const { userId } = await auth();
+    const authUser = await getAuthenticatedUser(req);
 
-    if (!userId) {
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -67,23 +67,16 @@ export async function GET() {
       const users = await sql<UserRow[]>`
         select *
         from users
-        where clerk_id = ${userId}
+        where user_id = ${authUser.userId}
         limit 1
       `;
 
       let user = users[0];
 
       if (!user) {
-        const clerkUser = await currentUser();
-        const email = clerkUser?.primaryEmailAddress?.emailAddress || "";
-        const fallbackName =
-          clerkUser?.fullName?.trim() ||
-          clerkUser?.firstName?.trim() ||
-          "";
-
         const insertedUsers = await sql<UserRow[]>`
           insert into users (
-            clerk_id,
+            user_id,
             email,
             name,
             occupation,
@@ -94,9 +87,9 @@ export async function GET() {
             onboarded
           )
           values (
-            ${userId},
-            ${email},
-            ${fallbackName},
+            ${authUser.userId},
+            ${authUser.email},
+            ${authUser.name},
             ${""},
             ${[]},
             ${0},
@@ -126,16 +119,14 @@ export async function GET() {
 
 export async function PUT(req: Request) {
   try {
-    const { userId } = await auth();
+    const authUser = await getAuthenticatedUser(req);
 
-    if (!userId) {
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const data = (await req.json()) as Record<string, unknown>;
 
-    const clerkUser = await currentUser();
-    const email = clerkUser?.primaryEmailAddress?.emailAddress || "";
     const paymentMethods = parsePaymentMethods(data.paymentMethods);
     const name = sanitizeText(data.name, {
       field: "name",
@@ -163,7 +154,7 @@ export async function PUT(req: Request) {
     const existingUsers = await sql<UserRow[]>`
       select *
       from users
-      where clerk_id = ${userId}
+      where user_id = ${authUser.userId}
       limit 1
     `;
 
@@ -172,7 +163,7 @@ export async function PUT(req: Request) {
     if (!existingUser) {
       const insertedUsers = await sql<UserRow[]>`
         insert into users (
-          clerk_id,
+          user_id,
           email,
           name,
           occupation,
@@ -183,8 +174,8 @@ export async function PUT(req: Request) {
           onboarded
         )
         values (
-          ${userId},
-          ${email},
+          ${authUser.userId},
+          ${authUser.email},
           ${name},
           ${occupation},
           ${paymentMethods},
@@ -232,7 +223,7 @@ export async function PUT(req: Request) {
     const updatedUsers = (await sql`
       update users
       set
-        email = ${email || existingUser.email},
+        email = ${authUser.email || existingUser.email},
         name = ${name || existingUser.name},
         occupation = ${occupation || existingUser.occupation},
         payment_methods = ${nextPaymentMethods},
@@ -240,7 +231,7 @@ export async function PUT(req: Request) {
         balance_cash = ${mergedBalances.cash},
         balance_splitwise = ${mergedBalances.splitwise},
         onboarded = ${nextOnboarded}
-      where clerk_id = ${userId}
+      where user_id = ${authUser.userId}
       returning *
     `) as unknown as UserRow[];
 

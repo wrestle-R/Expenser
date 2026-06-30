@@ -1,10 +1,9 @@
-import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from "@react-navigation/native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { View, ActivityIndicator } from "react-native";
-import * as SecureStore from "expo-secure-store";
+import type { Session } from "@supabase/supabase-js";
 import "react-native-reanimated";
 import "../global.css";
 
@@ -12,37 +11,43 @@ import { ThemeProvider, useTheme } from "../context/ThemeContext";
 import { StealthProvider } from "../context/StealthContext";
 import { UserProvider } from "../context/UserContext";
 import { ToastProvider } from "../context/ToastContext";
-import { ENV } from "../env";
 import { Colors } from "../constants/theme";
 import { syncService } from "../lib/sync";
+import { supabase } from "../lib/supabase";
 import BalanceReconciliationPrompt from "../components/BalanceReconciliationPrompt";
 
 const AUTH_LOAD_TIMEOUT_MS = 5000;
 
-// Secure token cache for Clerk
-const tokenCache = {
-  async getToken(key: string) {
-    try {
-      return SecureStore.getItemAsync(key);
-    } catch {
-      return null;
-    }
-  },
-  async saveToken(key: string, value: string) {
-    try {
-      return SecureStore.setItemAsync(key, value);
-    } catch {
-      return;
-    }
-  },
-};
-
 // Auth guard component
 function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { isSignedIn, isLoaded } = useAuth();
+  const [session, setSession] = useState<Session | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const isSignedIn = Boolean(session?.user);
   const segments = useSegments();
   const router = useRouter();
   const [authTimedOut, setAuthTimedOut] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session);
+      setIsLoaded(true);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setIsLoaded(true);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (isLoaded) {
@@ -181,19 +186,11 @@ function InnerLayout() {
 }
 
 export default function RootLayout() {
-  const publishableKey = ENV.CLERK_PUBLISHABLE_KEY;
-
-  if (!publishableKey) {
-    throw new Error("Missing CLERK_PUBLISHABLE_KEY in environment");
-  }
-
   return (
-    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
-      <ThemeProvider>
-        <StealthProvider>
-          <InnerLayout />
-        </StealthProvider>
-      </ThemeProvider>
-    </ClerkProvider>
+    <ThemeProvider>
+      <StealthProvider>
+        <InnerLayout />
+      </StealthProvider>
+    </ThemeProvider>
   );
 }

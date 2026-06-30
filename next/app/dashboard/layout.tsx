@@ -2,7 +2,6 @@
 
 import React, { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@clerk/nextjs";
 import { useUserContext } from "@/context/UserContext";
 import {
   SidebarProvider,
@@ -11,34 +10,47 @@ import {
 import { AppSidebar } from "../../components/app-sidebar";
 import { BalanceReconciliationPopup } from "../../components/balance-reconciliation-popup";
 import { DashboardTopbar } from "../../components/dashboard-topbar";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { isSignedIn, isLoaded } = useAuth();
-  const { profile, loading } = useUserContext();
+  const { profile, loading, authLoaded, isSignedIn } = useUserContext();
   const router = useRouter();
 
   useEffect(() => {
-    if (isLoaded && !isSignedIn) {
-      console.log("[DashboardLayout] Not signed in, redirecting to sign-in");
+    if (authLoaded && !isSignedIn) {
       router.push("/sign-in");
     }
-  }, [isLoaded, isSignedIn, router]);
+  }, [authLoaded, isSignedIn, router]);
 
   useEffect(() => {
-    if (isLoaded && isSignedIn && !loading && profile && !profile.onboarded) {
-      console.log("[DashboardLayout] User not onboarded, redirecting to onboarding");
+    if (authLoaded && isSignedIn && !loading && profile && !profile.onboarded) {
       router.push("/onboarding");
     }
-  }, [isLoaded, isSignedIn, loading, profile, router]);
+  }, [authLoaded, isSignedIn, loading, profile, router]);
 
-  if (!isLoaded || !isSignedIn) {
+  if (!authLoaded || !isSignedIn) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      <div className="flex h-screen bg-background">
+        <div className="hidden w-64 border-r p-4 md:block">
+          <Skeleton className="mb-8 h-10 w-36" />
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <Skeleton key={index} className="h-10 w-full" />
+            ))}
+          </div>
+        </div>
+        <div className="flex-1 p-6">
+          <Skeleton className="mb-6 h-12 w-full" />
+          <div className="grid gap-4 md:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <Skeleton key={index} className="h-32 rounded-xl" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

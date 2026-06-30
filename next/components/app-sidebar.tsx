@@ -13,10 +13,11 @@ import {
 } from "@/components/ui/sidebar";
 import { LayoutDashboard, ArrowRightLeft, CalendarDays, ChartPie, LogOut, Moon, Sun, Wallet, Workflow } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
-import { useClerk, useUser } from "@clerk/nextjs";
 import { useRouter, usePathname } from "next/navigation";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { createClient } from "@/lib/supabase/client";
+import { useUserContext } from "@/context/UserContext";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
@@ -49,16 +50,14 @@ const navItems = [
 ];
 
 export function AppSidebar() {
-  const { signOut } = useClerk();
-  const { user } = useUser();
+  const { profile } = useUserContext();
   const router = useRouter();
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
 
   const handleSignOut = async () => {
-    console.log("[AppSidebar] Signing out...");
     localStorage.removeItem("expenser-user-profile");
-    await signOut();
+    await createClient().auth.signOut();
     router.push("/");
   };
 
@@ -150,14 +149,13 @@ export function AppSidebar() {
               >
                 <div className="flex items-center justify-center w-5">
                   <Avatar className={cn("size-6 shadow-sm ring-1", isProfileActive ? "ring-white/20" : "ring-border/50")}>
-                    <AvatarImage src={user?.imageUrl} />
                     <AvatarFallback className={cn("text-[10px] font-bold", isProfileActive ? "bg-white/20 text-white" : "bg-primary/10 text-primary")}>
-                      {user?.firstName?.[0] || "U"}
+                      {profile?.name?.[0] || "U"}
                     </AvatarFallback>
                   </Avatar>
                 </div>
                 <span className="truncate group-data-[collapsible=icon]:hidden ml-3">
-                  {user?.fullName || user?.firstName || "Profile"}
+                  {profile?.name || "Profile"}
                 </span>
               </SidebarMenuButton>
             </Link>

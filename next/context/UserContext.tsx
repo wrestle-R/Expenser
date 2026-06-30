@@ -1,10 +1,11 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { useUser, useAuth } from "@clerk/nextjs";
+import { type Session } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 
 export interface UserProfile {
-  clerkId: string;
+  userId: string;
   name: string;
   email: string;
   occupation: string;
@@ -30,6 +31,9 @@ export interface UserProfile {
 interface UserContextType {
   profile: UserProfile | null;
   loading: boolean;
+  authLoaded: boolean;
+  isSignedIn: boolean;
+  session: Session | null;
   error: string | null;
   refreshProfile: () => Promise<void>;
   updateProfile: (data: Partial<UserProfile>) => Promise<void>;
@@ -38,11 +42,12 @@ interface UserContextType {
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const { user, isLoaded: isClerkLoaded } = useUser();
-  const { isSignedIn } = useAuth();
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoaded, setAuthLoaded] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isSignedIn = Boolean(session?.user);
 
   const readErrorMessage = useCallback(async (res: Response) => {
     const fallback = `Request failed with status ${res.status}`;
@@ -56,25 +61,25 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fetchProfile = useCallback(async () => {
-    if (!isSignedIn || !user) {
+    if (!authLoaded) {
+      return;
+    }
+
+    if (!isSignedIn) {
       setProfile(null);
       setLoading(false);
-      console.log("[UserContext] No signed in user, clearing profile");
       return;
     }
 
     try {
       setLoading(true);
-      console.log("[UserContext] Fetching profile for user:", user.id);
 
       const res = await fetch("/api/user/profile");
       if (res.ok) {
         const data = await res.json();
         setProfile(data.profile);
         localStorage.setItem("expenser-user-profile", JSON.stringify(data.profile));
-        console.log("[UserContext] Profile loaded:", data.profile);
       } else if (res.status === 404) {
-        console.log("[UserContext] No profile found, user needs onboarding");
         setProfile(null);
       } else {
         throw new Error(await readErrorMessage(res));
@@ -86,7 +91,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       if (cached) {
         try {
           setProfile(JSON.parse(cached));
-          console.log("[UserContext] Loaded profile from cache");
         } catch {
           setError("Failed to load profile");
         }
@@ -94,11 +98,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [isSignedIn, readErrorMessage, user]);
+  }, [authLoaded, isSignedIn, readErrorMessage]);
 
   const updateProfile = async (data: Partial<UserProfile>) => {
     try {
-      console.log("[UserContext] Updating profile:", data);
       const res = await fetch("/api/user/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -109,7 +112,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         const result = await res.json();
         setProfile(result.profile);
         localStorage.setItem("expenser-user-profile", JSON.stringify(result.profile));
-        console.log("[UserContext] Profile updated:", result.profile);
       } else {
         throw new Error(await readErrorMessage(res));
       }
@@ -120,24 +122,45 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    if (isClerkLoaded) {
-      fetchProfile();
-    }
-  }, [isClerkLoaded, fetchProfile]);
+    const supabase = createClient();
+    let mounted = true;
 
-  // Log auth state changes
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) {
+        return;
+      }
+      setSession(data.session);
+      setAuthLoaded(true);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthLoaded(true);
+      if (!nextSession) {
+        localStorage.removeItem("expenser-user-profile");
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   useEffect(() => {
-    console.log("[UserContext] Auth state changed - isSignedIn:", isSignedIn, "isClerkLoaded:", isClerkLoaded);
-    if (isSignedIn && user) {
-      console.log("[UserContext] Clerk user:", { id: user.id, email: user.primaryEmailAddress?.emailAddress });
-    }
-  }, [isSignedIn, isClerkLoaded, user]);
+    fetchProfile();
+  }, [fetchProfile]);
 
   return (
     <UserContext.Provider
       value={{
         profile,
         loading,
+        authLoaded,
+        isSignedIn,
+        session,
         error,
         refreshProfile: fetchProfile,
         updateProfile,
@@ -155,6 +178,9 @@ export function useUserContext() {
     return {
       profile: null,
       loading: true,
+      authLoaded: false,
+      isSignedIn: false,
+      session: null,
       error: null,
       refreshProfile: async () => {},
       updateProfile: async () => {},

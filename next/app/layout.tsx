@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { StealthProvider } from "@/context/StealthContext";
 import { ShortcutProvider } from "@/context/ShortcutContext";
@@ -36,24 +35,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
-      <html
-        lang="en"
-        className={`${fontSans.variable} ${fontMono.variable}`}
-        suppressHydrationWarning
-      >
-        <body className="font-sans antialiased">
-          <ThemeProvider>
-            <StealthProvider>
-              <ShortcutProvider>
-                <UserProvider>
-                  <TooltipProvider>{children}</TooltipProvider>
-                </UserProvider>
-              </ShortcutProvider>
-            </StealthProvider>
-          </ThemeProvider>
-        </body>
-      </html>
-    </ClerkProvider>
+    <html
+      lang="en"
+      className={`${fontSans.variable} ${fontMono.variable}`}
+      suppressHydrationWarning
+    >
+      <body className="font-sans antialiased">
+        <ThemeProvider>
+          <StealthProvider>
+            <ShortcutProvider>
+              <UserProvider>
+                <TooltipProvider>{children}</TooltipProvider>
+              </UserProvider>
+            </ShortcutProvider>
+          </StealthProvider>
+        </ThemeProvider>
+      </body>
+    </html>
   );
 }

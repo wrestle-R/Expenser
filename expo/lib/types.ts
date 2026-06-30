@@ -2,7 +2,7 @@
 
 export interface ITransaction {
   _id: string;
-  clerkId: string;
+  userId: string;
   clientRequestId?: string;
   exchangeExpenseId?: string;
   importSource?: string;
@@ -48,7 +48,7 @@ export interface IWorkflow {
 
 export interface IUserProfile {
   _id?: string;
-  clerkId: string;
+  userId: string;
   name: string;
   email: string;
   occupation: string;
@@ -176,7 +176,7 @@ export interface ProfileResponse {
 
 export interface IUserCategory {
   _id: string;
-  clerkId: string;
+  userId: string;
   type: TransactionType;
   name: string;
   color: string;
@@ -186,7 +186,7 @@ export interface IUserCategory {
 
 export interface BalanceReconciliationAlert {
   _id: string;
-  clerkId: string;
+  userId: string;
   transactionId?: string;
   paymentMethod: PaymentMethod;
   expectedBalance: number;

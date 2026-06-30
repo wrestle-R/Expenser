@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { getAuthenticatedUser } from "@/lib/auth";
 import { getApiErrorResponse } from "@/lib/api-errors";
 import {
   mapUserCategoryRow,
@@ -61,27 +61,28 @@ async function ensureDefaultCategories(userId: string) {
   for (const type of CATEGORY_TYPES) {
     for (const category of DEFAULT_CATEGORIES[type]) {
       await sql`
-        insert into user_categories (clerk_id, type, name, color)
+        insert into user_categories (user_id, type, name, color)
         values (${userId}, ${type}, ${category.name}, ${category.color})
-        on conflict (clerk_id, type, lower(name)) do nothing
+        on conflict (user_id, type, lower(name)) do nothing
       `;
     }
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
+    const authUser = await getAuthenticatedUser(req);
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = authUser.userId;
 
     await ensureDefaultCategories(userId);
 
     const categories = await sql<UserCategoryRow[]>`
       select *
       from user_categories
-      where clerk_id = ${userId}
+      where user_id = ${userId}
       order by type asc, name asc
     `;
 
@@ -96,10 +97,11 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
+    const authUser = await getAuthenticatedUser(req);
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = authUser.userId;
 
     const data = (await req.json()) as Record<string, unknown>;
     const type = parseType(data.type);
@@ -107,9 +109,9 @@ export async function POST(req: Request) {
     const color = parseColor(data.color);
 
     const rows = await sql<UserCategoryRow[]>`
-      insert into user_categories (clerk_id, type, name, color)
+      insert into user_categories (user_id, type, name, color)
       values (${userId}, ${type}, ${name}, ${color})
-      on conflict (clerk_id, type, lower(name))
+      on conflict (user_id, type, lower(name))
       do update set color = excluded.color
       returning *
     `;
@@ -123,10 +125,11 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
+    const authUser = await getAuthenticatedUser(req);
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = authUser.userId;
 
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
@@ -136,7 +139,7 @@ export async function DELETE(req: Request) {
 
     await sql`
       delete from user_categories
-      where id = ${id} and clerk_id = ${userId}
+      where id = ${id} and user_id = ${userId}
     `;
 
     return NextResponse.json({ success: true });

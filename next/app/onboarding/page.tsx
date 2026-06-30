@@ -2,12 +2,12 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth, useUser } from "@clerk/nextjs";
 import { useUserContext } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Wallet,
   CreditCard,
@@ -46,9 +46,7 @@ const paymentOptions = [
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { isSignedIn, isLoaded } = useAuth();
-  const { user } = useUser();
-  const { profile, updateProfile } = useUserContext();
+  const { profile, updateProfile, authLoaded, isSignedIn } = useUserContext();
 
   const [step, setStep] = useState(1);
   const [name, setName] = useState("");
@@ -58,10 +56,10 @@ export default function OnboardingPage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (isLoaded && !isSignedIn) {
+    if (authLoaded && !isSignedIn) {
       router.push("/sign-in");
     }
-  }, [isLoaded, isSignedIn, router]);
+  }, [authLoaded, isSignedIn, router]);
 
   useEffect(() => {
     if (profile?.onboarded) {
@@ -69,15 +67,6 @@ export default function OnboardingPage() {
       router.push("/dashboard");
     }
   }, [profile, router]);
-
-  useEffect(() => {
-    if (user) {
-      setTimeout(() => {
-        setName(user.fullName || "");
-      }, 0);
-      console.log("[Onboarding] Pre-filled name:", user.fullName);
-    }
-  }, [user]);
 
   const toggleMethod = (id: string) => {
     setSelectedMethods((prev) =>
@@ -108,10 +97,13 @@ export default function OnboardingPage() {
     router.push("/dashboard");
   };
 
-  if (!isLoaded || !isSignedIn) {
+  if (!authLoaded || !isSignedIn) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
-        <div className="animate-pulse text-muted-foreground">Loading...</div>
+        <div className="w-full max-w-lg space-y-6 p-4">
+          <Skeleton className="h-3 w-full rounded-full" />
+          <Skeleton className="h-80 w-full rounded-xl" />
+        </div>
       </div>
     );
   }

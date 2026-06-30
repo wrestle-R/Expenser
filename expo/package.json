@@ -11,7 +11,6 @@
     "lint": "expo lint"
   },
   "dependencies": {
-    "@clerk/clerk-expo": "2.19.0",
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/netinfo": "^11.5.2",
@@ -19,6 +18,7 @@
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
     "@rn-primitives/slot": "^1.2.0",
+    "@supabase/supabase-js": "^2.109.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "expenser-bank-notifications": "file:modules/expenser-bank-notifications",
@@ -46,18 +46,12 @@
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
+    "react-native-url-polyfill": "^3.0.0",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.5.1",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^3.4.14",
     "tailwindcss-animate": "^1.0.7"
-  },
-  "overrides": {
-    "@clerk/clerk-js": "5.107.0",
-    "@clerk/clerk-react": "5.54.0",
-    "@clerk/localizations": "3.27.2",
-    "@clerk/shared": "3.33.0",
-    "@clerk/types": "4.99.0"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

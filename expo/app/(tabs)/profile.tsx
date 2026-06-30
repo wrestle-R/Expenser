@@ -9,7 +9,6 @@ import {
   Alert,
   Switch,
 } from "react-native";
-import { useClerk, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -19,6 +18,7 @@ import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { clearAllData, getStoredBankReviewEvents } from "../../lib/storage";
 import ConfirmModal from "../../components/ConfirmModal";
 import { api } from "../../lib/api";
+import { supabase } from "../../lib/supabase";
 import { IUserCategory } from "../../lib/types";
 import {
   getBankNotificationAccessHealth,
@@ -59,8 +59,6 @@ export default function ProfileScreen() {
   const { isDark, toggleTheme } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
-  const { signOut } = useClerk();
-  const { user } = useUser();
   const {
     profile,
     loading,
@@ -164,7 +162,7 @@ export default function ProfileScreen() {
     setShowSignOutConfirm(false);
     try {
       await clearAllData();
-      await signOut();
+      await supabase.auth.signOut();
     } catch (error) {
       console.error("Sign out error:", error);
     }
@@ -293,14 +291,14 @@ export default function ProfileScreen() {
               textTransform: "uppercase",
             }}
           >
-            {profile?.name?.[0] || user?.firstName?.[0] || "U"}
+            {profile?.name?.[0] || "U"}
           </Text>
         </View>
         <Text style={{ fontSize: 20, fontWeight: "600", color: colors.text }}>
-          {profile?.name || user?.firstName || "User"}
+          {profile?.name || "User"}
         </Text>
         <Text style={{ color: colors.textMuted, marginTop: 4 }}>
-          {profile?.email || user?.primaryEmailAddress?.emailAddress || ""}
+          {profile?.email || ""}
         </Text>
 
         {/* Status */}

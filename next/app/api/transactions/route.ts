@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { getAuthenticatedUser } from "@/lib/auth";
 import { getApiErrorResponse } from "@/lib/api-errors";
 import { deriveTransactionReviewState } from "@/lib/transaction-review.js";
 import {
@@ -282,7 +282,7 @@ async function createBalanceReconciliationAlertIfNeeded(
 
   await trx`
     insert into balance_reconciliation_alerts (
-      clerk_id,
+      user_id,
       transaction_id,
       payment_method,
       expected_balance,
@@ -328,7 +328,7 @@ async function validateExchangeExpenseLink(
     select *
     from transactions
     where id = ${exchangeExpenseId}
-      and clerk_id = ${userId}
+      and user_id = ${userId}
       and type = 'expense'
     limit 1
   `) as TransactionRow[];
@@ -342,7 +342,7 @@ async function validateExchangeExpenseLink(
     ? await trx`
         select coalesce(sum(amount), 0) as total
         from transactions
-        where clerk_id = ${userId}
+        where user_id = ${userId}
           and type = 'income'
           and lower(category) = 'exchange'
           and exchange_expense_id = ${exchangeExpenseId}
@@ -351,7 +351,7 @@ async function validateExchangeExpenseLink(
     : await trx`
         select coalesce(sum(amount), 0) as total
         from transactions
-        where clerk_id = ${userId}
+        where user_id = ${userId}
           and type = 'income'
           and lower(category) = 'exchange'
           and exchange_expense_id = ${exchangeExpenseId}
@@ -385,7 +385,7 @@ async function assertExpenseCanSupportLinkedExchanges(
   const linkedExchanges = (await trx`
     select coalesce(sum(amount), 0) as total
     from transactions
-    where clerk_id = ${userId}
+    where user_id = ${userId}
       and type = 'income'
       and lower(category) = 'exchange'
       and exchange_expense_id = ${transactionId}
@@ -417,7 +417,7 @@ async function assertExpenseCanBeDeleted(
   const linkedExchangeTransactions = (await trx`
     select id
     from transactions
-    where clerk_id = ${userId}
+    where user_id = ${userId}
       and type = 'income'
       and lower(category) = 'exchange'
       and exchange_expense_id = ${transactionId}
@@ -429,18 +429,19 @@ async function assertExpenseCanBeDeleted(
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const { userId } = await auth();
+    const authUser = await getAuthenticatedUser(req);
 
-    if (!userId) {
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = authUser.userId;
 
     const transactions = await sql<TransactionRow[]>`
       select *
       from transactions
-      where clerk_id = ${userId}
+      where user_id = ${userId}
       order by date desc, created_at desc
     `;
 
@@ -455,11 +456,12 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { userId } = await auth();
+    const authUser = await getAuthenticatedUser(req);
 
-    if (!userId) {
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = authUser.userId;
 
     const data = (await req.json()) as Record<string, unknown>;
     const payload = parseTransactionInput(data);
@@ -470,7 +472,7 @@ export async function POST(req: Request) {
         const existingTransactions = (await trx`
           select *
           from transactions
-          where clerk_id = ${userId}
+          where user_id = ${userId}
             and client_request_id = ${payload.clientRequestId}
           limit 1
         `) as TransactionRow[];
@@ -485,7 +487,7 @@ export async function POST(req: Request) {
         const existingImports = (await trx`
           select *
           from transactions
-          where clerk_id = ${userId}
+          where user_id = ${userId}
             and import_source = ${payload.importSource}
             and import_source_key = ${payload.importSourceKey}
           limit 1
@@ -503,7 +505,7 @@ export async function POST(req: Request) {
       try {
         const insertedTransactions = (await trx`
           insert into transactions (
-            clerk_id,
+            user_id,
             client_request_id,
             exchange_expense_id,
             import_source,
@@ -551,7 +553,7 @@ export async function POST(req: Request) {
             const existingImports = (await trx`
               select *
               from transactions
-              where clerk_id = ${userId}
+              where user_id = ${userId}
                 and import_source = ${payload.importSource}
                 and import_source_key = ${payload.importSourceKey}
               limit 1
@@ -567,7 +569,7 @@ export async function POST(req: Request) {
             const existingTransactions = (await trx`
               select *
               from transactions
-              where clerk_id = ${userId}
+              where user_id = ${userId}
                 and client_request_id = ${payload.clientRequestId}
               limit 1
             `) as TransactionRow[];
@@ -585,7 +587,7 @@ export async function POST(req: Request) {
       const users = (await trx`
         select *
         from users
-        where clerk_id = ${userId}
+        where user_id = ${userId}
         limit 1
         for update
       `) as UserRow[];
@@ -609,7 +611,7 @@ export async function POST(req: Request) {
             balance_bank = ${balances.bank},
             balance_cash = ${balances.cash},
             balance_splitwise = ${balances.splitwise}
-          where clerk_id = ${userId}
+          where user_id = ${userId}
         `;
 
         await createBalanceReconciliationAlertIfNeeded(
@@ -634,10 +636,11 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
+    const authUser = await getAuthenticatedUser(req);
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = authUser.userId;
 
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
@@ -651,7 +654,7 @@ export async function DELETE(req: Request) {
       const transactions = (await trx`
         select *
         from transactions
-        where id = ${id} and clerk_id = ${userId}
+        where id = ${id} and user_id = ${userId}
         limit 1
       `) as TransactionRow[];
 
@@ -667,7 +670,7 @@ export async function DELETE(req: Request) {
       const users = (await trx`
         select *
         from users
-        where clerk_id = ${userId}
+        where user_id = ${userId}
         limit 1
         for update
       `) as UserRow[];
@@ -691,14 +694,14 @@ export async function DELETE(req: Request) {
             balance_bank = ${balances.bank},
             balance_cash = ${balances.cash},
             balance_splitwise = ${balances.splitwise}
-          where clerk_id = ${userId}
+          where user_id = ${userId}
         `;
         console.log("[API /transactions DELETE] Reversed balances");
       }
 
       await trx`
         delete from transactions
-        where id = ${id} and clerk_id = ${userId}
+        where id = ${id} and user_id = ${userId}
       `;
 
       return transaction;
@@ -717,11 +720,12 @@ export async function DELETE(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    const { userId } = await auth();
+    const authUser = await getAuthenticatedUser(req);
 
-    if (!userId) {
+    if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = authUser.userId;
 
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
@@ -737,7 +741,7 @@ export async function PUT(req: Request) {
       const existingTransactions = (await trx`
         select *
         from transactions
-        where id = ${id} and clerk_id = ${userId}
+        where id = ${id} and user_id = ${userId}
         limit 1
       `) as TransactionRow[];
 
@@ -767,7 +771,7 @@ export async function PUT(req: Request) {
       const users = (await trx`
         select *
         from users
-        where clerk_id = ${userId}
+        where user_id = ${userId}
         limit 1
         for update
       `) as UserRow[];
@@ -793,7 +797,7 @@ export async function PUT(req: Request) {
             balance_bank = ${balances.bank},
             balance_cash = ${balances.cash},
             balance_splitwise = ${balances.splitwise}
-          where clerk_id = ${userId}
+          where user_id = ${userId}
         `;
       }
 
@@ -809,7 +813,7 @@ export async function PUT(req: Request) {
           split_amount = ${nextTransaction.splitAmount},
           exchange_expense_id = ${nextTransaction.exchangeExpenseId},
           date = ${nextTransaction.date}
-        where id = ${id} and clerk_id = ${userId}
+        where id = ${id} and user_id = ${userId}
         returning *
       `) as TransactionRow[];
 

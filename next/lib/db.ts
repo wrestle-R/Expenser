@@ -33,7 +33,7 @@ export type TransactionReviewStatus = "pending" | "complete";
 
 export interface UserRow {
   id: string;
-  clerk_id: string;
+  user_id: string;
   name: string;
   email: string;
   occupation: string;
@@ -48,7 +48,7 @@ export interface UserRow {
 
 export interface TransactionRow {
   id: string;
-  clerk_id: string;
+  user_id: string;
   client_request_id: string | null;
   exchange_expense_id: string | null;
   import_source: string | null;
@@ -86,7 +86,7 @@ export interface WorkflowRow {
 
 export interface UserProfile {
   _id: string;
-  clerkId: string;
+  userId: string;
   name: string;
   email: string;
   occupation: string;
@@ -103,7 +103,7 @@ export interface UserProfile {
 
 export interface UserCategoryRow {
   id: string;
-  clerk_id: string;
+  user_id: string;
   type: TransactionType;
   name: string;
   color: string;
@@ -113,7 +113,7 @@ export interface UserCategoryRow {
 
 export interface BalanceReconciliationAlertRow {
   id: string;
-  clerk_id: string;
+  user_id: string;
   transaction_id: string | null;
   payment_method: PaymentMethod;
   expected_balance: number;
@@ -128,7 +128,7 @@ export interface BalanceReconciliationAlertRow {
 export function mapUserRow(row: UserRow): UserProfile {
   return {
     _id: row.id,
-    clerkId: row.clerk_id,
+    userId: row.user_id,
     name: row.name,
     email: row.email,
     occupation: row.occupation,
@@ -147,7 +147,7 @@ export function mapUserRow(row: UserRow): UserProfile {
 export function mapTransactionRow(row: TransactionRow) {
   return {
     _id: row.id,
-    clerkId: row.clerk_id,
+    userId: row.user_id,
     clientRequestId: row.client_request_id ?? undefined,
     exchangeExpenseId: row.exchange_expense_id ?? undefined,
     importSource: row.import_source ?? undefined,
@@ -175,7 +175,7 @@ export function mapTransactionRow(row: TransactionRow) {
 export function mapUserCategoryRow(row: UserCategoryRow) {
   return {
     _id: row.id,
-    clerkId: row.clerk_id,
+    userId: row.user_id,
     type: row.type,
     name: row.name,
     color: row.color,
@@ -189,7 +189,7 @@ export function mapBalanceReconciliationAlertRow(
 ) {
   return {
     _id: row.id,
-    clerkId: row.clerk_id,
+    userId: row.user_id,
     transactionId: row.transaction_id ?? undefined,
     paymentMethod: row.payment_method,
     expectedBalance: Number(row.expected_balance),

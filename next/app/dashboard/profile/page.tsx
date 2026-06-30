@@ -2,12 +2,11 @@
 
 import React, { useState, useEffect } from "react";
 import { useUserContext } from "@/context/UserContext";
-import { useUser } from "@clerk/nextjs";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Check, CreditCard, PiggyBank, ArrowRightLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -21,7 +20,6 @@ const paymentOptions = [
 
 export default function ProfilePage() {
   const { profile, updateProfile, loading } = useUserContext();
-  const { user } = useUser();
   const [name, setName] = useState("");
   const [occupation, setOccupation] = useState("");
   const [selectedMethods, setSelectedMethods] = useState<string[]>([]);
@@ -78,7 +76,6 @@ export default function ProfilePage() {
           <div className="relative group">
             <div className="absolute -inset-1 bg-gradient-to-tr from-primary to-primary-foreground rounded-full blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
             <Avatar className="size-32 border-4 border-background relative">
-              <AvatarImage src={user?.imageUrl} />
               <AvatarFallback className="text-4xl font-bold bg-primary/10 text-primary uppercase">
                 {profile.name?.[0] || "U"}
               </AvatarFallback>

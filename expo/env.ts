@@ -1,6 +1,5 @@
 // Environment configuration for the Expenser app
-// Replace these values with your actual API URL and Clerk publishable key
-import { Platform } from "react-native";
+// Replace these values with your actual API URL and Supabase public keys.
 
 // IMPORTANT: For Expo Go on physical device with mobile hotspot:
 // 1. Find your computer's local IP: `ifconfig | grep "inet "`
@@ -22,7 +21,9 @@ function getApiUrl(): string {
 
 export const ENV = {
   API_URL: getApiUrl(),
-  CLERK_PUBLISHABLE_KEY:
-    process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || "pk_test_Z3VpZGluZy1jYWltYW4tNjIuY2xlcmsuYWNjb3VudHMuZGV2JA",
+  SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL || "",
+  SUPABASE_ANON_KEY:
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    "",
 };
-

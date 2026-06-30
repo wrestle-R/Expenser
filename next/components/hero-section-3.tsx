@@ -5,9 +5,10 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { HeroHeader } from './header'
 import { ChevronRight, Wallet, CreditCard, IndianRupee, PiggyBank, ArrowRightLeft, CheckCircle2 } from 'lucide-react'
-import { SignedIn, SignedOut } from '@clerk/nextjs'
+import { useUserContext } from '@/context/UserContext'
 
 export default function HeroSection() {
+    const { isSignedIn } = useUserContext()
     const features = [
         'Track daily expenses across cash and bank',
         'Monitor splitwise balances in real-time',
@@ -52,19 +53,20 @@ export default function HeroSection() {
                                 </div>
 
                                 <div className="flex flex-wrap gap-4 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-300">
-                                    <SignedOut>
+                                    {!isSignedIn ? (
+                                      <>
                                         <Button size="lg" className="rounded-full px-8 shadow-xl shadow-primary/20 hover:shadow-primary/30 transition-all hover:-translate-y-0.5" render={<Link href="/sign-up" />} nativeButton={false}>
                                             Get Started Free <ChevronRight className="size-4 ml-1" />
                                         </Button>
                                         <Button size="lg" variant="outline" className="rounded-full px-8 hover:bg-primary/5 border-primary/20" render={<Link href="/sign-in" />} nativeButton={false}>
                                             Sign In
                                         </Button>
-                                    </SignedOut>
-                                    <SignedIn>
+                                      </>
+                                    ) : (
                                         <Button size="lg" className="rounded-full px-8 shadow-xl shadow-primary/20 hover:shadow-primary/30 transition-all hover:-translate-y-0.5" render={<Link href="/dashboard" />} nativeButton={false}>
                                             Go to Dashboard <ChevronRight className="size-4 ml-1" />
                                         </Button>
-                                    </SignedIn>
+                                    )}
                                 </div>
                             </div>
 

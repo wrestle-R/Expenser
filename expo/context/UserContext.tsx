@@ -6,8 +6,9 @@ import React, {
   useCallback,
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
-import { useAuth } from "@clerk/clerk-expo";
+import type { Session } from "@supabase/supabase-js";
 import { ApiError, api } from "../lib/api";
+import { supabase } from "../lib/supabase";
 import { syncService } from "../lib/sync";
 import {
   getStoredProfile,
@@ -143,7 +144,9 @@ interface UserContextType {
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const { getToken, isSignedIn, isLoaded } = useAuth();
+  const [session, setSession] = useState<Session | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const isSignedIn = Boolean(session?.user);
   const [profile, setProfile] = useState<IUserProfile | null>(null);
   const [transactions, setTransactions] = useState<ITransaction[]>([]);
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
@@ -154,6 +157,28 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSyncTime, setLastSyncTimeState] = useState<number | null>(null);
   const [authTimedOut, setAuthTimedOut] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session);
+      setIsLoaded(true);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setIsLoaded(true);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (isLoaded) {
@@ -171,14 +196,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   // Set API token getter for fresh tokens on every request
   useEffect(() => {
     if (isSignedIn) {
-      api.setTokenGetter(() => getToken());
-      // Also set initial token for immediate use
-      getToken().then((token) => api.setToken(token)).catch(console.error);
+      api.setTokenGetter(async () => {
+        const { data } = await supabase.auth.getSession();
+        return data.session?.access_token ?? null;
+      });
+      api.setToken(session?.access_token ?? null);
     } else {
       api.setToken(null);
       api.setTokenGetter(null);
     }
-  }, [isSignedIn, getToken]);
+  }, [isSignedIn, session?.access_token]);
 
   // Subscribe to sync status changes
   useEffect(() => {
@@ -460,7 +487,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       const tempTransaction: ITransaction = {
         _id: clientRequestId,
-        clerkId: profile?.clerkId || "",
+        userId: profile?.userId || "",
         clientRequestId,
         type: payload.type,
         amount: payload.amount,
@@ -833,7 +860,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       // Always save locally first
       const tempWorkflow: IWorkflow = {
         _id: generateTempId(),
-        userId: profile?.clerkId || "",
+        userId: profile?.userId || "",
         clientRequestId: generateTempId(),
         name: payload.name,
         type: payload.type,

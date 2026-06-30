@@ -10,6 +10,15 @@ export function isNotificationAccessEnabled() {
   return NativeModule?.isNotificationAccessEnabled?.() ?? false;
 }
 
+export function getNotificationAccessHealth(lookbackMs) {
+  return NativeModule?.getNotificationAccessHealth?.(lookbackMs) ?? {
+    settingEnabled: false,
+    recentReadCount: 0,
+    lastReadAt: null,
+    hasRecentReads: false,
+  };
+}
+
 export async function openNotificationAccessSettings() {
   if (!NativeModule) {
     return;
@@ -23,4 +32,20 @@ export function getQueuedImports() {
 
 export function clearQueuedImports(sourceKeys) {
   NativeModule?.clearQueuedImports?.(sourceKeys);
+}
+
+export function getQueuedRawBankCandidates() {
+  return NativeModule?.getQueuedRawBankCandidates?.() ?? [];
+}
+
+export function clearQueuedRawBankCandidates(sourceKeys) {
+  NativeModule?.clearQueuedRawBankCandidates?.(sourceKeys);
+}
+
+export function getQueuedBankReviewEvents() {
+  return NativeModule?.getQueuedBankReviewEvents?.() ?? [];
+}
+
+export function clearQueuedBankReviewEvents(sourceKeys) {
+  NativeModule?.clearQueuedBankReviewEvents?.(sourceKeys);
 }

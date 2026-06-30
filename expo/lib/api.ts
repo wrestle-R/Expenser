@@ -11,6 +11,7 @@ import {
   CreateWorkflowPayload,
   IUserCategory,
   BalanceReconciliationAlert,
+  ParsedBankNotificationResponse,
 } from "./types";
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -161,6 +162,13 @@ class ApiService {
     return this.request("/api/bank-imports/reconcile", {
       method: "POST",
       body: JSON.stringify({ id, action }),
+    });
+  }
+
+  async parseBankNotification(message: string): Promise<ParsedBankNotificationResponse> {
+    return this.request<ParsedBankNotificationResponse>("/api/bank-imports/parse", {
+      method: "POST",
+      body: JSON.stringify({ message }),
     });
   }
 

@@ -16,14 +16,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../../context/ThemeContext";
 import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
-import { clearAllData } from "../../lib/storage";
+import { clearAllData, getStoredBankReviewEvents } from "../../lib/storage";
 import ConfirmModal from "../../components/ConfirmModal";
 import { api } from "../../lib/api";
 import { IUserCategory } from "../../lib/types";
 import {
-  getBankNotificationAccessEnabled,
+  getBankNotificationAccessHealth,
+  getQueuedNativeBankReviewEvents,
   getQueuedBankImports,
+  getQueuedRawBankImportCandidates,
   openBankNotificationAccessSettings,
+  type NativeNotificationAccessHealth,
 } from "../../lib/bank-imports";
 
 const paymentOptions = [
@@ -32,6 +35,25 @@ const paymentOptions = [
   { id: "splitwise", label: "Splitwise", icon: "swap-horizontal" as const },
 ];
 const COLOR_OPTIONS = ["#6b7280", "#f97316", "#3b82f6", "#ec4899", "#22c55e", "#a855f7"];
+const EMPTY_ACCESS_HEALTH: NativeNotificationAccessHealth = {
+  settingEnabled: false,
+  recentReadCount: 0,
+  lastReadAt: null,
+  hasRecentReads: false,
+};
+
+function formatLastRead(value: string | null) {
+  if (!value) {
+    return "never";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "unknown";
+  }
+
+  return date.toLocaleString();
+}
 
 export default function ProfileScreen() {
   const { isDark, toggleTheme } = useTheme();
@@ -54,8 +76,10 @@ export default function ProfileScreen() {
   const [saved, setSaved] = useState(false);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
-  const [notificationEnabled, setNotificationEnabled] = useState(false);
+  const [accessHealth, setAccessHealth] = useState<NativeNotificationAccessHealth>(EMPTY_ACCESS_HEALTH);
   const [queuedCount, setQueuedCount] = useState(0);
+  const [rawCandidateCount, setRawCandidateCount] = useState(0);
+  const [reviewEventCount, setReviewEventCount] = useState(0);
   const [categories, setCategories] = useState<IUserCategory[]>([]);
   const [categoryType, setCategoryType] = useState<"expense" | "income">("expense");
   const [categoryName, setCategoryName] = useState("");
@@ -72,9 +96,14 @@ export default function ProfileScreen() {
   }, [profile]);
 
   const refreshSetup = useCallback(async () => {
-    setNotificationEnabled(getBankNotificationAccessEnabled());
+    setAccessHealth(getBankNotificationAccessHealth());
     setQueuedCount(getQueuedBankImports().length);
+    setRawCandidateCount(getQueuedRawBankImportCandidates().length);
     try {
+      const storedReviewEvents = await getStoredBankReviewEvents();
+      setReviewEventCount(
+        getQueuedNativeBankReviewEvents().length + storedReviewEvents.length
+      );
       const nextCategories = await api.getCategories();
       setCategories(nextCategories);
     } catch (error) {
@@ -604,10 +633,25 @@ export default function ProfileScreen() {
           Bank SMS Import
         </Text>
         <Text style={{ color: colors.textMuted }}>
-          Notification access: {notificationEnabled ? "enabled" : "not enabled"}
+          Notification access: {accessHealth.hasRecentReads ? "working" : "Permission has not been given"}
+        </Text>
+        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
+          Android setting: {accessHealth.settingEnabled ? "enabled" : "not enabled"}
+        </Text>
+        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
+          Notifications read in last 4 hours: {accessHealth.recentReadCount}
+        </Text>
+        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
+          Last notification read: {formatLastRead(accessHealth.lastReadAt)}
         </Text>
         <Text style={{ color: colors.textMuted, marginTop: 6 }}>
           Queued imports: {queuedCount}
+        </Text>
+        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
+          Raw Union Bank retries: {rawCandidateCount}
+        </Text>
+        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
+          Bank events needing review: {reviewEventCount}
         </Text>
         <TouchableOpacity
           style={{

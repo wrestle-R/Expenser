@@ -91,6 +91,48 @@ export interface CreateTransactionPayload {
   clientRequestId?: string;
 }
 
+export interface BankReviewEvent {
+  bankName: string;
+  eventType: string;
+  amount: number | null;
+  accountSuffix: string | null;
+  occurredAt: string | null;
+  summary: string;
+  confidence: "high" | "medium" | "low" | string;
+  importSource: string;
+  importSourceKey: string;
+  capturedAt?: string;
+  notificationPackage?: string;
+  parser?: "regex" | "groq" | string;
+}
+
+export type ParsedBankNotificationResponse =
+  | { parsed: null }
+  | {
+      kind: "transaction";
+      parsed: {
+        bankName: string;
+        accountSuffix: string;
+        type: TransactionType;
+        amount: number;
+        occurredAt: string;
+        referenceNumber: string | null;
+        payee: string | null;
+        availableBalance: number;
+        confidence: "high" | "medium" | string;
+      };
+      importSource: string;
+      importSourceKey: string;
+      parser: "regex" | "groq" | string;
+    }
+  | {
+      kind: "review_event";
+      event: Omit<BankReviewEvent, "importSource" | "importSourceKey" | "parser">;
+      importSource: string;
+      importSourceKey: string;
+      parser: "regex" | "groq" | string;
+    };
+
 export interface UpdateTransactionPayload {
   type?: TransactionType;
   amount?: number;

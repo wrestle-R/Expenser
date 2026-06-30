@@ -1,6 +1,7 @@
 // Offline storage service using AsyncStorage
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
+  BankReviewEvent,
   ITransaction,
   IWorkflow,
   IUserProfile,
@@ -19,6 +20,7 @@ const KEYS = {
   THEME: "@expenser_theme",
   STEALTH_MODE: "@expenser_stealth_mode",
   LOCAL_BALANCES: "@expenser_local_balances",
+  BANK_REVIEW_EVENTS: "@expenser_bank_review_events",
 };
 
 // === Transactions ===
@@ -85,6 +87,50 @@ export async function removePendingTransaction(tempId: string): Promise<void> {
     );
   } catch (error) {
     console.error("[Storage] Error removing pending transaction:", error);
+  }
+}
+
+// === Bank Review Events ===
+export async function getStoredBankReviewEvents(): Promise<BankReviewEvent[]> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.BANK_REVIEW_EVENTS);
+    return data ? JSON.parse(data) : [];
+  } catch (error) {
+    console.error("[Storage] Error getting bank review events:", error);
+    return [];
+  }
+}
+
+export async function addStoredBankReviewEvent(event: BankReviewEvent): Promise<void> {
+  try {
+    const existing = await getStoredBankReviewEvents();
+    if (existing.some((item) => item.importSourceKey === event.importSourceKey)) {
+      return;
+    }
+
+    await AsyncStorage.setItem(
+      KEYS.BANK_REVIEW_EVENTS,
+      JSON.stringify([event, ...existing].slice(0, 50))
+    );
+  } catch (error) {
+    console.error("[Storage] Error adding bank review event:", error);
+  }
+}
+
+export async function clearStoredBankReviewEvents(sourceKeys: string[]): Promise<void> {
+  try {
+    if (sourceKeys.length === 0) {
+      return;
+    }
+
+    const keys = new Set(sourceKeys);
+    const existing = await getStoredBankReviewEvents();
+    await AsyncStorage.setItem(
+      KEYS.BANK_REVIEW_EVENTS,
+      JSON.stringify(existing.filter((event) => !keys.has(event.importSourceKey)))
+    );
+  } catch (error) {
+    console.error("[Storage] Error clearing bank review events:", error);
   }
 }
 

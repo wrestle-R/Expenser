@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { buildBankImportKey, parseUnionBankNotification } from "@/lib/bank-import-parser.js";
+import {
+  buildBankImportKey,
+  buildBankReviewEventKey,
+  parseBankNotification,
+  parseUnionBankNotification,
+  type ParsedBankReviewEvent,
+} from "@/lib/bank-import-parser.js";
 
 type ParsedBankNotification = NonNullable<
   ReturnType<typeof parseUnionBankNotification>
@@ -56,6 +62,47 @@ function normalizeGroqParsed(value: unknown): ParsedBankNotification | null {
   };
 }
 
+function normalizeGroqReviewEvent(value: unknown): ParsedBankReviewEvent | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const data = value as Record<string, unknown>;
+  const eventType =
+    typeof data.eventType === "string" && data.eventType.trim()
+      ? data.eventType.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_")
+      : null;
+  const summary =
+    typeof data.summary === "string" && data.summary.trim()
+      ? data.summary.trim().slice(0, 160)
+      : null;
+
+  if (!eventType || !summary) {
+    return null;
+  }
+
+  const amount = data.amount == null ? null : normalizeGroqNumber(data.amount);
+  const occurredAt =
+    typeof data.occurredAt === "string" &&
+    !Number.isNaN(new Date(data.occurredAt).getTime())
+      ? new Date(data.occurredAt).toISOString()
+      : null;
+  const accountSuffix =
+    typeof data.accountSuffix === "string" && data.accountSuffix.trim()
+      ? data.accountSuffix.trim().replace(/\D/g, "").slice(-4) || null
+      : null;
+
+  return {
+    bankName: "Union Bank of India",
+    eventType,
+    amount,
+    accountSuffix,
+    occurredAt,
+    summary,
+    confidence: "medium",
+  };
+}
+
 async function parseWithGroq(message: string) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
@@ -76,7 +123,7 @@ async function parseWithGroq(message: string) {
         {
           role: "system",
           content:
-            "Extract one Union Bank of India SMS transaction. Return JSON only with accountSuffix, type (income or expense), amount, occurredAt ISO string in Asia/Kolkata converted to UTC, referenceNumber or null, payee or null, and availableBalance. Return {\"parsed\":null} if this is not a Union Bank debit/credit transaction.",
+            "Extract one Union Bank of India notification. Return JSON only. For debit/credit transactions return {\"kind\":\"transaction\",\"parsed\":{\"accountSuffix\":\"4280\",\"type\":\"income\" or \"expense\",\"amount\":123.45,\"occurredAt\":\"UTC ISO string converted from Asia/Kolkata\",\"referenceNumber\":string or null,\"payee\":string or null,\"availableBalance\":123.45}}. For non-transaction account events return {\"kind\":\"review_event\",\"event\":{\"eventType\":short_snake_case,\"amount\":number or null,\"accountSuffix\":string or null,\"occurredAt\":\"UTC ISO string\" or null,\"summary\":short string}}. Return {\"parsed\":null} if this is not a Union Bank notification.",
         },
         {
           role: "user",
@@ -97,7 +144,15 @@ async function parseWithGroq(message: string) {
   }
 
   const decoded = JSON.parse(content) as Record<string, unknown>;
-  return normalizeGroqParsed(decoded.parsed ?? decoded);
+  const kind = decoded.kind;
+
+  if (kind === "review_event") {
+    const event = normalizeGroqReviewEvent(decoded.event);
+    return event ? { kind: "review_event" as const, event } : null;
+  }
+
+  const parsed = normalizeGroqParsed(decoded.parsed ?? decoded);
+  return parsed ? { kind: "transaction" as const, parsed } : null;
 }
 
 export async function POST(req: Request) {
@@ -108,17 +163,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
     }
 
-    const regexParsed = parseUnionBankNotification(message);
-    const parsed = regexParsed ?? (await parseWithGroq(message));
-    if (!parsed) {
+    const deterministic = parseBankNotification(message);
+    const result = deterministic ?? (await parseWithGroq(message));
+    if (!result) {
       return NextResponse.json({ parsed: null }, { status: 200 });
     }
 
+    const parser = deterministic ? "regex" : "groq";
+    if (result.kind === "review_event") {
+      return NextResponse.json({
+        kind: "review_event",
+        event: result.event,
+        importSource: "union_bank_event",
+        importSourceKey: buildBankReviewEventKey(result.event),
+        parser,
+      });
+    }
+
     return NextResponse.json({
-      parsed,
+      kind: "transaction",
+      parsed: result.parsed,
       importSource: "union_bank_notification",
-      importSourceKey: buildBankImportKey(parsed),
-      parser: regexParsed ? "regex" : "groq",
+      importSourceKey: buildBankImportKey(result.parsed),
+      parser,
     });
   } catch (error) {
     if (error instanceof Error) {

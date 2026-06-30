@@ -21,6 +21,7 @@ import {
   addPendingWorkflow,
   removePendingWorkflow,
   addPendingDelete,
+  addStoredBankReviewEvent,
   getLocalBalances,
   getStoredLocalBalances,
   getPendingTransactions,
@@ -37,9 +38,12 @@ import { notificationService } from "../lib/notifications";
 import {
   bankImportToTransactionPayload,
   clearQueuedBankImports,
+  clearQueuedRawBankImportCandidates,
   getQueuedBankImports,
+  getQueuedRawBankImportCandidates,
 } from "../lib/bank-imports";
 import { getPendingReviewStatus } from "../lib/transaction-review";
+import type { ParsedBankNotificationResponse } from "../lib/types";
 
 function dedupeTransactions(items: ITransaction[]) {
   const deduped = new Map<string, ITransaction>();
@@ -82,6 +86,26 @@ function isRetryableSyncError(error: unknown) {
   }
 
   return true;
+}
+
+function parsedBankResponseToTransactionPayload(
+  response: Extract<ParsedBankNotificationResponse, { kind: "transaction" }>
+): CreateTransactionPayload {
+  return {
+    type: response.parsed.type,
+    amount: Number(response.parsed.amount),
+    description: "",
+    category: "",
+    paymentMethod: "bank",
+    splitAmount: 0,
+    date: response.parsed.occurredAt,
+    importSource: response.importSource,
+    importSourceKey: response.importSourceKey,
+    importedAccountSuffix: response.parsed.accountSuffix,
+    importedBankBalance: Number(response.parsed.availableBalance),
+    importedBankReference: response.parsed.referenceNumber ?? undefined,
+    importedBankConfidence: response.parsed.confidence,
+  };
 }
 
 interface UserContextType {
@@ -532,6 +556,58 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     if (importedKeys.length > 0) {
       clearQueuedBankImports(importedKeys);
+    }
+
+    const rawCandidates = getQueuedRawBankImportCandidates();
+    if (rawCandidates.length === 0) {
+      return;
+    }
+
+    const clearedRawKeys: string[] = [];
+    for (const item of rawCandidates) {
+      try {
+        const response = await api.parseBankNotification(item.message);
+        if ("kind" in response && response.kind === "transaction") {
+          await addTransaction(parsedBankResponseToTransactionPayload(response));
+          clearedRawKeys.push(item.sourceKey);
+          continue;
+        }
+
+        if ("kind" in response && response.kind === "review_event") {
+          await addStoredBankReviewEvent({
+            ...response.event,
+            importSource: response.importSource,
+            importSourceKey: response.importSourceKey,
+            capturedAt: item.capturedAt,
+            notificationPackage: item.notificationPackage,
+            parser: response.parser,
+          });
+          clearedRawKeys.push(item.sourceKey);
+          continue;
+        }
+
+        await addStoredBankReviewEvent({
+          bankName: "Union Bank of India",
+          eventType: "unparsed_union_bank_notification",
+          amount: null,
+          accountSuffix: null,
+          occurredAt: item.capturedAt,
+          summary: "Union Bank notification needs review",
+          confidence: "low",
+          importSource: "union_bank_event",
+          importSourceKey: `union-bank:event:raw:${item.sourceKey}`,
+          capturedAt: item.capturedAt,
+          notificationPackage: item.notificationPackage,
+          parser: "groq",
+        });
+        clearedRawKeys.push(item.sourceKey);
+      } catch (error) {
+        console.error("[UserContext] Failed to parse raw bank notification:", error);
+      }
+    }
+
+    if (clearedRawKeys.length > 0) {
+      clearQueuedRawBankImportCandidates(clearedRawKeys);
     }
   }, [addTransaction, isSignedIn, profile]);
 

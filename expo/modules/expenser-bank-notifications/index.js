@@ -1,17 +1,33 @@
 import { Platform } from "react-native";
 import { requireNativeModule } from "expo-modules-core";
 
-const NativeModule =
-  Platform.OS === "android"
-    ? requireNativeModule("ExpenserBankNotifications")
-    : null;
+let nativeModule;
+let didResolveNativeModule = false;
+
+function getNativeModule() {
+  if (Platform.OS !== "android") {
+    return null;
+  }
+
+  if (!didResolveNativeModule) {
+    didResolveNativeModule = true;
+
+    try {
+      nativeModule = requireNativeModule("ExpenserBankNotifications");
+    } catch {
+      nativeModule = null;
+    }
+  }
+
+  return nativeModule;
+}
 
 export function isNotificationAccessEnabled() {
-  return NativeModule?.isNotificationAccessEnabled?.() ?? false;
+  return getNativeModule()?.isNotificationAccessEnabled?.() ?? false;
 }
 
 export function getNotificationAccessHealth(lookbackMs) {
-  return NativeModule?.getNotificationAccessHealth?.(lookbackMs) ?? {
+  return getNativeModule()?.getNotificationAccessHealth?.(lookbackMs) ?? {
     settingEnabled: false,
     recentReadCount: 0,
     lastReadAt: null,
@@ -20,32 +36,35 @@ export function getNotificationAccessHealth(lookbackMs) {
 }
 
 export async function openNotificationAccessSettings() {
-  if (!NativeModule) {
+  const module = getNativeModule();
+
+  if (!module) {
     return;
   }
-  await NativeModule.openNotificationAccessSettings();
+
+  await module.openNotificationAccessSettings();
 }
 
 export function getQueuedImports() {
-  return NativeModule?.getQueuedImports?.() ?? [];
+  return getNativeModule()?.getQueuedImports?.() ?? [];
 }
 
 export function clearQueuedImports(sourceKeys) {
-  NativeModule?.clearQueuedImports?.(sourceKeys);
+  getNativeModule()?.clearQueuedImports?.(sourceKeys);
 }
 
 export function getQueuedRawBankCandidates() {
-  return NativeModule?.getQueuedRawBankCandidates?.() ?? [];
+  return getNativeModule()?.getQueuedRawBankCandidates?.() ?? [];
 }
 
 export function clearQueuedRawBankCandidates(sourceKeys) {
-  NativeModule?.clearQueuedRawBankCandidates?.(sourceKeys);
+  getNativeModule()?.clearQueuedRawBankCandidates?.(sourceKeys);
 }
 
 export function getQueuedBankReviewEvents() {
-  return NativeModule?.getQueuedBankReviewEvents?.() ?? [];
+  return getNativeModule()?.getQueuedBankReviewEvents?.() ?? [];
 }
 
 export function clearQueuedBankReviewEvents(sourceKeys) {
-  NativeModule?.clearQueuedBankReviewEvents?.(sourceKeys);
+  getNativeModule()?.clearQueuedBankReviewEvents?.(sourceKeys);
 }

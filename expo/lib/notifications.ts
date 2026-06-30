@@ -1,5 +1,4 @@
 // Local notification service for sync reminders
-import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import { Platform, AppState, AppStateStatus } from "react-native";
 import {
@@ -12,19 +11,11 @@ import {
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
-// Configure how notifications appear when the app is in the foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+type NotificationsModule = typeof import("expo-notifications");
 
 class NotificationService {
   private initialized = false;
+  private notifications: NotificationsModule | null | undefined;
   private checkInterval: ReturnType<typeof setInterval> | null = null;
   private appStateSubscription: { remove: () => void } | null = null;
   private scheduledUnsyncedReminderId: string | null = null;
@@ -33,10 +24,44 @@ class NotificationService {
   private lastUnsyncedCountNotified = 0;
   private lastStaleHoursNotified = -1;
 
+  private async getNotifications() {
+    if (this.notifications !== undefined) {
+      return this.notifications;
+    }
+
+    try {
+      const notifications = await import("expo-notifications");
+
+      // Configure how notifications appear when the app is in the foreground.
+      notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
+
+      this.notifications = notifications;
+    } catch (error) {
+      console.warn("[Notifications] Notifications unavailable in this runtime:", error);
+      this.notifications = null;
+    }
+
+    return this.notifications;
+  }
+
   async initialize() {
     if (this.initialized) return;
 
     try {
+      const Notifications = await this.getNotifications();
+
+      if (!Notifications) {
+        return;
+      }
+
       // Request permissions
       if (Device.isDevice) {
         const { status: existing } = await Notifications.getPermissionsAsync();
@@ -100,6 +125,12 @@ class NotificationService {
   // Schedule a notification to fire later when the app is in background
   private async scheduleBackgroundReminder() {
     try {
+      const Notifications = await this.getNotifications();
+
+      if (!Notifications) {
+        return;
+      }
+
       // Cancel any existing scheduled reminder first.
       if (this.scheduledUnsyncedReminderId) {
         await Notifications.cancelScheduledNotificationAsync(this.scheduledUnsyncedReminderId).catch(() => {});
@@ -189,6 +220,12 @@ class NotificationService {
    * Fires when there are pending transactions/workflows/deletes that haven't been synced.
    */
   private async checkUnsyncedData() {
+    const Notifications = await this.getNotifications();
+
+    if (!Notifications) {
+      return;
+    }
+
     const [pendingTxns, pendingWorkflows, pendingDeletes, pendingProfile] = await Promise.all([
       getPendingTransactions(),
       getPendingWorkflows(),
@@ -238,6 +275,12 @@ class NotificationService {
    * Fires when the app hasn't successfully refreshed from the server in 4+ hours.
    */
   private async checkStaleData() {
+    const Notifications = await this.getNotifications();
+
+    if (!Notifications) {
+      return;
+    }
+
     const lastSync = await getLastSyncTime();
 
     if (!lastSync) {
@@ -298,6 +341,12 @@ class NotificationService {
    */
   async onSyncComplete() {
     try {
+      const Notifications = await this.getNotifications();
+
+      if (!Notifications) {
+        return;
+      }
+
       if (this.scheduledUnsyncedReminderId) {
         await Notifications.cancelScheduledNotificationAsync(this.scheduledUnsyncedReminderId).catch(() => {});
         this.scheduledUnsyncedReminderId = null;
@@ -347,6 +396,12 @@ class NotificationService {
     }
     
     try {
+      const Notifications = await this.getNotifications();
+
+      if (!Notifications) {
+        return;
+      }
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title: "Test Notification",

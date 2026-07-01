@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useStealthMode } from "@/context/StealthContext";
+import { getProfileSetupHref } from "@/lib/profile-navigation";
 
 export type ShortcutAction =
   | "dashboard"
@@ -36,7 +37,7 @@ const ROUTES: Partial<Record<ShortcutAction, string>> = {
   workflows: "/dashboard/workflows",
   calendar: "/dashboard/calendar",
   analysis: "/dashboard/analysis",
-  setup: "/dashboard/profile",
+  setup: getProfileSetupHref(),
 };
 
 type ShortcutContextType = {

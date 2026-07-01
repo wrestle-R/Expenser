@@ -230,7 +230,7 @@ export default function WorkflowsPage() {
               </Button>
             }
           />
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-xl">
             <DialogHeader>
               <DialogTitle>Create Workflow</DialogTitle>
               <DialogDescription>

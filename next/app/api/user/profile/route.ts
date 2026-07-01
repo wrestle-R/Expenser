@@ -81,24 +81,26 @@ export async function GET(req: Request) {
             name,
             occupation,
             payment_methods,
-            balance_bank,
-            balance_cash,
-            balance_splitwise,
-            onboarded
-          )
-          values (
-            ${authUser.userId},
-            ${authUser.email},
-            ${authUser.name},
+          balance_bank,
+          balance_cash,
+          balance_splitwise,
+          onboarded,
+          dashboard_tutorial_completed
+        )
+        values (
+          ${authUser.userId},
+          ${authUser.email},
+          ${authUser.name},
             ${""},
             ${[]},
-            ${0},
-            ${0},
-            ${0},
-            ${false}
-          )
-          returning *
-        `;
+          ${0},
+          ${0},
+          ${0},
+          ${false},
+          ${false}
+        )
+        returning *
+      `;
 
         user = insertedUsers[0];
       }
@@ -171,7 +173,8 @@ export async function PUT(req: Request) {
           balance_bank,
           balance_cash,
           balance_splitwise,
-          onboarded
+          onboarded,
+          dashboard_tutorial_completed
         )
         values (
           ${authUser.userId},
@@ -182,7 +185,8 @@ export async function PUT(req: Request) {
           ${Number.isFinite(parsedBalances.bank ?? Number.NaN) ? parsedBalances.bank : 0},
           ${Number.isFinite(parsedBalances.cash ?? Number.NaN) ? parsedBalances.cash : 0},
           ${Number.isFinite(parsedBalances.splitwise ?? Number.NaN) ? parsedBalances.splitwise : 0},
-          ${Boolean(data.onboarded ?? false)}
+          ${Boolean(data.onboarded ?? false)},
+          ${Boolean(data.dashboardTutorialCompleted ?? false)}
         )
         returning *
       `;
@@ -219,6 +223,10 @@ export async function PUT(req: Request) {
       typeof data.onboarded === "boolean"
         ? data.onboarded
         : existingUser.onboarded;
+    const nextDashboardTutorialCompleted =
+      typeof data.dashboardTutorialCompleted === "boolean"
+        ? data.dashboardTutorialCompleted
+        : existingUser.dashboard_tutorial_completed;
 
     const updatedUsers = (await sql`
       update users
@@ -230,7 +238,8 @@ export async function PUT(req: Request) {
         balance_bank = ${mergedBalances.bank},
         balance_cash = ${mergedBalances.cash},
         balance_splitwise = ${mergedBalances.splitwise},
-        onboarded = ${nextOnboarded}
+        onboarded = ${nextOnboarded},
+        dashboard_tutorial_completed = ${nextDashboardTutorialCompleted}
       where user_id = ${authUser.userId}
       returning *
     `) as unknown as UserRow[];

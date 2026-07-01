@@ -1,16 +1,18 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useUserContext } from "@/context/UserContext";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Check, CreditCard, PiggyBank, ArrowRightLeft } from "lucide-react";
+import { Check, CreditCard, PiggyBank, ArrowRightLeft, CirclePlay, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { ProfileSetupPanel } from "@/components/profile-setup-panel";
+import { replayDashboardTutorial } from "@/components/dashboard-tutorial";
+import { PROFILE_SETUP_HASH } from "@/lib/profile-navigation";
 
 const paymentOptions = [
   { id: "bank", label: "Bank (UPI)", icon: CreditCard, color: "text-blue-500", bg: "bg-blue-500/10" },
@@ -20,6 +22,7 @@ const paymentOptions = [
 
 export default function ProfilePage() {
   const { profile, updateProfile, loading } = useUserContext();
+  const setupSectionRef = useRef<HTMLDivElement | null>(null);
   const [name, setName] = useState("");
   const [occupation, setOccupation] = useState("");
   const [selectedMethods, setSelectedMethods] = useState<string[]>([]);
@@ -35,6 +38,27 @@ export default function ProfilePage() {
       }, 0);
     }
   }, [profile]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (window.location.hash !== `#${PROFILE_SETUP_HASH}`) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      setupSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
 
   const toggleMethod = (id: string) => {
     setSelectedMethods((prev) =>
@@ -72,12 +96,12 @@ export default function ProfilePage() {
 
       <div className="grid lg:grid-cols-3 gap-8">
         {/* Left Column - User Info & Preview */}
-        <Card className="lg:col-span-1 p-8 h-fit flex flex-col items-center text-center gap-6 bg-card/50 backdrop-blur-sm border-primary/10 shadow-xl shadow-primary/5">
+        <Card className="lg:col-span-1 rounded-[1.6rem] p-8 h-fit flex flex-col items-center text-center gap-6 bg-card/50 backdrop-blur-sm border-primary/10 shadow-xl shadow-primary/5">
           <div className="relative group">
             <div className="absolute -inset-1 bg-gradient-to-tr from-primary to-primary-foreground rounded-full blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
             <Avatar className="size-32 border-4 border-background relative">
-              <AvatarFallback className="text-4xl font-bold bg-primary/10 text-primary uppercase">
-                {profile.name?.[0] || "U"}
+              <AvatarFallback className="bg-primary/10 text-primary uppercase">
+                <UserRound className="size-14" />
               </AvatarFallback>
             </Avatar>
           </div>
@@ -91,11 +115,21 @@ export default function ProfilePage() {
                 <span className="text-sm font-medium text-muted-foreground">Status</span>
                 <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Active</span>
              </div>
+             <Button
+               type="button"
+               variant="outline"
+               data-tutorial-target="tutorial-profile-replay"
+               className="h-11 w-full justify-center gap-2 rounded-2xl border-primary/15 bg-background/70"
+               onClick={replayDashboardTutorial}
+             >
+               <CirclePlay className="size-4" />
+               Replay tutorial
+             </Button>
           </div>
         </Card>
 
         {/* Right Column - Forms */}
-        <Card className="lg:col-span-2 p-8 shadow-xl shadow-black/5 bg-card/30 backdrop-blur-sm border-primary/5">
+        <Card className="lg:col-span-2 rounded-[1.6rem] p-8 shadow-xl shadow-black/5 bg-card/30 backdrop-blur-sm border-primary/5">
           <div className="space-y-8">
             <div className="space-y-6">
               <h3 className="text-lg font-semibold flex items-center gap-2">
@@ -132,19 +166,19 @@ export default function ProfilePage() {
                 Active Accounts
               </h3>
               <p className="text-sm text-muted-foreground">Select the payment methods you want to Track on your Dashboard.</p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div data-tutorial-target="tutorial-profile-accounts" className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {paymentOptions.map((option) => (
                   <button
                     key={option.id}
                     onClick={() => toggleMethod(option.id)}
                     className={cn(
-                      "relative flex flex-col items-center gap-4 p-6 rounded-2xl border-2 transition-all duration-300 group ring-offset-background",
+                      "relative flex flex-col items-center gap-4 rounded-[1.5rem] border-2 p-6 transition-all duration-300 group ring-offset-background",
                       selectedMethods.includes(option.id)
                         ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
                         : "border-border bg-muted/20 hover:border-primary/50 hover:bg-muted/40"
                     )}
                   >
-                    <div className={cn("p-4 rounded-2xl transition-transform duration-300 group-hover:scale-110", option.bg, option.color)}>
+                      <div className={cn("rounded-[1.2rem] p-4 transition-transform duration-300 group-hover:scale-110", option.bg, option.color)}>
                       <option.icon className="size-7" />
                     </div>
                     <span className="font-bold text-sm tracking-tight">{option.label}</span>
@@ -174,7 +208,13 @@ export default function ProfilePage() {
 
       <Separator className="opacity-50" />
 
-      <ProfileSetupPanel />
+      <div
+        id={PROFILE_SETUP_HASH}
+        ref={setupSectionRef}
+        className="scroll-mt-24"
+      >
+        <ProfileSetupPanel />
+      </div>
     </div>
   );
 }

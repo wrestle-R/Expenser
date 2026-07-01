@@ -16,6 +16,7 @@ export interface UserProfile {
     splitwise: number;
   };
   onboarded: boolean;
+  dashboardTutorialCompleted: boolean;
   workflows?: {
     _id: string;
     name: string;

@@ -42,6 +42,7 @@ export interface UserRow {
   balance_cash: number;
   balance_splitwise: number;
   onboarded: boolean;
+  dashboard_tutorial_completed: boolean;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -97,6 +98,7 @@ export interface UserProfile {
     splitwise: number;
   };
   onboarded: boolean;
+  dashboardTutorialCompleted: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -139,6 +141,7 @@ export function mapUserRow(row: UserRow): UserProfile {
       splitwise: Number(row.balance_splitwise ?? 0),
     },
     onboarded: row.onboarded,
+    dashboardTutorialCompleted: Boolean(row.dashboard_tutorial_completed),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   };

@@ -11,7 +11,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, ArrowRightLeft, CalendarDays, ChartPie, LogOut, Moon, Sun, Wallet, Workflow } from "lucide-react";
+import { LayoutDashboard, ArrowRightLeft, CalendarDays, ChartPie, LogOut, Moon, Sun, UserRound, Wallet, Workflow } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useRouter, usePathname } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -26,26 +26,31 @@ const navItems = [
     title: "Dashboard",
     url: "/dashboard",
     icon: LayoutDashboard,
+    tutorialTarget: "tutorial-nav-dashboard",
   },
   {
     title: "Transactions",
     url: "/dashboard/transactions",
     icon: ArrowRightLeft,
+    tutorialTarget: "tutorial-nav-transactions",
   },
   {
     title: "Workflows",
     url: "/dashboard/workflows",
     icon: Workflow,
+    tutorialTarget: "tutorial-nav-workflows",
   },
   {
     title: "Calendar",
     url: "/dashboard/calendar",
     icon: CalendarDays,
+    tutorialTarget: "tutorial-nav-calendar",
   },
   {
     title: "Analysis",
     url: "/dashboard/analysis",
     icon: ChartPie,
+    tutorialTarget: "tutorial-nav-analysis",
   },
 ];
 
@@ -94,6 +99,7 @@ export function AppSidebar() {
                       <SidebarMenuButton
                         tooltip={item.title}
                         isActive={isActive}
+                        data-tutorial-target={item.tutorialTarget}
                         className={cn(
                           "w-full transition-all duration-300 group-data-[collapsible=icon]:justify-center",
                           itemStateClasses
@@ -123,6 +129,7 @@ export function AppSidebar() {
             <SidebarMenuButton
               onClick={toggleTheme}
               tooltip={theme === "light" ? "Dark Mode" : "Light Mode"}
+              data-tutorial-target="tutorial-theme-toggle"
               className="w-full group-data-[collapsible=icon]:justify-center transition-all duration-300 hover:bg-accent hover:text-foreground"
             >
               <div className="flex items-center justify-center w-5">
@@ -140,6 +147,7 @@ export function AppSidebar() {
               <SidebarMenuButton
                 tooltip="Profile"
                 isActive={isProfileActive}
+                data-tutorial-target="tutorial-nav-profile"
                 className={cn(
                   "w-full group-data-[collapsible=icon]:justify-center transition-all duration-300",
                   isProfileActive
@@ -149,8 +157,8 @@ export function AppSidebar() {
               >
                 <div className="flex items-center justify-center w-5">
                   <Avatar className={cn("size-6 shadow-sm ring-1", isProfileActive ? "ring-white/20" : "ring-border/50")}>
-                    <AvatarFallback className={cn("text-[10px] font-bold", isProfileActive ? "bg-white/20 text-white" : "bg-primary/10 text-primary")}>
-                      {profile?.name?.[0] || "U"}
+                    <AvatarFallback className={cn("bg-primary/10", isProfileActive ? "bg-white/20 text-white" : "text-primary")}>
+                      <UserRound className="size-3.5" />
                     </AvatarFallback>
                   </Avatar>
                 </div>

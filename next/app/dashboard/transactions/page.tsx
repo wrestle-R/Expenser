@@ -621,7 +621,7 @@ export default function TransactionsPage() {
                 </Button>
               }
             />
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>Add Transaction</DialogTitle>
               <DialogDescription>
@@ -1006,7 +1006,7 @@ export default function TransactionsPage() {
         setEditDialogOpen(open);
         if (!open) setEditingTransaction(null);
       }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Transaction</DialogTitle>
             <DialogDescription>

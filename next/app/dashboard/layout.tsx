@@ -10,6 +10,7 @@ import {
 import { AppSidebar } from "../../components/app-sidebar";
 import { BalanceReconciliationPopup } from "../../components/balance-reconciliation-popup";
 import { DashboardTopbar } from "../../components/dashboard-topbar";
+import { DashboardTutorial } from "../../components/dashboard-tutorial";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function DashboardLayout({
@@ -64,6 +65,7 @@ export default function DashboardLayout({
           {children}
         </main>
         <BalanceReconciliationPopup />
+        <DashboardTutorial />
       </SidebarInset>
     </SidebarProvider>
   );

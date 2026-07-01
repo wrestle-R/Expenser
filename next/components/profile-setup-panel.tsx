@@ -105,7 +105,7 @@ export function ProfileSetupPanel() {
         </p>
       </div>
 
-      <Card className="p-5">
+      <Card data-tutorial-target="tutorial-profile-shortcuts" className="rounded-[1.45rem] p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <h3 className="flex items-center gap-2 text-lg font-semibold">
@@ -136,19 +136,19 @@ export function ProfileSetupPanel() {
         </div>
       </Card>
 
-      <Card className="p-5">
+      <Card data-tutorial-target="tutorial-profile-categories" className="rounded-[1.45rem] p-5">
         <div className="mb-4">
           <h3 className="flex items-center gap-2 text-lg font-semibold">
             <Tag className="size-5" />
             Categories
           </h3>
           <p className="text-sm text-muted-foreground">
-            These sync to Android and web. SMS imports stay in pending review until category and description are filled.
+            These sync to Android and web.
           </p>
         </div>
         <div className="mb-5 grid gap-3 md:grid-cols-[160px_1fr_120px_auto]">
           <select
-            className="h-10 rounded-md border bg-background px-3 text-sm"
+            className="h-10 rounded-xl border bg-background px-3 text-sm"
             value={categoryType}
             onChange={(event) => setCategoryType(event.target.value as "expense" | "income")}
           >
@@ -172,7 +172,7 @@ export function ProfileSetupPanel() {
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           {(["expense", "income"] as const).map((type) => (
-            <div key={type} className="rounded-lg border p-3">
+            <div key={type} className="rounded-2xl border p-3">
               <h4 className="mb-3 font-medium capitalize">{type}</h4>
               <div className="flex flex-wrap gap-2">
                 {groupedCategories[type].map((category) => (

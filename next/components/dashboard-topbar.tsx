@@ -51,9 +51,10 @@ export function DashboardTopbar() {
         variant="ghost"
         size="icon"
         onClick={toggleStealthMode}
+        data-tutorial-target="tutorial-stealth-toggle"
         aria-label={isStealthMode ? "Show money values" : "Hide money values"}
         title={isStealthMode ? "Show money values" : "Hide money values"}
-        className="shrink-0"
+        className="shrink-0 rounded-2xl border border-transparent bg-background/40 hover:bg-background/70"
       >
         {isStealthMode ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
       </Button>

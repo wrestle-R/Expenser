@@ -106,7 +106,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {/* Greeting */}
       <div className="flex items-center justify-between">
-        <div>
+        <div data-tutorial-target="dashboard-welcome">
           <h1 className="text-2xl font-bold">
             Welcome back, {profile.name.split(" ")[0]}!
           </h1>
@@ -121,7 +121,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Total Balance Card */}
-      <Card className="p-6">
+      <Card className="rounded-[1.4rem] p-6">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm text-muted-foreground font-medium">
@@ -147,7 +147,7 @@ export default function DashboardPage() {
           const config = methodConfig[method as keyof typeof methodConfig];
           const balance = profile.balances[method as keyof typeof profile.balances] || 0;
           return (
-            <Card key={method} className="p-5">
+            <Card key={method} className="rounded-[1.4rem] p-5">
               <div className="flex items-center gap-3 mb-3">
                 <div className={`rounded-lg p-2.5 ${config.bg}`}>
                   <config.icon className={`size-5 ${config.color}`} />
@@ -169,7 +169,7 @@ export default function DashboardPage() {
           <h2 className="text-lg font-semibold">Recent Transactions</h2>
           <Button variant="ghost" size="sm" render={<Link href="/dashboard/transactions" />} nativeButton={false}>View All</Button>
         </div>
-        <Card>
+        <Card className="rounded-[1.4rem]">
           {loadingTxns ? (
             <div className="p-6 space-y-3">
               {[1, 2, 3].map((i) => (

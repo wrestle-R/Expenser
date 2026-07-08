@@ -27,6 +27,7 @@ create table public.users (
   balance_cash double precision not null default 0,
   balance_splitwise double precision not null default 0,
   onboarded boolean not null default false,
+  dashboard_tutorial_completed boolean not null default false,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );

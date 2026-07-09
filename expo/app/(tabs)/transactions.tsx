@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -25,12 +25,14 @@ import {
   Colors,
   paymentMethodConfig,
 } from "../../constants/theme";
+import { api } from "../../lib/api";
 import { formatCurrency, formatDate } from "../../lib/utils";
-import { ITransaction, PaymentMethod, TransactionType } from "../../lib/types";
+import { ITransaction, IUserCategory, PaymentMethod, TransactionType } from "../../lib/types";
 import ConfirmModal from "../../components/ConfirmModal";
 import { getTransactionDisplayFields } from "../../lib/transaction-review";
 
 const PAGE_SIZE = 10;
+const IMPORTED_FALLBACK_CATEGORY = "bank import";
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { id: "bank", label: "Bank (UPI)", icon: "card" },
@@ -38,11 +40,80 @@ const paymentMethods: { id: PaymentMethod; label: string; icon: keyof typeof Ion
   { id: "splitwise", label: "Splitwise", icon: "swap-horizontal" },
 ];
 
+const EXPENSE_CATEGORIES = [
+  { id: "food", label: "Food", icon: "restaurant-outline" as const, color: "#f97316" },
+  { id: "transport", label: "Transport", icon: "car-outline" as const, color: "#3b82f6" },
+  { id: "shopping", label: "Shopping", icon: "bag-handle-outline" as const, color: "#ec4899" },
+  { id: "other", label: "Other", icon: "ellipsis-horizontal-circle-outline" as const, color: "#6b7280" },
+];
+
+const INCOME_CATEGORIES = [
+  { id: "salary", label: "Salary", icon: "briefcase-outline" as const, color: "#10b981" },
+  { id: "gift", label: "Gift", icon: "gift-outline" as const, color: "#a855f7" },
+  { id: "exchange", label: "Exchange", icon: "swap-horizontal-outline" as const, color: "#0ea5e9" },
+  { id: "other", label: "Other", icon: "ellipsis-horizontal-circle-outline" as const, color: "#6b7280" },
+];
+
+type EditMode = "edit" | "review";
+
+type CategoryOption = {
+  id: string;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+};
+
+function normalizeEditableCategory(category: string) {
+  const trimmed = category.trim();
+  if (!trimmed || trimmed.toLowerCase() === IMPORTED_FALLBACK_CATEGORY) {
+    return "";
+  }
+
+  return trimmed;
+}
+
+function isTransactionEditable(transaction: ITransaction) {
+  return !transaction.isLocal && !transaction._id.startsWith("temp_");
+}
+
+function getCategoriesForType(
+  type: TransactionType,
+  userCategories: IUserCategory[],
+  selectedCategory: string
+): CategoryOption[] {
+  const builtIns = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const builtInIds = new Set(builtIns.map((category) => category.id.toLowerCase()));
+  const customCategories = userCategories
+    .filter((category) => category.type === type && !builtInIds.has(category.name.toLowerCase()))
+    .map((category) => ({
+      id: category.name,
+      label: category.name,
+      icon: "pricetag-outline" as const,
+      color: category.color,
+    }));
+  const options = [...builtIns, ...customCategories];
+
+  if (
+    selectedCategory.trim() &&
+    !options.some((category) => category.id.toLowerCase() === selectedCategory.toLowerCase())
+  ) {
+    options.push({
+      id: selectedCategory,
+      label: selectedCategory,
+      icon: "pricetag-outline",
+      color: "#6b7280",
+    });
+  }
+
+  return options;
+}
+
 export default function TransactionsScreen() {
   const { isDark } = useTheme();
   const { isStealthMode, toggleStealthMode } = useStealthMode();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
+  const params = useLocalSearchParams<{ reviewId?: string }>();
   const insets = useSafeAreaInsets();
   const {
     profile,
@@ -67,13 +138,41 @@ export default function TransactionsScreen() {
   // Edit modal
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingTxn, setEditingTxn] = useState<ITransaction | null>(null);
+  const [editMode, setEditMode] = useState<EditMode>("edit");
   const [editType, setEditType] = useState<TransactionType>("expense");
   const [editAmount, setEditAmount] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("");
   const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>("bank");
   const [editSplitAmount, setEditSplitAmount] = useState("");
   const [editIsSplit, setEditIsSplit] = useState(false);
+  const [userCategories, setUserCategories] = useState<IUserCategory[]>([]);
   const [saving, setSaving] = useState(false);
+  const handledReviewIdRef = useRef<string | null>(null);
+  const reviewId = typeof params.reviewId === "string" ? params.reviewId : undefined;
+
+  const categoryOptions = useMemo(
+    () => getCategoriesForType(editType, userCategories, editCategory),
+    [editCategory, editType, userCategories]
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    api.getCategories()
+      .then((categories) => {
+        if (active) {
+          setUserCategories(categories);
+        }
+      })
+      .catch((error) => {
+        console.error("[Transactions] Failed to load categories:", error);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -103,46 +202,98 @@ export default function TransactionsScreen() {
     }
   };
 
-  const handleEditPress = (txn: ITransaction) => {
-    // Cannot edit pending (local) transactions
-    if (txn.isLocal || txn._id.startsWith("temp_")) {
+  const closeEditModal = () => {
+    setEditModalVisible(false);
+    setEditingTxn(null);
+    setEditMode("edit");
+    setEditCategory("");
+  };
+
+  const handleEditPress = (txn: ITransaction, mode?: EditMode) => {
+    if (!isTransactionEditable(txn)) {
       return;
     }
+
     setEditingTxn(txn);
+    setEditMode(mode ?? (txn.reviewStatus === "pending" ? "review" : "edit"));
     setEditType(txn.type);
     setEditAmount(txn.amount.toString());
     setEditDescription(txn.description);
+    setEditCategory(normalizeEditableCategory(txn.category));
     setEditPaymentMethod(txn.paymentMethod);
     setEditSplitAmount((txn.splitAmount || 0).toString());
     setEditIsSplit((txn.splitAmount || 0) > 0);
     setEditModalVisible(true);
   };
 
+  useEffect(() => {
+    if (!reviewId) {
+      handledReviewIdRef.current = null;
+      return;
+    }
+
+    if (loading || handledReviewIdRef.current === reviewId) {
+      return;
+    }
+
+    const targetTransaction = transactions.find((transaction) => transaction._id === reviewId);
+    handledReviewIdRef.current = reviewId;
+
+    if (!targetTransaction) {
+      router.setParams({ reviewId: undefined });
+      return;
+    }
+
+    if (!isTransactionEditable(targetTransaction)) {
+      showToast("This transaction is still syncing", "error");
+      router.setParams({ reviewId: undefined });
+      return;
+    }
+
+    handleEditPress(targetTransaction, "review");
+    router.setParams({ reviewId: undefined });
+  }, [loading, reviewId, router, showToast, transactions]);
+
   const handleSaveEdit = async () => {
     if (!editingTxn || !editAmount) return;
+    const parsedAmount = parseFloat(editAmount);
+    const trimmedDescription = editDescription.trim();
+    const trimmedCategory = editCategory.trim();
+    const requiresReviewCompletion = editMode === "review";
 
-    if (editIsSplit && Number(editSplitAmount || "0") >= Number(editAmount || "0")) {
+    if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      showToast("Please enter a valid amount", "error");
+      return;
+    }
+
+    if (!trimmedCategory) {
+      showToast("Please choose a category", "error");
+      return;
+    }
+
+    if (requiresReviewCompletion && !trimmedDescription) {
+      showToast("Please add a description before saving", "error");
+      return;
+    }
+
+    if (editIsSplit && Number(editSplitAmount || "0") >= parsedAmount) {
       showToast("Split amount must be less than total amount", "error");
       return;
     }
 
     setSaving(true);
     try {
-      const allowsPendingReview = Boolean(
-        editingTxn.importSource || editingTxn.reviewStatus === "pending"
-      );
       await updateTransaction(editingTxn._id, {
         type: editType,
-        amount: parseFloat(editAmount),
-        description: allowsPendingReview
-          ? editDescription.trim()
-          : editDescription.trim() || "No description",
-        category: editType === "income" ? "income" : "expense",
+        amount: parsedAmount,
+        description: requiresReviewCompletion
+          ? trimmedDescription
+          : trimmedDescription || "No description",
+        category: trimmedCategory,
         paymentMethod: editPaymentMethod,
         splitAmount: editIsSplit ? parseFloat(editSplitAmount || "0") : 0,
       });
-      setEditModalVisible(false);
-      setEditingTxn(null);
+      closeEditModal();
     } catch (error: any) {
       console.error("Failed to update:", error);
       showToast(error?.message || "Failed to update transaction", "error");
@@ -308,6 +459,7 @@ export default function TransactionsScreen() {
           >
             {paginatedTransactions.map((txn, index) => {
               const display = getTransactionDisplayFields(txn);
+              const editable = isTransactionEditable(txn);
 
               return (
               <View
@@ -322,8 +474,11 @@ export default function TransactionsScreen() {
                   borderBottomColor: colors.border,
                 }}
               >
-                <View
-                  style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
+                <TouchableOpacity
+                  style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
+                  onPress={() => handleEditPress(txn)}
+                  activeOpacity={editable ? 0.8 : 1}
+                  disabled={!editable}
                 >
                   <View
                     style={{
@@ -422,7 +577,7 @@ export default function TransactionsScreen() {
                       </View>
                     )}
                   </View>
-                </View>
+                </TouchableOpacity>
 
                 <View style={{ alignItems: "flex-end" }}>
                   <Text
@@ -459,8 +614,8 @@ export default function TransactionsScreen() {
                       <Ionicons name="refresh-outline" size={18} color={colors.info} />
                     </TouchableOpacity>
                   )}
-                  {/* Edit button - only show if not pending */}
-                  {!txn.isLocal && !txn._id.startsWith("temp_") && (
+                  {/* Edit button */}
+                  {editable && (
                     <TouchableOpacity
                       style={{ padding: 8 }}
                       onPress={() => handleEditPress(txn)}
@@ -538,9 +693,9 @@ export default function TransactionsScreen() {
         visible={editModalVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setEditModalVisible(false)}
+        onRequestClose={closeEditModal}
       >
-        <TouchableWithoutFeedback onPress={() => setEditModalVisible(false)}>
+        <TouchableWithoutFeedback onPress={closeEditModal}>
           <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 20 }}>
             {/* Blur overlay */}
             <View
@@ -568,15 +723,42 @@ export default function TransactionsScreen() {
                 >
                   {/* Header */}
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                    <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-                      Edit Transaction
-                    </Text>
-                    <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                    <View style={{ flex: 1, paddingRight: 12 }}>
+                      <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
+                        {editMode === "review" ? "Review Pending Transaction" : "Edit Transaction"}
+                      </Text>
+                      <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 4 }}>
+                        {editMode === "review"
+                          ? "Complete the missing details before saving this imported transaction."
+                          : "Update the transaction details."}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={closeEditModal}>
                       <Ionicons name="close" size={24} color={colors.textMuted} />
                     </TouchableOpacity>
                   </View>
 
                   <ScrollView showsVerticalScrollIndicator={false}>
+                    {editMode === "review" && (
+                      <View
+                        style={{
+                          backgroundColor: colors.warningBg,
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          borderColor: colors.warning + "33",
+                          padding: 12,
+                          marginBottom: 16,
+                        }}
+                      >
+                        <Text style={{ color: colors.warning, fontWeight: "700", fontSize: 13 }}>
+                          Pending review
+                        </Text>
+                        <Text style={{ color: colors.text, fontSize: 12, marginTop: 4, lineHeight: 18 }}>
+                          Add a proper category and description so this import is no longer left in review.
+                        </Text>
+                      </View>
+                    )}
+
                     {/* Type Selector */}
                     <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
                       <TouchableOpacity
@@ -606,7 +788,11 @@ export default function TransactionsScreen() {
                           borderColor: editType === "income" ? colors.success : colors.border,
                           alignItems: "center",
                         }}
-                        onPress={() => setEditType("income")}
+                        onPress={() => {
+                          setEditType("income");
+                          setEditIsSplit(false);
+                          setEditSplitAmount("");
+                        }}
                       >
                         <Ionicons name="arrow-up" size={20} color={editType === "income" ? colors.success : colors.textMuted} />
                         <Text style={{ marginTop: 4, fontWeight: "600", color: editType === "income" ? colors.success : colors.textMuted, fontSize: 12 }}>
@@ -653,6 +839,42 @@ export default function TransactionsScreen() {
                       placeholder="What was this for?"
                       placeholderTextColor={colors.textMuted}
                     />
+
+                    {/* Category */}
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>
+                      Category
+                    </Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                      {categoryOptions.map((category) => {
+                        const isSelected = editCategory === category.id;
+
+                        return (
+                          <TouchableOpacity
+                            key={category.id}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              borderRadius: 8,
+                              backgroundColor: isSelected ? `${category.color}18` : colors.card,
+                              borderWidth: 1,
+                              borderColor: isSelected ? category.color : colors.border,
+                            }}
+                            onPress={() => setEditCategory(category.id)}
+                          >
+                            <Ionicons
+                              name={category.icon}
+                              size={16}
+                              color={category.color}
+                            />
+                            <Text style={{ marginLeft: 6, color: colors.text, fontSize: 13 }}>
+                              {category.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
 
                     {/* Payment Method */}
                     <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Payment Method</Text>
@@ -730,13 +952,18 @@ export default function TransactionsScreen() {
                         marginTop: 8,
                       }}
                       onPress={handleSaveEdit}
-                      disabled={saving || !editAmount}
+                      disabled={
+                        saving ||
+                        !editAmount ||
+                        !editCategory.trim() ||
+                        (editMode === "review" && !editDescription.trim())
+                      }
                     >
                       {saving ? (
                         <ActivityIndicator color="#fff" />
                       ) : (
                         <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
-                          Save Changes
+                          {editMode === "review" ? "Save Review" : "Save Changes"}
                         </Text>
                       )}
                     </TouchableOpacity>

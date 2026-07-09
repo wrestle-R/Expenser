@@ -64,6 +64,19 @@ test("uses pending display labels without writing placeholders into stored field
   });
 });
 
+test("hides the internal bank import placeholder in pending display labels", () => {
+  const result = getTransactionDisplayFields({
+    description: "Juice",
+    category: "bank import",
+    reviewStatus: "pending",
+  });
+
+  assert.deepEqual(result, {
+    description: "Juice",
+    category: "",
+  });
+});
+
 test("uses an internal imported category instead of a pending category placeholder", () => {
   const result = deriveTransactionReviewState({
     description: "",

@@ -28,7 +28,7 @@ export function getTransactionDisplayFields(
 
     return {
       description: transaction.description.trim() || "Pending details",
-      category: category === IMPORTED_FALLBACK_CATEGORY ? "Bank import" : category,
+      category: category === IMPORTED_FALLBACK_CATEGORY ? "" : category,
     };
   }
 

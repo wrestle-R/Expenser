@@ -879,11 +879,11 @@ export default function TransactionsPage() {
               return (
                 <div
                   key={txn._id}
-                  className="flex flex-col gap-3 p-4 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex items-start gap-3 p-4 transition-colors hover:bg-muted/30 sm:items-center sm:justify-between"
                 >
-                  <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
                     <div
-                      className={`rounded-lg p-2 ${
+                      className={`shrink-0 rounded-lg p-2 ${
                         txn.type === "income"
                           ? "bg-emerald-500/10"
                           : "bg-red-500/10"
@@ -895,8 +895,8 @@ export default function TransactionsPage() {
                         <TrendingDown className="size-4 text-red-500" />
                       )}
                     </div>
-                    <div className="min-w-0">
-                      <p className="break-words text-sm font-medium">
+                    <div className="min-w-0 flex-1">
+                      <p className="break-words text-sm font-medium leading-5">
                         {display.description}
                         {(txn.splitAmount || 0) > 0 && (
                            <span className="ml-2 inline-flex items-center rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium text-orange-500 ring-1 ring-inset ring-orange-500/20">
@@ -909,7 +909,7 @@ export default function TransactionsPage() {
                           </span>
                         )}
                       </p>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                      <div className="mt-1 flex flex-wrap items-center gap-2 pr-1">
                         <Badge variant="secondary" className="text-xs">
                           {config.label}
                         </Badge>
@@ -923,7 +923,7 @@ export default function TransactionsPage() {
                             Offsets {linkedExpenseDisplay.category}
                           </Badge>
                         )}
-                        <span className="text-xs text-muted-foreground">
+                        <span className="hidden text-xs text-muted-foreground sm:inline">
                           {new Date(txn.date).toLocaleDateString("en-IN", {
                             day: "numeric",
                             month: "short",
@@ -933,10 +933,17 @@ export default function TransactionsPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end">
-                    <div className="text-left sm:text-right">
+                  <div className="flex shrink-0 items-start gap-2 sm:items-center">
+                    <div className="min-w-[4.5rem] text-right sm:min-w-0">
+                        <p className="text-[11px] text-muted-foreground sm:hidden">
+                          {new Date(txn.date).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </p>
                         <p
-                          className={`font-semibold flex items-center justify-end gap-0.5 ${
+                          className={`flex items-center justify-end gap-0.5 font-semibold ${
                             txn.type === "income"
                               ? "text-emerald-500"
                               : "text-red-500"
@@ -947,52 +954,54 @@ export default function TransactionsPage() {
                           <span className={numberClassName}>{txn.amount.toLocaleString("en-IN")}</span>
                         </p>
                         {(txn.splitAmount || 0) > 0 && (
-                            <p className="text-[10px] text-orange-500 flex items-center justify-end gap-1">
+                            <p className="flex items-center justify-end gap-1 text-[10px] text-orange-500">
                                 <ArrowRightLeft className="size-2.5" />
                                 Gets back <span className={numberClassName}>₹{txn.splitAmount}</span>
                             </p>
                         )}
                     </div>
-                    {/* Edit Button */}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 text-muted-foreground hover:text-primary"
-                      onClick={() => handleEditClick(txn)}
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                    {/* Delete Button with Confirmation */}
-                    <AlertDialog open={deleteId === txn._id} onOpenChange={(open) => !open && setDeleteId(null)}>
-                      <AlertDialogTrigger render={
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => setDeleteId(txn._id)}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      } />
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete Transaction</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Are you sure you want to delete &quot;{display.description}&quot;? This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel onClick={() => setDeleteId(null)}>Cancel</AlertDialogCancel>
-                          <AlertDialogAction 
-                            variant="destructive" 
-                            onClick={handleConfirmDelete}
-                            disabled={deleting}
+                    <div className="flex shrink-0 items-center gap-1 self-stretch">
+                      {/* Edit Button */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 text-muted-foreground hover:text-primary"
+                        onClick={() => handleEditClick(txn)}
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
+                      {/* Delete Button with Confirmation */}
+                      <AlertDialog open={deleteId === txn._id} onOpenChange={(open) => !open && setDeleteId(null)}>
+                        <AlertDialogTrigger render={
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-muted-foreground hover:text-destructive"
+                            onClick={() => setDeleteId(txn._id)}
                           >
-                            {deleting ? "Deleting..." : "Delete"}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        } />
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Transaction</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Are you sure you want to delete &quot;{display.description}&quot;? This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel onClick={() => setDeleteId(null)}>Cancel</AlertDialogCancel>
+                            <AlertDialogAction 
+                              variant="destructive" 
+                              onClick={handleConfirmDelete}
+                              disabled={deleting}
+                            >
+                              {deleting ? "Deleting..." : "Delete"}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </div>
                 </div>
               );

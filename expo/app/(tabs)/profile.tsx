@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Switch,
 } from "react-native";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -63,6 +64,7 @@ function formatLastRead(value: string | null) {
 export default function ProfileScreen() {
   const { isDark, toggleTheme } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const {
     profile,
@@ -70,6 +72,7 @@ export default function ProfileScreen() {
     isOnline,
     pendingCount,
     manualRefresh,
+    transactions,
     updateProfile,
   } = useUserContext();
   const { slots, updateSlots } = useTabPreferences();
@@ -85,6 +88,13 @@ export default function ProfileScreen() {
   const [queuedCount, setQueuedCount] = useState(0);
   const [rawCandidateCount, setRawCandidateCount] = useState(0);
   const [reviewEventCount, setReviewEventCount] = useState(0);
+  const pendingReviewTransactions = transactions.filter(
+    (transaction) =>
+      transaction.reviewStatus === "pending" &&
+      !transaction.isLocal &&
+      !transaction._id.startsWith("temp_")
+  );
+  const firstPendingReviewId = pendingReviewTransactions[0]?._id;
 
   useEffect(() => {
     if (profile) {
@@ -175,6 +185,18 @@ export default function ProfileScreen() {
     }
   };
 
+  const openPendingReview = () => {
+    if (firstPendingReviewId) {
+      router.push({
+        pathname: "/transactions",
+        params: { reviewId: firstPendingReviewId },
+      });
+      return;
+    }
+
+    router.push("/transactions");
+  };
+
   if (loading) {
     return (
       <View
@@ -231,16 +253,6 @@ export default function ProfileScreen() {
           />
         }
       >
-        {/* Header */}
-        <View style={{ marginBottom: 24 }}>
-          <Text style={{ fontSize: 28, fontWeight: "bold", color: colors.text }}>
-            Profile
-          </Text>
-          <Text style={{ color: colors.textMuted, marginTop: 4 }}>
-            Manage your personal information, imports, and tabs
-          </Text>
-        </View>
-
         {/* User Card */}
         <View
           style={{
@@ -553,27 +565,27 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      <Text
-        style={{
-          color:
-            saveStatus === "error"
-              ? colors.error
-              : saveStatus === "saved"
-                ? colors.success
-                : colors.textMuted,
-          fontSize: 12,
-          marginBottom: 16,
-          textAlign: "center",
-        }}
-      >
-        {saveStatus === "saving"
-          ? "Saving changes..."
-          : saveStatus === "saved"
-            ? "Saved"
-            : saveStatus === "error"
-              ? "Autosave failed"
-              : "Changes save automatically"}
-      </Text>
+      {saveStatus !== "idle" && (
+        <Text
+          style={{
+            color:
+              saveStatus === "error"
+                ? colors.error
+                : saveStatus === "saved"
+                  ? colors.success
+                  : colors.textMuted,
+            fontSize: 12,
+            marginBottom: 16,
+            textAlign: "center",
+          }}
+        >
+          {saveStatus === "saving"
+            ? "Saving changes..."
+            : saveStatus === "saved"
+              ? "Saved"
+              : "Autosave failed"}
+        </Text>
+      )}
 
       {/* Bottom Tabs */}
       <View
@@ -700,6 +712,35 @@ export default function ProfileScreen() {
         <Text style={{ color: colors.textMuted, marginTop: 6 }}>
           Bank events needing review: {reviewEventCount}
         </Text>
+        <TouchableOpacity
+          style={{
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: colors.border,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 14,
+          }}
+          onPress={openPendingReview}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", flex: 1, marginRight: 12 }}>
+            <Ionicons name="create-outline" size={18} color={colors.primary} />
+            <View style={{ marginLeft: 10, flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: "600" }}>
+                Pending review transactions
+              </Text>
+              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
+                {pendingReviewTransactions.length > 0
+                  ? `${pendingReviewTransactions.length} ready to review`
+                  : "Open transactions"}
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
         <TouchableOpacity
           style={{
             backgroundColor: colors.primary,

@@ -238,14 +238,16 @@ export default function ProfilePage() {
         </Card>
       </div>
 
-      <Separator className="opacity-50" />
+      <div className="hidden scroll-mt-24 sm:block">
+        <Separator className="opacity-50" />
 
-      <div
-        id={PROFILE_SETUP_HASH}
-        ref={setupSectionRef}
-        className="scroll-mt-24"
-      >
-        <ProfileSetupPanel />
+        <div
+          id={PROFILE_SETUP_HASH}
+          ref={setupSectionRef}
+          className="scroll-mt-24"
+        >
+          <ProfileSetupPanel />
+        </div>
       </div>
     </div>
   );

@@ -4,6 +4,8 @@ function isImportedPayload(payload: Pick<CreateTransactionPayload, "importSource
   return Boolean(payload.importSource && payload.importSourceKey);
 }
 
+const IMPORTED_FALLBACK_CATEGORY = "bank import";
+
 export function getPendingReviewStatus(
   payload: Pick<CreateTransactionPayload, "description" | "category" | "importSource" | "importSourceKey">
 ) {
@@ -22,9 +24,11 @@ export function getTransactionDisplayFields(
   transaction: Pick<ITransaction, "description" | "category" | "reviewStatus">
 ) {
   if (transaction.reviewStatus === "pending") {
+    const category = transaction.category.trim();
+
     return {
       description: transaction.description.trim() || "Pending details",
-      category: transaction.category.trim() || "Pending category",
+      category: category === IMPORTED_FALLBACK_CATEGORY ? "Bank import" : category,
     };
   }
 

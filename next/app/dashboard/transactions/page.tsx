@@ -599,29 +599,29 @@ export default function TransactionsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="space-y-6 overflow-hidden">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold">Transactions</h1>
           <p className="text-muted-foreground">
             View and manage all your transactions
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => void refreshTransactionPage()}>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <Button className="w-full sm:w-auto" variant="outline" onClick={() => void refreshTransactionPage()}>
             <RotateCcw className="mr-2 size-4" />
             Refresh
           </Button>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger
               render={
-                <Button onClick={resetForm}>
+                <Button className="w-full sm:w-auto" onClick={resetForm}>
                   <Plus className="size-4 mr-1" />
                   Add Transaction
                 </Button>
               }
             />
-          <DialogContent className="sm:max-w-2xl">
+          <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>Add Transaction</DialogTitle>
               <DialogDescription>
@@ -879,9 +879,9 @@ export default function TransactionsPage() {
               return (
                 <div
                   key={txn._id}
-                  className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors"
+                  className="flex flex-col gap-3 p-4 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
                     <div
                       className={`rounded-lg p-2 ${
                         txn.type === "income"
@@ -895,8 +895,8 @@ export default function TransactionsPage() {
                         <TrendingDown className="size-4 text-red-500" />
                       )}
                     </div>
-                    <div>
-                      <p className="font-medium text-sm">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-medium">
                         {display.description}
                         {(txn.splitAmount || 0) > 0 && (
                            <span className="ml-2 inline-flex items-center rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium text-orange-500 ring-1 ring-inset ring-orange-500/20">
@@ -909,11 +909,11 @@ export default function TransactionsPage() {
                           </span>
                         )}
                       </p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2">
                         <Badge variant="secondary" className="text-xs">
                           {config.label}
                         </Badge>
-                        {display.category !== "General" && (
+                        {display.category && display.category !== "General" && (
                           <Badge variant="outline" className="text-xs">
                             {display.category}
                           </Badge>
@@ -933,8 +933,8 @@ export default function TransactionsPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
+                  <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end">
+                    <div className="text-left sm:text-right">
                         <p
                           className={`font-semibold flex items-center justify-end gap-0.5 ${
                             txn.type === "income"
@@ -1006,7 +1006,7 @@ export default function TransactionsPage() {
         setEditDialogOpen(open);
         if (!open) setEditingTransaction(null);
       }}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Transaction</DialogTitle>
             <DialogDescription>

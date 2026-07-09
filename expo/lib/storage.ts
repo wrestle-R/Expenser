@@ -6,6 +6,7 @@ import {
   IWorkflow,
   IUserProfile,
   ILocalBalance,
+  BottomTabSlot,
 } from "./types";
 
 const KEYS = {
@@ -21,7 +22,33 @@ const KEYS = {
   STEALTH_MODE: "@expenser_stealth_mode",
   LOCAL_BALANCES: "@expenser_local_balances",
   BANK_REVIEW_EVENTS: "@expenser_bank_review_events",
+  BOTTOM_TAB_SLOTS: "@expenser_bottom_tab_slots",
 };
+
+const DEFAULT_BOTTOM_TAB_SLOTS: BottomTabSlot[] = [
+  "transactions",
+  "analysis",
+  "empty",
+];
+
+function normalizeBottomTabSlots(value: unknown): BottomTabSlot[] {
+  const allowed = new Set<BottomTabSlot>([
+    "transactions",
+    "workflows",
+    "analysis",
+    "empty",
+  ]);
+  const source = Array.isArray(value) ? value : DEFAULT_BOTTOM_TAB_SLOTS;
+  const normalized = source
+    .filter((item): item is BottomTabSlot => allowed.has(item as BottomTabSlot))
+    .slice(0, 3);
+
+  while (normalized.length < 3) {
+    normalized.push("empty");
+  }
+
+  return normalized;
+}
 
 // === Transactions ===
 export async function getStoredTransactions(): Promise<ITransaction[]> {
@@ -348,6 +375,30 @@ export async function setStoredStealthMode(enabled: boolean): Promise<void> {
     await AsyncStorage.setItem(KEYS.STEALTH_MODE, String(enabled));
   } catch (error) {
     console.error("[Storage] Error setting stealth mode:", error);
+  }
+}
+
+// === Bottom Tabs ===
+export async function getStoredBottomTabSlots(): Promise<BottomTabSlot[]> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.BOTTOM_TAB_SLOTS);
+    return normalizeBottomTabSlots(data ? JSON.parse(data) : null);
+  } catch (error) {
+    console.error("[Storage] Error getting bottom tab slots:", error);
+    return DEFAULT_BOTTOM_TAB_SLOTS;
+  }
+}
+
+export async function setStoredBottomTabSlots(
+  slots: BottomTabSlot[]
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      KEYS.BOTTOM_TAB_SLOTS,
+      JSON.stringify(normalizeBottomTabSlots(slots))
+    );
+  } catch (error) {
+    console.error("[Storage] Error setting bottom tab slots:", error);
   }
 }
 

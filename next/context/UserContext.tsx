@@ -119,6 +119,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error("[UserContext] Error updating profile:", err);
       setError("Failed to update profile");
+      throw err;
     }
   };
 

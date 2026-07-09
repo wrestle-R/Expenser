@@ -19,6 +19,7 @@ export interface ITransaction {
   paymentMethod: "bank" | "cash" | "splitwise";
   splitAmount?: number;
   date: string;
+  deletedAt?: string;
   createdAt: string;
   updatedAt: string;
   // For offline sync
@@ -71,6 +72,7 @@ export interface ILocalBalance {
 
 export type PaymentMethod = "bank" | "cash" | "splitwise";
 export type TransactionType = "income" | "expense";
+export type BottomTabSlot = "transactions" | "workflows" | "analysis" | "empty";
 
 // API Payload types (what we send to the backend)
 export interface CreateTransactionPayload {

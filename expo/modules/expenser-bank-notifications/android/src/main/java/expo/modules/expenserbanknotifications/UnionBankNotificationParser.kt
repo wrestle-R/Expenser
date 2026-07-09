@@ -7,7 +7,7 @@ import java.util.TimeZone
 
 object UnionBankNotificationParser {
   private val coreRegex = Regex(
-    "\\bA/c\\s+\\*(\\d{3,8})\\s+(Debited|Credited(?:\\s+for)?)\\s+Rs:?([\\d,]+(?:\\.\\d{1,2})?)\\s+on\\s+(\\d{2}-\\d{2}-\\d{4})\\s+(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)",
+    "\\b(?:A/c|Alc)\\s+[%*](\\d{3,8})\\s+(Debited|Credited(?:\\s+for)?)\\s+Rs:?([\\d,]+(?:\\.\\d{1,2})?)\\s+on\\s+(\\d{2}-\\d{2}-\\d{4})\\s+(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)",
     RegexOption.IGNORE_CASE
   )
   private val balanceRegex = Regex(
@@ -26,7 +26,8 @@ object UnionBankNotificationParser {
 
   fun isUnionBankLike(message: String): Boolean {
     return message.contains("Union Bank of India", ignoreCase = true) ||
-      Regex("\\bA/c\\s+\\*\\d{3,8}\\b", RegexOption.IGNORE_CASE).containsMatchIn(message)
+      Regex("\\bA/c\\s+\\*\\d{3,8}\\b", RegexOption.IGNORE_CASE).containsMatchIn(message) ||
+      Regex("\\bAlc\\s+[%*]\\d{3,8}\\b", RegexOption.IGNORE_CASE).containsMatchIn(message)
   }
 
   fun parse(message: String): JSONObject? {

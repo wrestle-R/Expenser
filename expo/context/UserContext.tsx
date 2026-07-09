@@ -50,7 +50,14 @@ function dedupeTransactions(items: ITransaction[]) {
   const deduped = new Map<string, ITransaction>();
 
   for (const item of items) {
-    const key = item.clientRequestId || item._id;
+    if (item.deletedAt) {
+      continue;
+    }
+
+    const key =
+      item.importSource && item.importSourceKey
+        ? `${item.importSource}:${item.importSourceKey}`
+        : item.clientRequestId || item._id;
     const existing = deduped.get(key);
 
     if (!existing || (existing.isLocal && !item.isLocal)) {
@@ -95,8 +102,8 @@ function parsedBankResponseToTransactionPayload(
   return {
     type: response.parsed.type,
     amount: Number(response.parsed.amount),
-    description: "",
-    category: "",
+    description: response.parsed.payee ?? "",
+    category: "bank import",
     paymentMethod: "bank",
     splitAmount: 0,
     date: response.parsed.occurredAt,
@@ -277,10 +284,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       );
 
       const visibleStoredTransactions = storedTxns.filter(
-        (txn) => !pendingTransactionDeletes.has(txn._id)
+        (txn) => !pendingTransactionDeletes.has(txn._id) && !txn.deletedAt
       );
       const visiblePendingTransactions = pendingTxns.filter(
-        (txn) => !pendingTransactionDeletes.has(txn._id)
+        (txn) => !pendingTransactionDeletes.has(txn._id) && !txn.deletedAt
       );
       const visibleStoredWorkflows = storedWorkflows.filter(
         (workflow) => !pendingWorkflowDeletes.has(workflow._id)
@@ -538,6 +545,21 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
           await removePendingTransaction(tempTransaction._id);
           setPendingCount((prev) => Math.max(0, prev - 1));
+
+          if (created.deletedAt) {
+            setTransactions((prev) =>
+              dedupeTransactions(
+                prev.filter((t) => t._id !== tempTransaction._id)
+              )
+            );
+            const restoredBalances = await syncService.applyLocalTransactionImpact(
+              tempTransaction,
+              -1
+            );
+            setLocalBalancesState(restoredBalances);
+            void refreshProfile();
+            return;
+          }
 
           const storedTransactions = await getStoredTransactions();
           await setStoredTransactions(

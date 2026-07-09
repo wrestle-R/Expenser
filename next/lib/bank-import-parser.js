@@ -75,7 +75,11 @@ function isUnionBankLike(message) {
     return false;
   }
 
-  return /Union Bank of India/i.test(message) || /\bA\/c\s+\*\d{3,8}\b/i.test(message);
+  return (
+    /Union Bank of India/i.test(message) ||
+    /\bA\/c\s+\*\d{3,8}\b/i.test(message) ||
+    /\bAlc\s+[%*]\d{3,8}\b/i.test(message)
+  );
 }
 
 function parseUnionBankNotification(message) {
@@ -89,7 +93,7 @@ function parseUnionBankNotification(message) {
   }
 
   const coreMatch =
-    /\bA\/c\s+\*(\d{3,8})\s+(Debited|Credited(?:\s+for)?)\s+Rs:?([\d,]+(?:\.\d{1,2})?)\s+on\s+(\d{2}-\d{2}-\d{4})\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/i.exec(
+    /\b(?:A\/c|Alc)\s+[%*](\d{3,8})\s+(Debited|Credited(?:\s+for)?)\s+Rs:?([\d,]+(?:\.\d{1,2})?)\s+on\s+(\d{2}-\d{2}-\d{4})\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/i.exec(
       text
     );
   const balanceMatch = /\bAvl\s+Bal\s+Rs:?([\d,]+(?:\.\d{1,2})?)/i.exec(text);

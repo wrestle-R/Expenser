@@ -6,17 +6,21 @@ function isImportedTransaction(value) {
   return Boolean(value.importSource && value.importSourceKey);
 }
 
+const IMPORTED_FALLBACK_CATEGORY = "bank import";
+
 export function deriveTransactionReviewState(value) {
   const description = trimText(value.description);
-  const category = trimText(value.category);
+  const rawCategory = trimText(value.category);
 
   if (!isImportedTransaction(value)) {
     return {
       description: description || "No description",
-      category: category || "General",
+      category: rawCategory || "General",
       reviewStatus: "complete",
     };
   }
+
+  const category = rawCategory || IMPORTED_FALLBACK_CATEGORY;
 
   if (!description || !category) {
     return {
@@ -35,9 +39,11 @@ export function deriveTransactionReviewState(value) {
 
 export function getTransactionDisplayFields(value) {
   if (value.reviewStatus === "pending") {
+    const category = trimText(value.category);
+
     return {
       description: trimText(value.description) || "Pending details",
-      category: trimText(value.category) || "Pending category",
+      category: category === IMPORTED_FALLBACK_CATEGORY ? "Bank import" : category,
     };
   }
 

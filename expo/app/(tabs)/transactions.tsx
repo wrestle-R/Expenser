@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -24,14 +24,10 @@ import { useToast } from "../../context/ToastContext";
 import {
   Colors,
   paymentMethodConfig,
-  EXPENSE_CATEGORIES,
-  INCOME_CATEGORIES,
 } from "../../constants/theme";
 import { formatCurrency, formatDate } from "../../lib/utils";
 import { ITransaction, PaymentMethod, TransactionType } from "../../lib/types";
 import ConfirmModal from "../../components/ConfirmModal";
-import { getExpenseOffsetSummary } from "../../lib/exchange";
-import { api } from "../../lib/api";
 import { getTransactionDisplayFields } from "../../lib/transaction-review";
 
 const PAGE_SIZE = 10;
@@ -74,80 +70,10 @@ export default function TransactionsScreen() {
   const [editType, setEditType] = useState<TransactionType>("expense");
   const [editAmount, setEditAmount] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [editCategory, setEditCategory] = useState("");
   const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>("bank");
   const [editSplitAmount, setEditSplitAmount] = useState("");
   const [editIsSplit, setEditIsSplit] = useState(false);
-  const [editExchangeExpenseId, setEditExchangeExpenseId] = useState("");
   const [saving, setSaving] = useState(false);
-  const [syncedCategories, setSyncedCategories] = useState<
-    { id: string; label: string; color: string; type: TransactionType }[]
-  >([]);
-
-  const editCategories = useMemo(() => {
-    const baseCategories =
-      editType === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-    return [
-      ...baseCategories,
-      ...syncedCategories.filter(
-        (cat) =>
-          cat.type === editType &&
-          !baseCategories.some((baseCategory) => baseCategory.id === cat.id)
-      ),
-    ];
-  }, [editType, syncedCategories]);
-  const editExchangeExpenseOptions = transactions
-    .filter((transaction) => transaction.type === "expense" && !transaction.isLocal)
-    .map((transaction) => {
-      const summary = getExpenseOffsetSummary(
-        transactions,
-        transaction._id,
-        editingTxn?._id
-      );
-
-      return {
-        transaction,
-        remainingAmount: summary?.remainingAmount ?? 0,
-      };
-    })
-    .filter(
-      (item) =>
-        item.transaction._id === editExchangeExpenseId || item.remainingAmount > 0
-    )
-    .sort(
-      (left, right) =>
-        new Date(right.transaction.date).getTime() -
-        new Date(left.transaction.date).getTime()
-    );
-
-  useEffect(() => {
-    api
-      .getCategories()
-      .then((items) =>
-        setSyncedCategories(
-          items.map((item) => ({
-            id: item.name,
-            label: item.name,
-            color: item.color,
-            type: item.type,
-          }))
-        )
-      )
-      .catch((error) => console.error("[Transactions] Categories:", error));
-  }, []);
-
-  useEffect(() => {
-    const validIds = editCategories.map((cat) => cat.id);
-    if (editCategory && !validIds.includes(editCategory)) {
-      setEditCategory("other");
-    }
-  }, [editType, editCategory, editCategories]);
-
-  useEffect(() => {
-    if (!(editType === "income" && editCategory === "exchange")) {
-      setEditExchangeExpenseId("");
-    }
-  }, [editType, editCategory]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -186,9 +112,7 @@ export default function TransactionsScreen() {
     setEditType(txn.type);
     setEditAmount(txn.amount.toString());
     setEditDescription(txn.description);
-    setEditCategory(txn.reviewStatus === "pending" ? txn.category : txn.category);
     setEditPaymentMethod(txn.paymentMethod);
-    setEditExchangeExpenseId(txn.exchangeExpenseId || "");
     setEditSplitAmount((txn.splitAmount || 0).toString());
     setEditIsSplit((txn.splitAmount || 0) > 0);
     setEditModalVisible(true);
@@ -202,31 +126,6 @@ export default function TransactionsScreen() {
       return;
     }
 
-    if (editType === "income" && editCategory === "exchange") {
-      if (!editExchangeExpenseId) {
-        showToast("Select the expense this exchange should offset", "error");
-        return;
-      }
-
-      const summary = getExpenseOffsetSummary(
-        transactions,
-        editExchangeExpenseId,
-        editingTxn._id
-      );
-      if (!summary) {
-        showToast("Selected expense is no longer available", "error");
-        return;
-      }
-
-      if (parseFloat(editAmount) > summary.remainingAmount) {
-        showToast(
-          `Exchange amount cannot exceed ₹${summary.remainingAmount.toFixed(2)}`,
-          "error"
-        );
-        return;
-      }
-    }
-    
     setSaving(true);
     try {
       const allowsPendingReview = Boolean(
@@ -238,15 +137,9 @@ export default function TransactionsScreen() {
         description: allowsPendingReview
           ? editDescription.trim()
           : editDescription.trim() || "No description",
-        category: allowsPendingReview
-          ? editCategory.trim()
-          : editCategory || "General",
+        category: editType === "income" ? "income" : "expense",
         paymentMethod: editPaymentMethod,
         splitAmount: editIsSplit ? parseFloat(editSplitAmount || "0") : 0,
-        exchangeExpenseId:
-          editType === "income" && editCategory === "exchange"
-            ? editExchangeExpenseId
-            : undefined,
       });
       setEditModalVisible(false);
       setEditingTxn(null);
@@ -466,8 +359,7 @@ export default function TransactionsScreen() {
                         marginTop: 2,
                       }}
                     >
-                      {paymentMethodConfig[txn.paymentMethod]?.label} ·{" "}
-                      {display.category} · {formatDate(txn.date)}
+                      {paymentMethodConfig[txn.paymentMethod]?.label} · {formatDate(txn.date)}
                     </Text>
                     {txn.reviewStatus === "pending" && (
                       <Text
@@ -761,87 +653,6 @@ export default function TransactionsScreen() {
                       placeholder="What was this for?"
                       placeholderTextColor={colors.textMuted}
                     />
-
-                    {/* Category */}
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Category</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                      <View style={{ flexDirection: "row", gap: 8 }}>
-                        {editCategories.map((cat) => (
-                          <TouchableOpacity
-                            key={cat.id}
-                            style={{
-                              paddingHorizontal: 14,
-                              paddingVertical: 8,
-                              borderRadius: 8,
-                              backgroundColor: editCategory === cat.id ? colors.primary + "20" : colors.card,
-                              borderWidth: 1,
-                              borderColor: editCategory === cat.id ? colors.primary : colors.border,
-                            }}
-                            onPress={() => setEditCategory(cat.id)}
-                          >
-                            <Text style={{ color: editCategory === cat.id ? colors.primary : colors.text, fontSize: 13 }}>
-                              {cat.label}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </ScrollView>
-
-                    {editType === "income" && editCategory === "exchange" && (
-                      <>
-                        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>
-                          Offsets Expense
-                        </Text>
-                        {editExchangeExpenseOptions.length === 0 ? (
-                          <View
-                            style={{
-                              backgroundColor: colors.backgroundSecondary,
-                              borderRadius: 10,
-                              padding: 12,
-                              borderWidth: 1,
-                              borderColor: colors.border,
-                              marginBottom: 12,
-                            }}
-                          >
-                            <Text style={{ color: colors.textMuted }}>
-                              No synced expense transactions are available yet.
-                            </Text>
-                          </View>
-                        ) : (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                            <View style={{ flexDirection: "row", gap: 8 }}>
-                              {editExchangeExpenseOptions.map(({ transaction, remainingAmount }) => (
-                                <TouchableOpacity
-                                  key={transaction._id}
-                                  style={{
-                                    paddingHorizontal: 12,
-                                    paddingVertical: 8,
-                                    borderRadius: 8,
-                                    backgroundColor:
-                                      editExchangeExpenseId === transaction._id
-                                        ? colors.infoBg
-                                        : colors.card,
-                                    borderWidth: 1,
-                                    borderColor:
-                                      editExchangeExpenseId === transaction._id
-                                        ? colors.info
-                                        : colors.border,
-                                  }}
-                                  onPress={() => setEditExchangeExpenseId(transaction._id)}
-                                >
-                                  <Text style={{ color: colors.text, fontSize: 13, fontWeight: "600" }}>
-                                    {transaction.description}
-                                  </Text>
-                                  <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>
-                                    ₹{remainingAmount.toFixed(2)} left
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </ScrollView>
-                        )}
-                      </>
-                    )}
 
                     {/* Payment Method */}
                     <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Payment Method</Text>

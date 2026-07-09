@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
-  Alert,
+  RefreshControl,
   Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,12 +14,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTheme } from "../../context/ThemeContext";
 import { useUserContext } from "../../context/UserContext";
+import { useTabPreferences } from "../../context/TabPreferencesContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { clearAllData, getStoredBankReviewEvents } from "../../lib/storage";
 import ConfirmModal from "../../components/ConfirmModal";
-import { api } from "../../lib/api";
 import { supabase } from "../../lib/supabase";
-import { IUserCategory } from "../../lib/types";
+import type { BottomTabSlot } from "../../lib/types";
 import {
   getBankNotificationAccessHealth,
   getQueuedNativeBankReviewEvents,
@@ -34,7 +34,12 @@ const paymentOptions = [
   { id: "cash", label: "Cash", icon: "cash" as const },
   { id: "splitwise", label: "Splitwise", icon: "swap-horizontal" as const },
 ];
-const COLOR_OPTIONS = ["#6b7280", "#f97316", "#3b82f6", "#ec4899", "#22c55e", "#a855f7"];
+const TAB_OPTIONS: { id: BottomTabSlot; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { id: "transactions", label: "Transactions", icon: "card-outline" },
+  { id: "workflows", label: "Workflows", icon: "flash-outline" },
+  { id: "analysis", label: "Analysis", icon: "pie-chart-outline" },
+  { id: "empty", label: "Empty", icon: "remove-circle-outline" },
+];
 const EMPTY_ACCESS_HEALTH: NativeNotificationAccessHealth = {
   settingEnabled: false,
   recentReadCount: 0,
@@ -64,32 +69,29 @@ export default function ProfileScreen() {
     loading,
     isOnline,
     pendingCount,
+    manualRefresh,
     updateProfile,
   } = useUserContext();
+  const { slots, updateSlots } = useTabPreferences();
+  const hydratedProfileRef = useRef(false);
 
   const [name, setName] = useState("");
   const [occupation, setOccupation] = useState("");
   const [selectedMethods, setSelectedMethods] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [accessHealth, setAccessHealth] = useState<NativeNotificationAccessHealth>(EMPTY_ACCESS_HEALTH);
   const [queuedCount, setQueuedCount] = useState(0);
   const [rawCandidateCount, setRawCandidateCount] = useState(0);
   const [reviewEventCount, setReviewEventCount] = useState(0);
-  const [categories, setCategories] = useState<IUserCategory[]>([]);
-  const [categoryType, setCategoryType] = useState<"expense" | "income">("expense");
-  const [categoryName, setCategoryName] = useState("");
-  const [categoryColor, setCategoryColor] = useState(COLOR_OPTIONS[0]);
-  const [categorySaving, setCategorySaving] = useState(false);
-  const [categoryLoading, setCategoryLoading] = useState(true);
 
   useEffect(() => {
     if (profile) {
       setName(profile.name || "");
       setOccupation(profile.occupation || "");
       setSelectedMethods(profile.paymentMethods || []);
+      hydratedProfileRef.current = true;
     }
   }, [profile]);
 
@@ -97,18 +99,10 @@ export default function ProfileScreen() {
     setAccessHealth(getBankNotificationAccessHealth());
     setQueuedCount(getQueuedBankImports().length);
     setRawCandidateCount(getQueuedRawBankImportCandidates().length);
-    try {
-      const storedReviewEvents = await getStoredBankReviewEvents();
-      setReviewEventCount(
-        getQueuedNativeBankReviewEvents().length + storedReviewEvents.length
-      );
-      const nextCategories = await api.getCategories();
-      setCategories(nextCategories);
-    } catch (error) {
-      console.error("[Profile] Failed to load setup data:", error);
-    } finally {
-      setCategoryLoading(false);
-    }
+    const storedReviewEvents = await getStoredBankReviewEvents();
+    setReviewEventCount(
+      getQueuedNativeBankReviewEvents().length + storedReviewEvents.length
+    );
   }, []);
 
   useEffect(() => {
@@ -121,36 +115,49 @@ export default function ProfileScreen() {
     );
   };
 
-  const handleSavePress = () => {
-    if (!name.trim()) {
-      Alert.alert("Error", "Please enter your name");
+  useEffect(() => {
+    if (!profile || !hydratedProfileRef.current || selectedMethods.length === 0) {
       return;
     }
 
-    if (selectedMethods.length === 0) {
-      Alert.alert("Error", "Please select at least one payment method");
+    const nextName = name.trim();
+    const nextOccupation = occupation.trim();
+    const sameProfile =
+      nextName === (profile.name || "") &&
+      nextOccupation === (profile.occupation || "") &&
+      selectedMethods.join("|") === (profile.paymentMethods || []).join("|");
+
+    if (sameProfile) {
       return;
     }
 
-    setShowSaveConfirm(true);
-  };
-
-  const handleConfirmSave = async () => {
-    setShowSaveConfirm(false);
-    setSaving(true);
-    try {
-      await updateProfile({
-        name: name.trim(),
-        occupation: occupation.trim(),
+    const timeout = setTimeout(() => {
+      setSaveStatus("saving");
+      updateProfile({
+        name: nextName,
+        occupation: nextOccupation,
         paymentMethods: selectedMethods,
         onboarded: true,
-      });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch {
-      Alert.alert("Error", "Failed to save profile");
+      })
+        .then(() => {
+          setSaveStatus("saved");
+          setTimeout(() => setSaveStatus("idle"), 1600);
+        })
+        .catch((error) => {
+          console.error("[Profile] Autosave failed:", error);
+          setSaveStatus("error");
+        });
+    }, 650);
+
+    return () => clearTimeout(timeout);
+  }, [name, occupation, profile, selectedMethods, updateProfile]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshSetup(), manualRefresh()]);
     } finally {
-      setSaving(false);
+      setRefreshing(false);
     }
   };
 
@@ -165,39 +172,6 @@ export default function ProfileScreen() {
       await supabase.auth.signOut();
     } catch (error) {
       console.error("Sign out error:", error);
-    }
-  };
-
-  const saveCategory = async () => {
-    if (!categoryName.trim()) {
-      Alert.alert("Error", "Please enter a category name");
-      return;
-    }
-
-    setCategorySaving(true);
-    try {
-      await api.saveCategory({
-        type: categoryType,
-        name: categoryName.trim(),
-        color: categoryColor,
-      });
-      setCategoryName("");
-      await refreshSetup();
-    } catch (error) {
-      console.error("[Profile] Failed to save category:", error);
-      Alert.alert("Error", "Failed to save category");
-    } finally {
-      setCategorySaving(false);
-    }
-  };
-
-  const deleteCategory = async (id: string) => {
-    try {
-      await api.deleteCategory(id);
-      await refreshSetup();
-    } catch (error) {
-      console.error("[Profile] Failed to delete category:", error);
-      Alert.alert("Error", "Failed to delete category");
     }
   };
 
@@ -249,6 +223,13 @@ export default function ProfileScreen() {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: 16, paddingTop: 0 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
+        }
       >
         {/* Header */}
         <View style={{ marginBottom: 24 }}>
@@ -256,7 +237,7 @@ export default function ProfileScreen() {
             Profile
           </Text>
           <Text style={{ color: colors.textMuted, marginTop: 4 }}>
-            Manage your personal information, imports, and categories
+            Manage your personal information, imports, and tabs
           </Text>
         </View>
 
@@ -572,42 +553,110 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* Save Button */}
-      <TouchableOpacity
+      <Text
         style={{
-          backgroundColor: saved ? colors.success : colors.primary,
-          borderRadius: 12,
-          paddingVertical: 16,
-          alignItems: "center",
+          color:
+            saveStatus === "error"
+              ? colors.error
+              : saveStatus === "saved"
+                ? colors.success
+                : colors.textMuted,
+          fontSize: 12,
           marginBottom: 16,
+          textAlign: "center",
         }}
-        onPress={handleSavePress}
-        disabled={saving || saved}
       >
-        {saving ? (
-          <ActivityIndicator color={colors.primaryForeground} />
-        ) : (
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            {saved && (
-              <Ionicons
-                name="checkmark"
-                size={20}
-                color={colors.primaryForeground}
-                style={{ marginRight: 8 }}
-              />
-            )}
+        {saveStatus === "saving"
+          ? "Saving changes..."
+          : saveStatus === "saved"
+            ? "Saved"
+            : saveStatus === "error"
+              ? "Autosave failed"
+              : "Changes save automatically"}
+      </Text>
+
+      {/* Bottom Tabs */}
+      <View
+        style={{
+          backgroundColor: colors.card,
+          borderRadius: 16,
+          padding: 20,
+          marginBottom: 16,
+          borderWidth: 1,
+          borderColor: colors.border,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 18,
+            fontWeight: "600",
+            color: colors.text,
+            marginBottom: 6,
+          }}
+        >
+          Bottom Bar
+        </Text>
+        <Text style={{ color: colors.textMuted, marginBottom: 14 }}>
+          Home and Profile stay fixed. Choose the three middle slots.
+        </Text>
+        {slots.map((slot, slotIndex) => (
+          <View key={slotIndex} style={{ marginBottom: slotIndex === 2 ? 0 : 14 }}>
             <Text
               style={{
-                color: colors.primaryForeground,
-                fontSize: 16,
+                color: colors.textMuted,
+                fontSize: 12,
                 fontWeight: "600",
+                marginBottom: 8,
               }}
             >
-              {saved ? "Saved!" : "Save Changes"}
+              Slot {slotIndex + 1}
             </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {TAB_OPTIONS.map((option) => {
+                const selected = slot === option.id;
+                return (
+                  <TouchableOpacity
+                    key={option.id}
+                    onPress={() => {
+                      const nextSlots = [...slots];
+                      nextSlots[slotIndex] = option.id;
+                      updateSlots(nextSlots).catch((error) =>
+                        console.error("[Profile] Failed to update tabs:", error)
+                      );
+                    }}
+                    style={{
+                      alignItems: "center",
+                      backgroundColor: selected
+                        ? colors.primary
+                        : colors.backgroundSecondary,
+                      borderRadius: 999,
+                      flexDirection: "row",
+                      gap: 6,
+                      paddingHorizontal: 12,
+                      paddingVertical: 9,
+                    }}
+                  >
+                    <Ionicons
+                      name={option.icon}
+                      size={15}
+                      color={selected ? colors.primaryForeground : colors.text}
+                    />
+                    <Text
+                      style={{
+                        color: selected ? colors.primaryForeground : colors.text,
+                        fontSize: 12,
+                        fontWeight: "700",
+                      }}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
-        )}
-      </TouchableOpacity>
+        ))}
+      </View>
 
       {/* Bank SMS Import */}
       <View
@@ -667,140 +716,6 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Categories */}
-      <View
-        style={{
-          backgroundColor: colors.card,
-          borderRadius: 16,
-          padding: 20,
-          marginBottom: 16,
-          borderWidth: 1,
-          borderColor: colors.border,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 18,
-            fontWeight: "600",
-            color: colors.text,
-            marginBottom: 16,
-          }}
-        >
-          Categories
-        </Text>
-        <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-          {(["expense", "income"] as const).map((item) => (
-            <TouchableOpacity
-              key={item}
-              onPress={() => setCategoryType(item)}
-              style={{
-                flex: 1,
-                borderRadius: 10,
-                paddingVertical: 10,
-                alignItems: "center",
-                backgroundColor:
-                  categoryType === item ? colors.primary : colors.backgroundSecondary,
-              }}
-            >
-              <Text
-                style={{
-                  color:
-                    categoryType === item
-                      ? colors.primaryForeground
-                      : colors.text,
-                  fontWeight: "700",
-                  textTransform: "capitalize",
-                }}
-              >
-                {item}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <TextInput
-          value={categoryName}
-          onChangeText={setCategoryName}
-          placeholder="category name"
-          placeholderTextColor={colors.textMuted}
-          style={{
-            backgroundColor: colors.backgroundSecondary,
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: colors.border,
-            paddingVertical: 12,
-            paddingHorizontal: 16,
-            fontSize: 16,
-            color: colors.text,
-          }}
-        />
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
-          {COLOR_OPTIONS.map((item) => (
-            <TouchableOpacity
-              key={item}
-              onPress={() => setCategoryColor(item)}
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 15,
-                backgroundColor: item,
-                borderColor: categoryColor === item ? colors.text : "transparent",
-                borderWidth: 2,
-              }}
-            />
-          ))}
-        </View>
-        <TouchableOpacity
-          onPress={saveCategory}
-          disabled={categorySaving || !categoryName.trim()}
-          style={{
-            marginTop: 14,
-            backgroundColor: colors.primary,
-            borderRadius: 12,
-            opacity: categorySaving || !categoryName.trim() ? 0.6 : 1,
-            paddingVertical: 14,
-            alignItems: "center",
-          }}
-        >
-          <Text style={{ color: colors.primaryForeground, fontWeight: "600" }}>
-            Add Category
-          </Text>
-        </TouchableOpacity>
-        {categoryLoading ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
-        ) : (
-          <View style={{ marginTop: 16, gap: 10 }}>
-            {categories
-              .filter((category) => category.type === categoryType)
-              .map((category) => (
-                <TouchableOpacity
-                  key={category._id}
-                  onPress={() => deleteCategory(category._id)}
-                  style={{
-                    alignItems: "center",
-                    borderColor: colors.border,
-                    borderRadius: 10,
-                    borderWidth: 1,
-                    flexDirection: "row",
-                    gap: 10,
-                    padding: 12,
-                  }}
-                >
-                  <View
-                    style={{
-                      backgroundColor: category.color,
-                      borderRadius: 6,
-                      height: 12,
-                      width: 12,
-                    }}
-                  />
-                  <Text style={{ color: colors.text, flex: 1 }}>{category.name}</Text>
-                  <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-                </TouchableOpacity>
-              ))}
-          </View>
-        )}
-      </View>
-
       {/* Sign Out */}
       <TouchableOpacity
         style={{
@@ -830,20 +745,6 @@ export default function ProfileScreen() {
       {/* Bottom spacing */}
       <View style={{ height: 32 }} />
       </ScrollView>
-
-      {/* Save Confirmation Modal */}
-      <ConfirmModal
-        visible={showSaveConfirm}
-        onClose={() => setShowSaveConfirm(false)}
-        onConfirm={handleConfirmSave}
-        title="Save Changes"
-        message="Are you sure you want to save these profile changes?"
-        confirmText="Save"
-        cancelText="Cancel"
-        confirmColor="success"
-        icon="save-outline"
-        loading={saving}
-      />
 
       {/* Sign Out Confirmation Modal */}
       <ConfirmModal

@@ -261,43 +261,40 @@ function parseTransactionInput(data: Record<string, unknown>) {
   };
 }
 
-async function createBalanceReconciliationAlertIfNeeded(
-  trx: typeof sql,
-  userId: string,
-  transaction: TransactionRow,
-  expectedBankBalance: number
+function isImportedBankTransaction(
+  transaction: {
+    payment_method: PaymentMethod | null;
+    import_source: string | null;
+    import_source_key: string | null;
+    imported_bank_balance: number | string | null;
+  }
 ) {
-  if (
-    transaction.payment_method !== "bank" ||
-    transaction.imported_bank_balance == null
-  ) {
-    return;
-  }
+  return Boolean(
+    transaction.payment_method === "bank" &&
+      transaction.import_source &&
+      transaction.import_source_key &&
+      transaction.imported_bank_balance != null
+  );
+}
 
-  const bankBalance = Number(transaction.imported_bank_balance);
-  const difference = Number((bankBalance - expectedBankBalance).toFixed(2));
-  if (Math.abs(difference) <= 0.01) {
-    return;
-  }
+async function getLatestActiveImportedBankTransaction(
+  trx: typeof sql,
+  userId: string
+) {
+  const rows = (await trx`
+    select *
+    from transactions
+    where user_id = ${userId}
+      and deleted_at is null
+      and payment_method = 'bank'
+      and import_source is not null
+      and import_source_key is not null
+      and imported_bank_balance is not null
+    order by date desc, created_at desc
+    limit 1
+  `) as TransactionRow[];
 
-  await trx`
-    insert into balance_reconciliation_alerts (
-      user_id,
-      transaction_id,
-      payment_method,
-      expected_balance,
-      bank_balance,
-      difference
-    )
-    values (
-      ${userId},
-      ${transaction.id},
-      'bank',
-      ${expectedBankBalance},
-      ${bankBalance},
-      ${difference}
-    )
-  `;
+  return rows[0] ?? null;
 }
 
 async function validateExchangeExpenseLink(
@@ -330,6 +327,7 @@ async function validateExchangeExpenseLink(
     where id = ${exchangeExpenseId}
       and user_id = ${userId}
       and type = 'expense'
+      and deleted_at is null
     limit 1
   `) as TransactionRow[];
 
@@ -346,6 +344,7 @@ async function validateExchangeExpenseLink(
           and type = 'income'
           and lower(category) = 'exchange'
           and exchange_expense_id = ${exchangeExpenseId}
+          and deleted_at is null
           and id <> ${currentTransactionId}
       `
     : await trx`
@@ -355,6 +354,7 @@ async function validateExchangeExpenseLink(
           and type = 'income'
           and lower(category) = 'exchange'
           and exchange_expense_id = ${exchangeExpenseId}
+          and deleted_at is null
       `) as { total: number | string | null }[];
 
   const alreadyApplied = Number(linkedExchanges[0]?.total ?? 0);
@@ -389,6 +389,7 @@ async function assertExpenseCanSupportLinkedExchanges(
       and type = 'income'
       and lower(category) = 'exchange'
       and exchange_expense_id = ${transactionId}
+      and deleted_at is null
   `) as { total: number | string | null }[];
 
   const linkedAmount = Number(linkedExchanges[0]?.total ?? 0);
@@ -421,6 +422,7 @@ async function assertExpenseCanBeDeleted(
       and type = 'income'
       and lower(category) = 'exchange'
       and exchange_expense_id = ${transactionId}
+      and deleted_at is null
     limit 1
   `) as { id: string }[];
 
@@ -442,6 +444,7 @@ export async function GET(req: Request) {
       select *
       from transactions
       where user_id = ${userId}
+        and deleted_at is null
       order by date desc, created_at desc
     `;
 
@@ -474,6 +477,7 @@ export async function POST(req: Request) {
           from transactions
           where user_id = ${userId}
             and client_request_id = ${payload.clientRequestId}
+            and deleted_at is null
           limit 1
         `) as TransactionRow[];
 
@@ -571,6 +575,7 @@ export async function POST(req: Request) {
               from transactions
               where user_id = ${userId}
                 and client_request_id = ${payload.clientRequestId}
+                and deleted_at is null
               limit 1
             `) as TransactionRow[];
 
@@ -594,16 +599,31 @@ export async function POST(req: Request) {
 
       const user = users[0];
       if (user) {
-        const balances = updateBalancesForTransaction(
-          mapUserRow(user).balances,
-          {
-            type: transaction.type,
-            amount: Number(transaction.amount),
-            paymentMethod: transaction.payment_method,
-            splitAmount: Number(transaction.split_amount ?? 0),
-          },
-          1
-        );
+        let balances = mapUserRow(user).balances;
+
+        if (isImportedBankTransaction(transaction)) {
+          const latestImported = await getLatestActiveImportedBankTransaction(
+            trx,
+            userId
+          );
+          if (latestImported?.id === transaction.id) {
+            balances = {
+              ...balances,
+              bank: Number(transaction.imported_bank_balance),
+            };
+          }
+        } else {
+          balances = updateBalancesForTransaction(
+            balances,
+            {
+              type: transaction.type,
+              amount: Number(transaction.amount),
+              paymentMethod: transaction.payment_method,
+              splitAmount: Number(transaction.split_amount ?? 0),
+            },
+            1
+          );
+        }
 
         await trx`
           update users
@@ -613,13 +633,6 @@ export async function POST(req: Request) {
             balance_splitwise = ${balances.splitwise}
           where user_id = ${userId}
         `;
-
-        await createBalanceReconciliationAlertIfNeeded(
-          trx,
-          userId,
-          transaction,
-          balances.bank
-        );
       }
 
       return { transaction, insertedNew: true };
@@ -654,7 +667,9 @@ export async function DELETE(req: Request) {
       const transactions = (await trx`
         select *
         from transactions
-        where id = ${id} and user_id = ${userId}
+        where id = ${id}
+          and user_id = ${userId}
+          and deleted_at is null
         limit 1
       `) as TransactionRow[];
 
@@ -676,17 +691,56 @@ export async function DELETE(req: Request) {
       `) as UserRow[];
 
       const user = users[0];
+
+      const deletedTransactions = (await trx`
+        update transactions
+        set deleted_at = timezone('utc', now())
+        where id = ${id}
+          and user_id = ${userId}
+          and deleted_at is null
+        returning *
+      `) as TransactionRow[];
+
+      const deletedTransaction = deletedTransactions[0];
+      if (!deletedTransaction) {
+        return null;
+      }
+
       if (user) {
-        const balances = updateBalancesForTransaction(
-          mapUserRow(user).balances,
-          {
-            type: transaction.type,
-            amount: Number(transaction.amount),
-            paymentMethod: transaction.payment_method,
-            splitAmount: Number(transaction.split_amount ?? 0),
-          },
-          -1
-        );
+        let balances = mapUserRow(user).balances;
+
+        if (isImportedBankTransaction(transaction)) {
+          const latestImported = await getLatestActiveImportedBankTransaction(
+            trx,
+            userId
+          );
+          balances = latestImported
+            ? {
+                ...balances,
+                bank: Number(latestImported.imported_bank_balance),
+              }
+            : updateBalancesForTransaction(
+                balances,
+                {
+                  type: transaction.type,
+                  amount: Number(transaction.amount),
+                  paymentMethod: transaction.payment_method,
+                  splitAmount: Number(transaction.split_amount ?? 0),
+                },
+                -1
+              );
+        } else {
+          balances = updateBalancesForTransaction(
+            balances,
+            {
+              type: transaction.type,
+              amount: Number(transaction.amount),
+              paymentMethod: transaction.payment_method,
+              splitAmount: Number(transaction.split_amount ?? 0),
+            },
+            -1
+          );
+        }
 
         await trx`
           update users
@@ -699,12 +753,7 @@ export async function DELETE(req: Request) {
         console.log("[API /transactions DELETE] Reversed balances");
       }
 
-      await trx`
-        delete from transactions
-        where id = ${id} and user_id = ${userId}
-      `;
-
-      return transaction;
+      return deletedTransaction;
     });
 
     if (!deleted) {
@@ -741,7 +790,9 @@ export async function PUT(req: Request) {
       const existingTransactions = (await trx`
         select *
         from transactions
-        where id = ${id} and user_id = ${userId}
+        where id = ${id}
+          and user_id = ${userId}
+          and deleted_at is null
         limit 1
       `) as TransactionRow[];
 
@@ -763,6 +814,10 @@ export async function PUT(req: Request) {
           data.exchangeExpenseId ?? oldTransaction.exchange_expense_id,
         date: data.date ?? oldTransaction.date,
         clientRequestId: oldTransaction.client_request_id,
+        importedAccountSuffix: oldTransaction.imported_account_suffix,
+        importedBankBalance: oldTransaction.imported_bank_balance,
+        importedBankReference: oldTransaction.imported_bank_reference,
+        importedBankConfidence: oldTransaction.imported_bank_confidence,
       });
 
       await validateExchangeExpenseLink(trx, userId, nextTransaction, id);
@@ -777,29 +832,6 @@ export async function PUT(req: Request) {
       `) as UserRow[];
 
       const user = users[0];
-      if (user) {
-        let balances = updateBalancesForTransaction(
-          mapUserRow(user).balances,
-          {
-            type: oldTransaction.type,
-            amount: Number(oldTransaction.amount),
-            paymentMethod: oldTransaction.payment_method,
-            splitAmount: Number(oldTransaction.split_amount ?? 0),
-          },
-          -1
-        );
-
-        balances = updateBalancesForTransaction(balances, nextTransaction, 1);
-
-        await trx`
-          update users
-          set
-            balance_bank = ${balances.bank},
-            balance_cash = ${balances.cash},
-            balance_splitwise = ${balances.splitwise}
-          where user_id = ${userId}
-        `;
-      }
 
       const updatedTransactions = (await trx`
         update transactions
@@ -813,11 +845,68 @@ export async function PUT(req: Request) {
           split_amount = ${nextTransaction.splitAmount},
           exchange_expense_id = ${nextTransaction.exchangeExpenseId},
           date = ${nextTransaction.date}
-        where id = ${id} and user_id = ${userId}
+        where id = ${id}
+          and user_id = ${userId}
+          and deleted_at is null
         returning *
       `) as TransactionRow[];
 
-      return updatedTransactions[0] ?? null;
+      const updatedTransaction = updatedTransactions[0] ?? null;
+      if (user && updatedTransaction) {
+        const oldImported = isImportedBankTransaction(oldTransaction);
+        const nextImported = isImportedBankTransaction(updatedTransaction);
+        let balances = mapUserRow(user).balances;
+
+        if (!oldImported) {
+          balances = updateBalancesForTransaction(
+            balances,
+            {
+              type: oldTransaction.type,
+              amount: Number(oldTransaction.amount),
+              paymentMethod: oldTransaction.payment_method,
+              splitAmount: Number(oldTransaction.split_amount ?? 0),
+            },
+            -1
+          );
+        }
+
+        if (!nextImported) {
+          balances = updateBalancesForTransaction(
+            balances,
+            {
+              type: updatedTransaction.type,
+              amount: Number(updatedTransaction.amount),
+              paymentMethod: updatedTransaction.payment_method,
+              splitAmount: Number(updatedTransaction.split_amount ?? 0),
+            },
+            1
+          );
+        }
+
+        if (oldImported || nextImported) {
+          const latestImported = await getLatestActiveImportedBankTransaction(
+            trx,
+            userId
+          );
+          if (latestImported) {
+            balances = {
+              ...balances,
+              bank: Number(latestImported.imported_bank_balance),
+            };
+          }
+        }
+
+        await trx`
+          update users
+          set
+            balance_bank = ${balances.bank},
+            balance_cash = ${balances.cash},
+            balance_splitwise = ${balances.splitwise}
+          where user_id = ${userId}
+        `;
+      }
+
+      return updatedTransaction;
     });
 
     if (!updatedTransaction) {

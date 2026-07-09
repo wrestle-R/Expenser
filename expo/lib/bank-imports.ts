@@ -62,8 +62,8 @@ export function bankImportToTransactionPayload(
   return {
     type: item.type,
     amount: Number(item.amount),
-    description: "",
-    category: "",
+    description: item.payee ?? "",
+    category: "bank import",
     paymentMethod: "bank",
     splitAmount: 0,
     date: item.occurredAt,

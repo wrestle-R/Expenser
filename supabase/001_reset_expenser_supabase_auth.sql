@@ -51,6 +51,7 @@ create table public.transactions (
   payment_method text not null check (payment_method in ('bank', 'cash', 'splitwise')),
   split_amount double precision not null default 0,
   date timestamptz not null default timezone('utc', now()),
+  deleted_at timestamptz,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
@@ -96,6 +97,9 @@ create table public.balance_reconciliation_alerts (
 
 create index idx_users_user_id on public.users (user_id);
 create index idx_transactions_user_id_date on public.transactions (user_id, date desc);
+create index idx_transactions_user_active_date
+on public.transactions (user_id, date desc)
+where deleted_at is null;
 create unique index idx_transactions_user_client_request_id
 on public.transactions (user_id, client_request_id)
 where client_request_id is not null;

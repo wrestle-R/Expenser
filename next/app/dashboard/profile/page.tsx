@@ -26,8 +26,8 @@ export default function ProfilePage() {
   const [name, setName] = useState("");
   const [occupation, setOccupation] = useState("");
   const [selectedMethods, setSelectedMethods] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const hydratedProfileRef = useRef(false);
 
   useEffect(() => {
     if (profile) {
@@ -35,6 +35,7 @@ export default function ProfilePage() {
         setName(profile.name);
         setOccupation(profile.occupation);
         setSelectedMethods(profile.paymentMethods);
+        hydratedProfileRef.current = true;
       }, 0);
     }
   }, [profile]);
@@ -66,17 +67,41 @@ export default function ProfilePage() {
     );
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    await updateProfile({
-      name,
-      occupation,
-      paymentMethods: selectedMethods,
-    });
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
+  useEffect(() => {
+    if (!profile || !hydratedProfileRef.current) {
+      return;
+    }
+
+    const nextName = name.trim();
+    const nextOccupation = occupation.trim();
+    const sameProfile =
+      nextName === (profile.name || "") &&
+      nextOccupation === (profile.occupation || "") &&
+      selectedMethods.join("|") === (profile.paymentMethods || []).join("|");
+
+    if (sameProfile) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setSaveStatus("saving");
+      updateProfile({
+        name: nextName,
+        occupation: nextOccupation,
+        paymentMethods: selectedMethods,
+      })
+        .then(() => {
+          setSaveStatus("saved");
+          window.setTimeout(() => setSaveStatus("idle"), 1600);
+        })
+        .catch((error) => {
+          console.error("[Profile] Autosave failed:", error);
+          setSaveStatus("error");
+        });
+    }, 650);
+
+    return () => window.clearTimeout(timeout);
+  }, [name, occupation, profile, selectedMethods, updateProfile]);
 
   if (loading || !profile) {
     return (
@@ -192,16 +217,23 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <div className="pt-6">
-              <Button
-                onClick={handleSave}
-                disabled={saving}
-                size="lg"
-                className="w-full sm:w-fit h-14 px-12 rounded-2xl text-base font-bold shadow-xl shadow-primary/20 transition-all active:scale-95 disabled:opacity-50"
-              >
-                {saving ? "Saving..." : saved ? "Successfully Saved!" : "Save Profile Changes"}
-              </Button>
-            </div>
+            <p
+              className={cn(
+                "pt-2 text-sm font-medium",
+                saveStatus === "saved" && "text-emerald-600",
+                saveStatus === "error" && "text-destructive",
+                (saveStatus === "idle" || saveStatus === "saving") &&
+                  "text-muted-foreground"
+              )}
+            >
+              {saveStatus === "saving"
+                ? "Saving changes..."
+                : saveStatus === "saved"
+                  ? "Saved"
+                  : saveStatus === "error"
+                    ? "Autosave failed"
+                    : "Changes save automatically"}
+            </p>
           </div>
         </Card>
       </div>

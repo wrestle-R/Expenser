@@ -25,6 +25,9 @@ const debitWithPayee =
 const creditWithNonNumericReference =
   "there are a A/c *4280 Credited for Rs:698.00 on 29-06-2026 07:21:47 by Mob Bk ref no SUJANA FLORE Avl Bal Rs:626.58.Never Share OTP/PIN/CVV-Union Bank of India";
 
+const creditWithPayeeReference =
+  "Alc %4280 Credited for Rs:5000.00 on 05-07-2026 15:03:59 by Mob Bk ref no PAUL D. RENJ Avl Bal Rs:5239.58.Never Share OTP/PIN/CVV-Union Bank of India";
+
 const lienRemoval =
   "Dear customer,lien of Rs.79.36 due to LIEN FOR GENERAL SERVICE CHARGES has been removed from your account **74280on 30-06-2026 07:42:08.6425.Union Bank of India";
 
@@ -102,6 +105,19 @@ test("parses Union Bank credit notification with a non-numeric reference as pend
   assert.equal(result.parsed.referenceNumber, null);
   assert.equal(result.parsed.payee, "SUJANA FLORE");
   assert.equal(result.parsed.confidence, "medium");
+});
+
+test("parses Union Bank credit notification with Alc prefix and payee-like reference", () => {
+  const result = parseBankNotification(creditWithPayeeReference);
+
+  assert.equal(result?.kind, "transaction");
+  assert.equal(result.parsed.type, "income");
+  assert.equal(result.parsed.amount, 5000);
+  assert.equal(result.parsed.accountSuffix, "4280");
+  assert.equal(result.parsed.referenceNumber, null);
+  assert.equal(result.parsed.payee, "PAUL D. RENJ");
+  assert.equal(result.parsed.availableBalance, 5239.58);
+  assert.equal(result.parsed.occurredAt, "2026-07-05T09:33:59.000Z");
 });
 
 test("returns review event for Union Bank lien removal with missing spacing and fractional seconds", () => {

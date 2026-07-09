@@ -67,13 +67,20 @@ class SyncService {
     serverTransactions: ITransaction[],
     failedLocalTransactions: ITransaction[]
   ) {
+    const activeServerTransactions = serverTransactions.filter(
+      (transaction) => !transaction.deletedAt
+    );
     return [
       ...failedLocalTransactions,
-      ...serverTransactions.filter(
+      ...activeServerTransactions.filter(
         (transaction) =>
           !failedLocalTransactions.some(
             (failed) =>
               failed._id === transaction._id ||
+              (failed.importSource &&
+                failed.importSourceKey &&
+                failed.importSource === transaction.importSource &&
+                failed.importSourceKey === transaction.importSourceKey) ||
               (failed.clientRequestId || failed._id) ===
                 (transaction.clientRequestId || transaction._id)
           )
@@ -103,7 +110,14 @@ class SyncService {
     return getStoredTransactions().then(async (storedTransactions) => {
       const filtered = storedTransactions.filter(
         (item) =>
+          !item.deletedAt &&
           item._id !== transaction._id &&
+          !(
+            item.importSource &&
+            item.importSourceKey &&
+            item.importSource === transaction.importSource &&
+            item.importSourceKey === transaction.importSourceKey
+          ) &&
           (item.clientRequestId || item._id) !==
             (transaction.clientRequestId || transaction._id)
       );
@@ -375,6 +389,10 @@ class SyncService {
           date: txn.date,
           clientRequestId: txn.clientRequestId ?? txn._id,
         });
+        if (created.deletedAt) {
+          await removePendingTransaction(txn._id);
+          continue;
+        }
         await this.upsertStoredTransaction(created);
         await removePendingTransaction(txn._id);
       } catch (error) {
@@ -596,11 +614,22 @@ class SyncService {
   async applyLocalTransactionImpact(
     transaction: Pick<
       ITransaction,
-      "paymentMethod" | "amount" | "type" | "splitAmount"
+      "paymentMethod" | "amount" | "type" | "splitAmount" | "importedBankBalance"
     >,
     direction: 1 | -1
   ) {
     const balances = await getLocalBalances();
+    if (
+      direction === 1 &&
+      transaction.paymentMethod === "bank" &&
+      transaction.importedBankBalance != null &&
+      Number.isFinite(Number(transaction.importedBankBalance))
+    ) {
+      balances.bank = Number(transaction.importedBankBalance);
+      await setLocalBalances(balances);
+      return balances;
+    }
+
     const signedAmount =
       transaction.type === "income"
         ? transaction.amount * direction

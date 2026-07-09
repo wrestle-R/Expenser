@@ -11,6 +11,7 @@ import { ThemeProvider, useTheme } from "../context/ThemeContext";
 import { StealthProvider } from "../context/StealthContext";
 import { UserProvider } from "../context/UserContext";
 import { ToastProvider } from "../context/ToastContext";
+import { TabPreferencesProvider } from "../context/TabPreferencesContext";
 import { Colors } from "../constants/theme";
 import { syncService } from "../lib/sync";
 import { supabase } from "../lib/supabase";
@@ -148,10 +149,11 @@ function InnerLayout() {
   return (
     <NavigationThemeProvider value={isDark ? customDarkTheme : customLightTheme}>
       <UserProvider>
-        <ToastProvider>
-          <AuthGuard>
-            <BalanceReconciliationPrompt />
-            <Stack>
+        <TabPreferencesProvider>
+          <ToastProvider>
+            <AuthGuard>
+              <BalanceReconciliationPrompt />
+              <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="(auth)" options={{ headerShown: false }} />
             <Stack.Screen
@@ -176,9 +178,10 @@ function InnerLayout() {
                 headerTintColor: isDark ? Colors.dark.text : Colors.light.text,
               }}
               />
-            </Stack>
-          </AuthGuard>
-        </ToastProvider>
+              </Stack>
+            </AuthGuard>
+          </ToastProvider>
+        </TabPreferencesProvider>
       </UserProvider>
       <StatusBar style={isDark ? "light" : "dark"} />
     </NavigationThemeProvider>

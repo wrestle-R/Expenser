@@ -16,7 +16,7 @@ test("marks imported transactions with missing description/category as pending r
 
   assert.deepEqual(result, {
     description: "",
-    category: "",
+    category: "bank import",
     reviewStatus: "pending",
   });
 });
@@ -60,6 +60,21 @@ test("uses pending display labels without writing placeholders into stored field
 
   assert.deepEqual(result, {
     description: "Pending details",
-    category: "Pending category",
+    category: "",
+  });
+});
+
+test("uses an internal imported category instead of a pending category placeholder", () => {
+  const result = deriveTransactionReviewState({
+    description: "",
+    category: "",
+    importSource: "union_bank_notification",
+    importSourceKey: "union-bank:fallback:4280:income:5000.00:2026-07-05T09:33:59.000Z:5239.58",
+  });
+
+  assert.deepEqual(result, {
+    description: "",
+    category: "bank import",
+    reviewStatus: "pending",
   });
 });

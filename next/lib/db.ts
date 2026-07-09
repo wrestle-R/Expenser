@@ -66,6 +66,7 @@ export interface TransactionRow {
   payment_method: PaymentMethod;
   split_amount: number;
   date: string | Date;
+  deleted_at: string | Date | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -170,6 +171,7 @@ export function mapTransactionRow(row: TransactionRow) {
     paymentMethod: row.payment_method,
     splitAmount: Number(row.split_amount ?? 0),
     date: new Date(row.date).toISOString(),
+    deletedAt: row.deleted_at ? new Date(row.deleted_at).toISOString() : undefined,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   };

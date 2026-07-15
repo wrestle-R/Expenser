@@ -8,6 +8,7 @@ import {
   mapBalanceReconciliationAlertRow,
   mapUserRow,
   sql,
+  type BalanceRow,
   type BalanceReconciliationAlertRow,
   type UserRow,
 } from "@/lib/db";
@@ -94,13 +95,27 @@ export async function POST(req: Request) {
 
       let profile = null;
       if (action === "apply") {
+        await trx`
+          insert into balances (
+            user_id, payment_method, opening_balance, opening_at, current_balance
+          ) values (
+            ${userId}, 'bank', ${Number(alert.bank_balance)},
+            timezone('utc', now()), ${Number(alert.bank_balance)}
+          )
+          on conflict (user_id, payment_method) do update set
+            opening_balance = excluded.opening_balance,
+            opening_at = excluded.opening_at,
+            current_balance = excluded.current_balance
+        `;
+        await trx`select recalculate_user_balances(${userId})`;
         const users = (await trx`
-          update users
-          set balance_bank = ${Number(alert.bank_balance)}
-          where user_id = ${userId}
-          returning *
+          select * from users where user_id = ${userId} limit 1
         `) as UserRow[];
-        profile = users[0] ? mapUserRow(users[0]) : null;
+        const balances = (await trx`
+          select * from balances where user_id = ${userId}
+          order by payment_method
+        `) as BalanceRow[];
+        profile = users[0] ? mapUserRow(users[0], balances) : null;
       }
 
       const updatedAlerts = (await trx`

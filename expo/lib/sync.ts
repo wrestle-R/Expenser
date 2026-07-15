@@ -1,671 +1,294 @@
-// Sync service for handling offline/online synchronization
 import NetInfo from "@react-native-community/netinfo";
 import type { NetInfoState } from "@react-native-community/netinfo";
 import { ApiError, api } from "./api";
 import {
-  getStoredTransactions,
-  setStoredTransactions,
-  getPendingTransactions,
-  removePendingTransaction,
-  getStoredWorkflows,
-  setStoredWorkflows,
-  getPendingWorkflows,
-  removePendingWorkflow,
-  getPendingDeletes,
-  getLastSyncTime,
-  clearPendingDeletes,
-  setPendingDeletes,
+  getOutbox,
   getStoredProfile,
-  setStoredProfile,
+  getStoredTransactions,
+  getStoredWorkflows,
+  incrementOutboxAttempt,
+  migrateLegacyPendingData,
+  removeOutboxOperation,
   setLastSyncTime,
-  getLocalBalances,
-  setLocalBalances,
-  getPendingProfileUpdate,
-  clearPendingProfileUpdate,
+  setStoredProfile,
+  setStoredTransactions,
+  setStoredWorkflows,
+  type OutboxOperation,
 } from "./storage";
-import { ITransaction, IWorkflow, IUserProfile } from "./types";
-import { notificationService } from "./notifications";
+import type {
+  CreateTransactionPayload,
+  CreateWorkflowPayload,
+  ITransaction,
+  IUserProfile,
+  IWorkflow,
+  UpdateTransactionPayload,
+} from "./types";
 
 export interface SyncStatus {
   isOnline: boolean;
   isSyncing: boolean;
-  pendingCount: number;
-  lastSyncTime: number | null;
+  error?: string;
 }
 
 const NETINFO_TIMEOUT_MS = 3000;
 
+function isOnlineState(state: Pick<NetInfoState, "isConnected" | "isInternetReachable">) {
+  return Boolean(state.isConnected && (state.isInternetReachable ?? true));
+}
+
+function isPermanent(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    ![401, 403, 408, 409, 429].includes(error.status)
+  );
+}
+
 class SyncService {
   private initialized = false;
-  private isSyncing = false;
-  private listeners: ((status: SyncStatus) => void)[] = [];
-  private unsubscribeNetInfo: (() => void) | null = null;
-  private _isOnline = false;
+  private syncing = false;
+  private online = false;
+  private listeners: Array<(status: SyncStatus) => void> = [];
+  private unsubscribe: (() => void) | null = null;
+  private lastError: string | null = null;
 
-  private isStateOnline(
-    state: Pick<NetInfoState, "isConnected" | "isInternetReachable">
-  ) {
-    if (!state.isConnected) {
-      return false;
-    }
-
-    return state.isInternetReachable ?? true;
-  }
-
-  private mergeProfile(
-    base: IUserProfile | null,
-    pending: Partial<IUserProfile> | null
-  ): IUserProfile | null {
-    if (!base) {
-      return null;
-    }
-
-    return pending ? { ...base, ...pending } : base;
-  }
-
-  private mergeServerTransactions(
-    serverTransactions: ITransaction[],
-    failedLocalTransactions: ITransaction[]
-  ) {
-    const activeServerTransactions = serverTransactions.filter(
-      (transaction) => !transaction.deletedAt
-    );
-    return [
-      ...failedLocalTransactions,
-      ...activeServerTransactions.filter(
-        (transaction) =>
-          !failedLocalTransactions.some(
-            (failed) =>
-              failed._id === transaction._id ||
-              (failed.importSource &&
-                failed.importSourceKey &&
-                failed.importSource === transaction.importSource &&
-                failed.importSourceKey === transaction.importSourceKey) ||
-              (failed.clientRequestId || failed._id) ===
-                (transaction.clientRequestId || transaction._id)
-          )
-      ),
-    ];
-  }
-
-  private mergeServerWorkflows(
-    serverWorkflows: IWorkflow[],
-    failedLocalWorkflows: IWorkflow[]
-  ) {
-    return [
-      ...failedLocalWorkflows,
-      ...serverWorkflows.filter(
-        (workflow) =>
-          !failedLocalWorkflows.some(
-            (failed) =>
-              failed._id === workflow._id ||
-              (failed.clientRequestId || failed._id) ===
-                (workflow.clientRequestId || workflow._id)
-          )
-      ),
-    ];
-  }
-
-  private upsertStoredTransaction(transaction: ITransaction) {
-    return getStoredTransactions().then(async (storedTransactions) => {
-      const filtered = storedTransactions.filter(
-        (item) =>
-          !item.deletedAt &&
-          item._id !== transaction._id &&
-          !(
-            item.importSource &&
-            item.importSourceKey &&
-            item.importSource === transaction.importSource &&
-            item.importSourceKey === transaction.importSourceKey
-          ) &&
-          (item.clientRequestId || item._id) !==
-            (transaction.clientRequestId || transaction._id)
-      );
-      await setStoredTransactions([transaction, ...filtered]);
-    });
-  }
-
-  private upsertStoredWorkflow(workflow: IWorkflow) {
-    return getStoredWorkflows().then(async (storedWorkflows) => {
-      const filtered = storedWorkflows.filter((item) => item._id !== workflow._id);
-      await setStoredWorkflows([workflow, ...filtered]);
-    });
-  }
-
-  private isDeleteConflictSafe(error: unknown) {
-    return error instanceof ApiError && error.status === 404;
-  }
-
-  private isNonRetryableSyncError(error: unknown) {
-    if (!(error instanceof ApiError)) {
-      return false;
-    }
-
-    return (
-      error.status >= 400 &&
-      error.status < 500 &&
-      ![401, 403, 408, 409, 429].includes(error.status)
-    );
-  }
-
-  private async preserveFailedTransaction(
-    transaction: ITransaction,
-    error: unknown
-  ) {
-    const failedTransaction: ITransaction = {
-      ...transaction,
-      isLocal: true,
-      syncStatus: "failed",
-      syncError: error instanceof Error ? error.message : "Sync failed",
+  private emit() {
+    const status = {
+      isOnline: this.online,
+      isSyncing: this.syncing,
+      ...(this.lastError ? { error: this.lastError } : {}),
     };
-    await this.upsertStoredTransaction(failedTransaction);
+    this.listeners.forEach((listener) => listener(status));
+    this.lastError = null;
   }
 
-  private async preserveFailedWorkflow(workflow: IWorkflow, error: unknown) {
-    const failedWorkflow: IWorkflow = {
-      ...workflow,
-      isLocal: true,
-      syncStatus: "failed",
-      syncError: error instanceof Error ? error.message : "Sync failed",
-    };
-    await this.upsertStoredWorkflow(failedWorkflow);
-  }
-
-  private async getNetworkStateWithTimeout() {
+  private async networkState() {
     return Promise.race([
       NetInfo.fetch(),
-      new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("NetInfo timeout")), NETINFO_TIMEOUT_MS);
-      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Network check timed out")), NETINFO_TIMEOUT_MS)
+      ),
     ]);
   }
 
   async initialize() {
-    if (this.initialized) {
-      return;
-    }
-
+    if (this.initialized) return;
     this.initialized = true;
-
-    // Listen for network state changes
-    this.unsubscribeNetInfo = NetInfo.addEventListener((state) => {
-      const wasOffline = !this._isOnline;
-      this._isOnline = this.isStateOnline(state);
-
-      if (this._isOnline && wasOffline) {
-        console.log("[Sync] Network connected, triggering sync...");
-        this.syncAll();
-      }
-
-      // Notify listeners about connectivity change
-      this.notifyListeners();
+    await migrateLegacyPendingData();
+    this.unsubscribe = NetInfo.addEventListener((state) => {
+      const wasOffline = !this.online;
+      this.online = isOnlineState(state);
+      this.emit();
+      if (wasOffline && this.online) void this.syncAll();
     });
-
-    // Check current network state
     try {
-      const state = await this.getNetworkStateWithTimeout();
-      this._isOnline = this.isStateOnline(state);
-    } catch (error) {
-      console.warn("[Sync] Initial network check timed out, continuing offline mode");
+      this.online = isOnlineState(await this.networkState());
+    } catch {
+      this.online = false;
     }
-
-    this.notifyListeners();
+    this.emit();
   }
 
   cleanup() {
-    if (this.unsubscribeNetInfo) {
-      this.unsubscribeNetInfo();
-      this.unsubscribeNetInfo = null;
-    }
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     this.initialized = false;
   }
 
   subscribe(listener: (status: SyncStatus) => void) {
     this.listeners.push(listener);
     return () => {
-      this.listeners = this.listeners.filter((l) => l !== listener);
+      this.listeners = this.listeners.filter((item) => item !== listener);
     };
   }
 
-  private async notifyListeners() {
-    const status = await this.getStatus();
-    this.listeners.forEach((listener) => listener(status));
+  isOnlineSync() {
+    return this.online;
   }
 
-  async getStatus(): Promise<SyncStatus> {
-    const pendingTxns = await getPendingTransactions();
-    const pendingWorkflows = await getPendingWorkflows();
-    const pendingDeletes = await getPendingDeletes();
-    const pendingProfile = await getPendingProfileUpdate();
-    const lastSyncTime = await getLastSyncTime();
-
-    return {
-      isOnline: this._isOnline,
-      isSyncing: this.isSyncing,
-      pendingCount:
-        pendingTxns.length +
-        pendingWorkflows.length +
-        pendingDeletes.length +
-        (pendingProfile ? 1 : 0),
-      lastSyncTime,
-    };
-  }
-
-  async isOnline(): Promise<boolean> {
-    // Use cached value first for speed, but verify with NetInfo
+  async isOnline() {
     try {
-      const state = await this.getNetworkStateWithTimeout();
-      this._isOnline = this.isStateOnline(state);
-    } catch {
-      // Use cached value
-    }
-    return this._isOnline;
+      this.online = isOnlineState(await this.networkState());
+    } catch {}
+    return this.online;
   }
 
-  // Quick sync check without network call
-  isOnlineSync(): boolean {
-    return this._isOnline;
+  private async replaceTransaction(localId: string, transaction: ITransaction) {
+    const stored = await getStoredTransactions();
+    await setStoredTransactions([
+      transaction,
+      ...stored.filter(
+        (item) =>
+          item._id !== localId &&
+          item._id !== transaction._id &&
+          (item.clientRequestId || item._id) !==
+            (transaction.clientRequestId || transaction._id)
+      ),
+    ]);
   }
 
-  // Force a manual refresh - fetches everything fresh
-  async forceRefresh(): Promise<{
-    transactions: ITransaction[];
-    workflows: IWorkflow[];
-    profile: IUserProfile | null;
-  } | null> {
-    const online = await this.isOnline();
-    if (!online) return null;
+  private async replaceWorkflow(localId: string, workflow: IWorkflow) {
+    const stored = await getStoredWorkflows();
+    await setStoredWorkflows([
+      workflow,
+      ...stored.filter(
+        (item) => item._id !== localId && item._id !== workflow._id
+      ),
+    ]);
+  }
 
-    try {
-      // Sync pending items first
-      await this.syncAll();
-      
-      // Then fetch fresh data
-      return await this.fetchAllFromServer();
-    } catch (error) {
-      console.error("[Sync] Force refresh failed:", error);
-      return null;
+  private async replay(operation: OutboxOperation) {
+    if (operation.entity === "transaction") {
+      if (operation.action === "create") {
+        const created = await api.createTransaction(
+          operation.payload as unknown as CreateTransactionPayload
+        );
+        await this.replaceTransaction(operation.entityId, created);
+      } else if (operation.action === "update") {
+        const updated = await api.updateTransaction(
+          operation.entityId,
+          operation.payload as UpdateTransactionPayload
+        );
+        await this.replaceTransaction(operation.entityId, updated);
+      } else {
+        await api.deleteTransaction(operation.entityId).catch((error) => {
+          if (!(error instanceof ApiError && error.status === 404)) throw error;
+        });
+      }
+      return;
     }
+
+    if (operation.entity === "workflow") {
+      if (operation.action === "create") {
+        const created = await api.createWorkflow(
+          operation.payload as unknown as CreateWorkflowPayload
+        );
+        await this.replaceWorkflow(operation.entityId, created);
+      } else if (operation.action === "update") {
+        const updated = await api.updateWorkflow(operation.entityId, operation.payload);
+        await this.replaceWorkflow(operation.entityId, updated);
+      } else {
+        await api.deleteWorkflow(operation.entityId).catch((error) => {
+          if (!(error instanceof ApiError && error.status === 404)) throw error;
+        });
+      }
+      return;
+    }
+
+    const updated = await api.updateProfile(operation.payload as Partial<IUserProfile>);
+    await setStoredProfile(updated);
   }
 
   async syncAll() {
-    if (this.isSyncing) {
-      console.log("[Sync] Already syncing, skipping...");
-      return;
-    }
-
-    const isOnline = await this.isOnline();
-    if (!isOnline) {
-      console.log("[Sync] Offline, skipping sync...");
-      return;
-    }
-
-    this.isSyncing = true;
-    this.notifyListeners();
-
+    if (this.syncing || !(await this.isOnline())) return;
+    this.syncing = true;
+    this.emit();
     try {
-      console.log("[Sync] Starting full sync...");
-
-      // 1. Sync pending deletes first
-      await this.syncPendingDeletes();
-
-      // 2. Sync pending transactions
-      await this.syncPendingTransactions();
-
-      // 3. Sync pending workflows
-      await this.syncPendingWorkflows();
-
-      // 4. Sync pending profile edits
-      await this.syncPendingProfile();
-
-      // 5. Fetch fresh data from server
+      for (const operation of await getOutbox()) {
+        try {
+          await this.replay(operation);
+          await removeOutboxOperation(operation.id);
+        } catch (error) {
+          if (isPermanent(error)) {
+            console.error("[Outbox] Change rejected permanently:", error);
+            this.lastError =
+              error instanceof Error
+                ? error.message
+                : "The server rejected an offline change. Local data was restored.";
+            await removeOutboxOperation(operation.id);
+            continue;
+          }
+          await incrementOutboxAttempt(operation.id);
+          break;
+        }
+      }
       await this.fetchAllFromServer();
-
-      // Update last sync time
       await setLastSyncTime(Date.now());
-
-      // Clear unsynced/stale notifications on successful sync
-      await notificationService.onSyncComplete();
-
-      console.log("[Sync] Sync completed successfully");
-    } catch (error) {
-      console.error("[Sync] Error during sync:", error);
     } finally {
-      this.isSyncing = false;
-      this.notifyListeners();
+      this.syncing = false;
+      this.emit();
     }
   }
 
-  private async syncPendingDeletes() {
-    const pendingDeletes = await getPendingDeletes();
-    console.log("[Sync] Syncing", pendingDeletes.length, "pending deletes");
-
-    const failedDeletes: typeof pendingDeletes = [];
-
-    for (const item of pendingDeletes) {
-      try {
-        if (item.type === "transaction") {
-          await api.deleteTransaction(item.id);
-        } else if (item.type === "workflow") {
-          await api.deleteWorkflow(item.id);
-        }
-      } catch (error) {
-        if (this.isDeleteConflictSafe(error)) {
-          continue;
-        }
-        console.error("[Sync] Error deleting item:", item, error);
-        failedDeletes.push(item);
-      }
-    }
-
-    if (failedDeletes.length > 0) {
-      await setPendingDeletes(failedDeletes);
-      return;
-    }
-
-    await clearPendingDeletes();
-  }
-
-  private async syncPendingTransactions() {
-    const pending = await getPendingTransactions();
-    console.log("[Sync] Syncing", pending.length, "pending transactions");
-
-    for (const txn of pending) {
-      try {
-        const created = await api.createTransaction({
-          type: txn.type,
-          amount: txn.amount,
-          description: txn.description,
-          category: txn.category,
-          paymentMethod: txn.paymentMethod,
-          splitAmount: txn.splitAmount,
-          exchangeExpenseId: txn.exchangeExpenseId,
-          importSource: txn.importSource,
-          importSourceKey: txn.importSourceKey,
-          importedAccountSuffix: txn.importedAccountSuffix,
-          importedBankBalance: txn.importedBankBalance,
-          importedBankReference: txn.importedBankReference,
-          importedBankConfidence: txn.importedBankConfidence,
-          date: txn.date,
-          clientRequestId: txn.clientRequestId ?? txn._id,
-        });
-        if (created.deletedAt) {
-          await removePendingTransaction(txn._id);
-          continue;
-        }
-        await this.upsertStoredTransaction(created);
-        await removePendingTransaction(txn._id);
-      } catch (error) {
-        if (this.isNonRetryableSyncError(error)) {
-          await this.preserveFailedTransaction(txn, error);
-          await removePendingTransaction(txn._id);
-          continue;
-        }
-        console.error("[Sync] Error syncing transaction:", txn._id, error);
-      }
-    }
-  }
-
-  private async syncPendingWorkflows() {
-    const pending = await getPendingWorkflows();
-    console.log("[Sync] Syncing", pending.length, "pending workflows");
-
-    for (const workflow of pending) {
-      try {
-        const created = await api.createWorkflow({
-          name: workflow.name,
-          type: workflow.type,
-          amount: workflow.amount,
-          description: workflow.description,
-          category: workflow.category,
-          paymentMethod: workflow.paymentMethod,
-          splitAmount: workflow.splitAmount,
-          clientRequestId: workflow.clientRequestId ?? workflow._id,
-        });
-        await this.upsertStoredWorkflow(created);
-        await removePendingWorkflow(workflow._id);
-      } catch (error) {
-        if (this.isNonRetryableSyncError(error)) {
-          await this.preserveFailedWorkflow(workflow, error);
-          await removePendingWorkflow(workflow._id);
-          continue;
-        }
-        console.error("[Sync] Error syncing workflow:", workflow._id, error);
-      }
-    }
-  }
-
-  private async syncPendingProfile() {
-    const pendingProfile = await getPendingProfileUpdate();
-    if (!pendingProfile) {
-      return;
-    }
-
-    try {
-      const updated = await api.updateProfile(pendingProfile);
-      await setStoredProfile(updated);
-      await clearPendingProfileUpdate();
-    } catch (error) {
-      console.error("[Sync] Error syncing pending profile:", error);
-    }
-  }
-
-  async fetchAllFromServer(): Promise<{
-    transactions: ITransaction[];
-    workflows: IWorkflow[];
-    profile: IUserProfile | null;
-  }> {
-    try {
-      // Check for pending items to determine if we should update balances
-      const pendingTxns = await getPendingTransactions();
-      const hasPendingTransactions = pendingTxns.length > 0;
-      const pendingProfile = await getPendingProfileUpdate();
-      const failedLocalTransactions = (await getStoredTransactions()).filter(
-        (transaction) => transaction.isLocal && transaction.syncStatus === "failed"
-      );
-      const failedLocalWorkflows = (await getStoredWorkflows()).filter(
-        (workflow) => workflow.isLocal && workflow.syncStatus === "failed"
-      );
-
-      const [transactionsResult, workflowsResult, profileResult] = await Promise.allSettled([
-        api.getTransactions(),
-        api.getWorkflows(),
-        api.getProfile(),
-      ]);
-
-      const transactions =
-        transactionsResult.status === "fulfilled" ? transactionsResult.value : null;
-      const workflows =
-        workflowsResult.status === "fulfilled" ? workflowsResult.value : null;
-      const profile =
-        profileResult.status === "fulfilled" ? profileResult.value : null;
-
-      if (!transactions && !workflows && !profile) {
-        throw new Error("Failed to fetch fresh data from the server");
-      }
-
-      if (transactionsResult.status === "rejected") {
-        console.error("[Sync] Error fetching transactions from server:", transactionsResult.reason);
-      }
-      if (workflowsResult.status === "rejected") {
-        console.error("[Sync] Error fetching workflows from server:", workflowsResult.reason);
-      }
-      if (profileResult.status === "rejected") {
-        console.error("[Sync] Error fetching profile from server:", profileResult.reason);
-      }
-
-      if (transactions) {
-        await setStoredTransactions(
-          this.mergeServerTransactions(transactions, failedLocalTransactions)
-        );
-      }
-      if (workflows) {
-        await setStoredWorkflows(
-          this.mergeServerWorkflows(workflows, failedLocalWorkflows)
-        );
-      }
-      if (profile) {
-        await setStoredProfile(this.mergeProfile(profile, pendingProfile) ?? profile);
-        // Only reset local balances to server balances if there are NO pending transactions
-        // This prevents overwriting local balance changes before they're synced
-        if (!hasPendingTransactions) {
-          await setLocalBalances(profile.balances);
-        }
-      }
-
-      return {
-        transactions:
-          transactions ??
-          this.mergeServerTransactions(
-            await getStoredTransactions(),
-            failedLocalTransactions
-          ),
-        workflows:
-          workflows ??
-          this.mergeServerWorkflows(
-            await getStoredWorkflows(),
-            failedLocalWorkflows
-          ),
-        profile: profile ?? (await getStoredProfile()),
-      };
-    } catch (error) {
-      console.error("[Sync] Error fetching from server:", error);
-      throw error;
-    }
-  }
-
-  async fetchTransactions(): Promise<ITransaction[]> {
-    const isOnline = await this.isOnline();
-
-    if (isOnline) {
-      try {
-        const transactions = await api.getTransactions();
-        const failedLocalTransactions = (await getStoredTransactions()).filter(
-          (transaction) => transaction.isLocal && transaction.syncStatus === "failed"
-        );
-        const mergedTransactions = this.mergeServerTransactions(
-          transactions,
-          failedLocalTransactions
-        );
-        await setStoredTransactions(mergedTransactions);
-        return mergedTransactions;
-      } catch (error) {
-        console.error("[Sync] Error fetching transactions, using local:", error);
-      }
-    }
-
-    // Return local data (including pending)
-    const stored = await getStoredTransactions();
-    const pending = await getPendingTransactions();
-    return [...pending, ...stored];
-  }
-
-  async fetchWorkflows(): Promise<IWorkflow[]> {
-    const isOnline = await this.isOnline();
-
-    if (isOnline) {
-      try {
-        const workflows = await api.getWorkflows();
-        const failedLocalWorkflows = (await getStoredWorkflows()).filter(
-          (workflow) => workflow.isLocal && workflow.syncStatus === "failed"
-        );
-        const mergedWorkflows = this.mergeServerWorkflows(
-          workflows,
-          failedLocalWorkflows
-        );
-        await setStoredWorkflows(mergedWorkflows);
-        return mergedWorkflows;
-      } catch (error) {
-        console.error("[Sync] Error fetching workflows, using local:", error);
-      }
-    }
-
-    const stored = await getStoredWorkflows();
-    const pending = await getPendingWorkflows();
-    return [...pending, ...stored];
-  }
-
-  async fetchProfile(): Promise<IUserProfile | null> {
-    const isOnline = await this.isOnline();
-
-    if (isOnline) {
-      try {
-        const pendingProfile = await getPendingProfileUpdate();
-        // Check if there are pending transactions before updating balances
-        const pendingTxns = await getPendingTransactions();
-        const hasPendingTransactions = pendingTxns.length > 0;
-
-        const profile = await api.getProfile();
-        await setStoredProfile(this.mergeProfile(profile, pendingProfile) ?? profile);
-        // Only update local balances if there are no pending transactions
-        if (!hasPendingTransactions) {
-          await setLocalBalances(profile.balances);
-        }
-        return profile;
-      } catch (error) {
-        console.error("[Sync] Error fetching profile, using local:", error);
-      }
-    }
-
-    return await getStoredProfile();
-  }
-
-  // Update local balance when adding transaction offline
-  async applyLocalTransactionImpact(
-    transaction: Pick<
-      ITransaction,
-      "paymentMethod" | "amount" | "type" | "splitAmount" | "importedBankBalance"
-    >,
-    direction: 1 | -1
-  ) {
-    const balances = await getLocalBalances();
-    if (
-      direction === 1 &&
-      transaction.paymentMethod === "bank" &&
-      transaction.importedBankBalance != null &&
-      Number.isFinite(Number(transaction.importedBankBalance))
-    ) {
-      balances.bank = Number(transaction.importedBankBalance);
-      await setLocalBalances(balances);
-      return balances;
-    }
-
-    const signedAmount =
-      transaction.type === "income"
-        ? transaction.amount * direction
-        : -transaction.amount * direction;
-
-    balances[transaction.paymentMethod] =
-      (balances[transaction.paymentMethod] || 0) + signedAmount;
-
-    if (
-      transaction.type === "expense" &&
-      transaction.splitAmount &&
-      transaction.splitAmount > 0
-    ) {
-      balances.splitwise =
-        (balances.splitwise || 0) + transaction.splitAmount * direction;
-    }
-
-    await setLocalBalances(balances);
-    return balances;
-  }
-
-  async updateLocalBalance(
-    paymentMethod: "bank" | "cash" | "splitwise",
-    amount: number,
-    type: "income" | "expense",
-    splitAmount?: number
-  ) {
-    return this.applyLocalTransactionImpact(
-      {
-        paymentMethod,
-        amount,
-        type,
-        splitAmount,
-      },
-      1
+  async fetchAllFromServer() {
+    const operations = await getOutbox();
+    const localTransactions = await getStoredTransactions();
+    const localWorkflows = await getStoredWorkflows();
+    const transactionOps = new Set(
+      operations.filter((item) => item.entity === "transaction").map((item) => item.entityId)
     );
+    const transactionDeletes = new Set(
+      operations
+        .filter((item) => item.entity === "transaction" && item.action === "delete")
+        .map((item) => item.entityId)
+    );
+    const workflowOps = new Set(
+      operations.filter((item) => item.entity === "workflow").map((item) => item.entityId)
+    );
+    const workflowDeletes = new Set(
+      operations
+        .filter((item) => item.entity === "workflow" && item.action === "delete")
+        .map((item) => item.entityId)
+    );
+
+    const results = await Promise.allSettled([
+      api.getTransactions(),
+      api.getWorkflows(),
+      api.getProfile(),
+    ]);
+    const serverTransactions = results[0].status === "fulfilled" ? results[0].value : null;
+    const serverWorkflows = results[1].status === "fulfilled" ? results[1].value : null;
+    const serverProfile = results[2].status === "fulfilled" ? results[2].value : null;
+
+    const transactions = serverTransactions
+      ? [
+          ...localTransactions.filter((item) => transactionOps.has(item._id)),
+          ...serverTransactions.filter(
+            (item) => !transactionOps.has(item._id) && !transactionDeletes.has(item._id)
+          ),
+        ]
+      : localTransactions;
+    const workflows = serverWorkflows
+      ? [
+          ...localWorkflows.filter((item) => workflowOps.has(item._id)),
+          ...serverWorkflows.filter(
+            (item) => !workflowOps.has(item._id) && !workflowDeletes.has(item._id)
+          ),
+        ]
+      : localWorkflows;
+
+    await Promise.all([
+      setStoredTransactions(transactions),
+      setStoredWorkflows(workflows),
+      serverProfile ? setStoredProfile(serverProfile) : Promise.resolve(),
+    ]);
+    return {
+      transactions,
+      workflows,
+      profile: serverProfile ?? (await getStoredProfile()),
+    };
+  }
+
+  async forceRefresh() {
+    if (!(await this.isOnline())) return null;
+    await this.syncAll();
+    return this.fetchAllFromServer();
+  }
+
+  async fetchTransactions() {
+    if (await this.isOnline()) await this.syncAll();
+    return getStoredTransactions();
+  }
+
+  async fetchWorkflows() {
+    if (await this.isOnline()) await this.syncAll();
+    return getStoredWorkflows();
+  }
+
+  async fetchProfile() {
+    if (await this.isOnline()) await this.syncAll();
+    return getStoredProfile();
   }
 }
 

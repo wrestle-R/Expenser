@@ -1,5 +1,6 @@
 package expo.modules.expenserbanknotifications
 
+import android.content.Intent
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
@@ -32,6 +33,7 @@ class ExpenserBankNotificationListenerService : NotificationListenerService() {
     val result = UnionBankNotificationParser.parseBankNotification(message)
     if (result == null) {
       BankNotificationStore.enqueueRawCandidate(applicationContext, message, sbn.packageName)
+      notifyQueueChanged()
       return
     }
 
@@ -40,12 +42,21 @@ class ExpenserBankNotificationListenerService : NotificationListenerService() {
         val parsed = result.optJSONObject("parsed") ?: return
         parsed.put("notificationPackage", sbn.packageName)
         BankNotificationStore.enqueue(applicationContext, parsed)
+        notifyQueueChanged()
       }
       "review_event" -> {
         val event = result.optJSONObject("event") ?: return
         BankNotificationStore.enqueueReviewEvent(applicationContext, event, sbn.packageName)
+        notifyQueueChanged()
       }
-      else -> BankNotificationStore.enqueueRawCandidate(applicationContext, message, sbn.packageName)
+      else -> {
+        BankNotificationStore.enqueueRawCandidate(applicationContext, message, sbn.packageName)
+        notifyQueueChanged()
+      }
     }
+  }
+
+  private fun notifyQueueChanged() {
+    sendBroadcast(Intent("expo.modules.expenserbanknotifications.BANK_IMPORT_QUEUED").setPackage(packageName))
   }
 }

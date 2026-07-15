@@ -4,15 +4,12 @@ import { getApiErrorResponse } from "@/lib/api-errors";
 import { deriveTransactionReviewState } from "@/lib/transaction-review.js";
 import {
   mapTransactionRow,
-  mapUserRow,
   normalizeDate,
   normalizeNumber,
   sql,
-  updateBalancesForTransaction,
   type PaymentMethod,
   type TransactionRow,
   type TransactionType,
-  type UserRow,
 } from "@/lib/db";
 
 const PAYMENT_METHODS: PaymentMethod[] = ["bank", "cash", "splitwise"];
@@ -232,7 +229,7 @@ function parseTransactionInput(data: Record<string, unknown>) {
 
   const importMetadata = parseImportMetadata(data);
   const reviewState = deriveTransactionReviewState({
-    description: data.description,
+    description: data.description ?? "",
     category: data.category,
     importSource: importMetadata.importSource,
     importSourceKey: importMetadata.importSourceKey,
@@ -259,42 +256,6 @@ function parseTransactionInput(data: Record<string, unknown>) {
     date: normalizeDate(data.date),
     clientRequestId: parseClientRequestId(data.clientRequestId),
   };
-}
-
-function isImportedBankTransaction(
-  transaction: {
-    payment_method: PaymentMethod | null;
-    import_source: string | null;
-    import_source_key: string | null;
-    imported_bank_balance: number | string | null;
-  }
-) {
-  return Boolean(
-    transaction.payment_method === "bank" &&
-      transaction.import_source &&
-      transaction.import_source_key &&
-      transaction.imported_bank_balance != null
-  );
-}
-
-async function getLatestActiveImportedBankTransaction(
-  trx: typeof sql,
-  userId: string
-) {
-  const rows = (await trx`
-    select *
-    from transactions
-    where user_id = ${userId}
-      and deleted_at is null
-      and payment_method = 'bank'
-      and import_source is not null
-      and import_source_key is not null
-      and imported_bank_balance is not null
-    order by date desc, created_at desc
-    limit 1
-  `) as TransactionRow[];
-
-  return rows[0] ?? null;
 }
 
 async function validateExchangeExpenseLink(
@@ -589,52 +550,6 @@ export async function POST(req: Request) {
         throw error;
       }
 
-      const users = (await trx`
-        select *
-        from users
-        where user_id = ${userId}
-        limit 1
-        for update
-      `) as UserRow[];
-
-      const user = users[0];
-      if (user) {
-        let balances = mapUserRow(user).balances;
-
-        if (isImportedBankTransaction(transaction)) {
-          const latestImported = await getLatestActiveImportedBankTransaction(
-            trx,
-            userId
-          );
-          if (latestImported?.id === transaction.id) {
-            balances = {
-              ...balances,
-              bank: Number(transaction.imported_bank_balance),
-            };
-          }
-        } else {
-          balances = updateBalancesForTransaction(
-            balances,
-            {
-              type: transaction.type,
-              amount: Number(transaction.amount),
-              paymentMethod: transaction.payment_method,
-              splitAmount: Number(transaction.split_amount ?? 0),
-            },
-            1
-          );
-        }
-
-        await trx`
-          update users
-          set
-            balance_bank = ${balances.bank},
-            balance_cash = ${balances.cash},
-            balance_splitwise = ${balances.splitwise}
-          where user_id = ${userId}
-        `;
-      }
-
       return { transaction, insertedNew: true };
     });
 
@@ -682,16 +597,6 @@ export async function DELETE(req: Request) {
         await assertExpenseCanBeDeleted(trx, userId, id);
       }
 
-      const users = (await trx`
-        select *
-        from users
-        where user_id = ${userId}
-        limit 1
-        for update
-      `) as UserRow[];
-
-      const user = users[0];
-
       const deletedTransactions = (await trx`
         update transactions
         set deleted_at = timezone('utc', now())
@@ -704,53 +609,6 @@ export async function DELETE(req: Request) {
       const deletedTransaction = deletedTransactions[0];
       if (!deletedTransaction) {
         return null;
-      }
-
-      if (user) {
-        let balances = mapUserRow(user).balances;
-
-        if (isImportedBankTransaction(transaction)) {
-          const latestImported = await getLatestActiveImportedBankTransaction(
-            trx,
-            userId
-          );
-          balances = latestImported
-            ? {
-                ...balances,
-                bank: Number(latestImported.imported_bank_balance),
-              }
-            : updateBalancesForTransaction(
-                balances,
-                {
-                  type: transaction.type,
-                  amount: Number(transaction.amount),
-                  paymentMethod: transaction.payment_method,
-                  splitAmount: Number(transaction.split_amount ?? 0),
-                },
-                -1
-              );
-        } else {
-          balances = updateBalancesForTransaction(
-            balances,
-            {
-              type: transaction.type,
-              amount: Number(transaction.amount),
-              paymentMethod: transaction.payment_method,
-              splitAmount: Number(transaction.split_amount ?? 0),
-            },
-            -1
-          );
-        }
-
-        await trx`
-          update users
-          set
-            balance_bank = ${balances.bank},
-            balance_cash = ${balances.cash},
-            balance_splitwise = ${balances.splitwise}
-          where user_id = ${userId}
-        `;
-        console.log("[API /transactions DELETE] Reversed balances");
       }
 
       return deletedTransaction;
@@ -823,16 +681,6 @@ export async function PUT(req: Request) {
       await validateExchangeExpenseLink(trx, userId, nextTransaction, id);
       await assertExpenseCanSupportLinkedExchanges(trx, userId, id, nextTransaction);
 
-      const users = (await trx`
-        select *
-        from users
-        where user_id = ${userId}
-        limit 1
-        for update
-      `) as UserRow[];
-
-      const user = users[0];
-
       const updatedTransactions = (await trx`
         update transactions
         set
@@ -851,62 +699,7 @@ export async function PUT(req: Request) {
         returning *
       `) as TransactionRow[];
 
-      const updatedTransaction = updatedTransactions[0] ?? null;
-      if (user && updatedTransaction) {
-        const oldImported = isImportedBankTransaction(oldTransaction);
-        const nextImported = isImportedBankTransaction(updatedTransaction);
-        let balances = mapUserRow(user).balances;
-
-        if (!oldImported) {
-          balances = updateBalancesForTransaction(
-            balances,
-            {
-              type: oldTransaction.type,
-              amount: Number(oldTransaction.amount),
-              paymentMethod: oldTransaction.payment_method,
-              splitAmount: Number(oldTransaction.split_amount ?? 0),
-            },
-            -1
-          );
-        }
-
-        if (!nextImported) {
-          balances = updateBalancesForTransaction(
-            balances,
-            {
-              type: updatedTransaction.type,
-              amount: Number(updatedTransaction.amount),
-              paymentMethod: updatedTransaction.payment_method,
-              splitAmount: Number(updatedTransaction.split_amount ?? 0),
-            },
-            1
-          );
-        }
-
-        if (oldImported || nextImported) {
-          const latestImported = await getLatestActiveImportedBankTransaction(
-            trx,
-            userId
-          );
-          if (latestImported) {
-            balances = {
-              ...balances,
-              bank: Number(latestImported.imported_bank_balance),
-            };
-          }
-        }
-
-        await trx`
-          update users
-          set
-            balance_bank = ${balances.bank},
-            balance_cash = ${balances.cash},
-            balance_splitwise = ${balances.splitwise}
-          where user_id = ${userId}
-        `;
-      }
-
-      return updatedTransaction;
+      return updatedTransactions[0] ?? null;
     });
 
     if (!updatedTransaction) {

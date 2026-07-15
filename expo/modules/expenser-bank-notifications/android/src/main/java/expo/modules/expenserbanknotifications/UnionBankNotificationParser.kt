@@ -2,32 +2,41 @@ package expo.modules.expenserbanknotifications
 
 import org.json.JSONObject
 import java.text.SimpleDateFormat
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.TimeZone
 
 object UnionBankNotificationParser {
-  private val coreRegex = Regex(
-    "\\b(?:A/c|Alc)\\s+[%*](\\d{3,8})\\s+(Debited|Credited(?:\\s+for)?)\\s+Rs:?([\\d,]+(?:\\.\\d{1,2})?)\\s+on\\s+(\\d{2}-\\d{2}-\\d{4})\\s+(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)",
+  private val accountRegex = Regex(
+    "\\b(?:A/?c|Alc|Acct(?:ount)?)\\s*(?:No\\.?\\s*)?[*%xX-]+\\s*(\\d{3,12})\\b",
+    RegexOption.IGNORE_CASE
+  )
+  private val directionRegex = Regex(
+    "\\b(Debited|Debit|Dr|Credited(?:\\s+for)?|Credit|Cr)\\b",
+    RegexOption.IGNORE_CASE
+  )
+  private val amountRegex = Regex("(?:Rs\\.?|INR|₹)\\s*:?\\s*([\\d,]+(?:\\.\\d{1,2})?)", RegexOption.IGNORE_CASE)
+  private val dateRegex = Regex(
+    "\\b(\\d{2}[-/]\\d{2}[-/]\\d{4})\\s+(\\d{1,2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?)\\s*(AM|PM)?\\b",
     RegexOption.IGNORE_CASE
   )
   private val balanceRegex = Regex(
-    "\\bAvl\\s+Bal\\s+Rs:?([\\d,]+(?:\\.\\d{1,2})?)",
+    "\\b(?:Avl|Available)\\s+Bal(?:ance)?\\s*(?:Rs\\.?|INR|₹)?\\s*:?\\s*([\\d,]+(?:\\.\\d{1,2})?)",
     RegexOption.IGNORE_CASE
   )
   private val referenceValueRegex = Regex(
-    "\\bref\\s+no\\s+([^,]*?)(?=\\s+Avl\\s+Bal\\b|,|$)",
+    "\\bref(?:erence)?\\s*(?:no\\.?|number)?\\s*[:#-]?\\s*([^,]*?)(?=\\s+(?:Avl|Available)\\s+Bal\\b|,|$)",
     RegexOption.IGNORE_CASE
   )
-  private val payeeRegex = Regex("\\bFvg:\\s*(.*?)(?:\\s+Avl\\s+Bal\\b|$)", RegexOption.IGNORE_CASE)
+  private val payeeRegex = Regex("\\b(?:Fvg|To|At)\\s*:\\s*(.*?)(?=\\s+(?:Avl|Available)\\s+Bal\\b|$)", RegexOption.IGNORE_CASE)
   private val lienRemovedRegex = Regex(
-    "\\blien\\s+of\\s+Rs\\.?:?([\\d,]+(?:\\.\\d{1,2})?).*?\\bremoved\\b.*?\\baccount\\s+\\*+(\\d{3,8})\\s*on\\s+(\\d{2}-\\d{2}-\\d{4})\\s+(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)",
+    "\\blien\\s+of\\s+(?:Rs\\.?)?\\s*:?\\s*([\\d,]+(?:\\.\\d{1,2})?).*?\\bremoved\\b.*?\\baccount\\s+\\*+(\\d{3,12})\\s*on\\s+(\\d{2}[-/]\\d{2}[-/]\\d{4})\\s+(\\d{1,2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?)\\s*(AM|PM)?",
     RegexOption.IGNORE_CASE
   )
 
   fun isUnionBankLike(message: String): Boolean {
     return message.contains("Union Bank of India", ignoreCase = true) ||
-      Regex("\\bA/c\\s+\\*\\d{3,8}\\b", RegexOption.IGNORE_CASE).containsMatchIn(message) ||
-      Regex("\\bAlc\\s+[%*]\\d{3,8}\\b", RegexOption.IGNORE_CASE).containsMatchIn(message)
+      accountRegex.containsMatchIn(message)
   }
 
   fun parse(message: String): JSONObject? {
@@ -56,18 +65,20 @@ object UnionBankNotificationParser {
       return null
     }
 
-    val core = coreRegex.find(text) ?: return null
-    val balance = balanceRegex.find(text) ?: return null
-    val accountSuffix = normalizeAccountSuffix(core.groupValues[1]) ?: return null
-    val rawType = core.groupValues[2]
-    val amount = parseAmount(core.groupValues[3]) ?: return null
-    val occurredAt = parseDate(core.groupValues[4], core.groupValues[5]) ?: return null
-    val availableBalance = parseAmount(balance.groupValues[1]) ?: return null
+    val account = accountRegex.find(text) ?: return null
+    val direction = directionRegex.find(text) ?: return null
+    val date = dateRegex.find(text) ?: return null
+    val amountMatch = amountRegex.find(text, direction.range.last + 1) ?: return null
+    val accountSuffix = normalizeAccountSuffix(account.groupValues[1]) ?: return null
+    val rawType = direction.groupValues[1]
+    val amount = parseAmount(amountMatch.groupValues[1]) ?: return null
+    val occurredAt = parseDate(date.groupValues[1], date.groupValues[2], date.groupValues.getOrNull(3)) ?: return null
+    val availableBalance = balanceRegex.find(text)?.groupValues?.get(1)?.let(::parseAmount)
     val referenceValue = normalizeReferenceValue(referenceValueRegex.find(text)?.groupValues?.get(1))
     val referenceNumber = if (Regex("^\\d{6,}$").matches(referenceValue)) referenceValue else null
     val payee = normalizePayee(payeeRegex.find(text)?.groupValues?.get(1))
       ?: if (referenceValue.isNotBlank() && referenceNumber == null) normalizePayee(referenceValue) else null
-    val transactionType = if (rawType.equals("Debited", ignoreCase = true)) "expense" else "income"
+    val transactionType = if (Regex("^(?:Debited|Debit|Dr)$", RegexOption.IGNORE_CASE).matches(rawType)) "expense" else "income"
 
     val parsed = JSONObject()
       .put("bankName", "Union Bank of India")
@@ -77,12 +88,12 @@ object UnionBankNotificationParser {
       .put("occurredAt", occurredAt)
       .put("referenceNumber", referenceNumber ?: JSONObject.NULL)
       .put("payee", payee ?: JSONObject.NULL)
-      .put("availableBalance", availableBalance)
-      .put("confidence", if (!referenceNumber.isNullOrBlank()) "high" else "medium")
+      .put("availableBalance", availableBalance ?: JSONObject.NULL)
+      .put("confidence", if (!referenceNumber.isNullOrBlank() && availableBalance != null) "high" else "medium")
       .put("importSource", "union_bank_notification")
       .put("capturedAt", isoFormat().format(System.currentTimeMillis()))
 
-    parsed.put("importSourceKey", buildTransactionKey(parsed))
+    parsed.put("importSourceKey", buildTransactionKey(parsed, text))
     return parsed
   }
 
@@ -96,7 +107,7 @@ object UnionBankNotificationParser {
     if (lien != null) {
       val amount = parseAmount(lien.groupValues[1]) ?: return null
       val accountSuffix = normalizeAccountSuffix(lien.groupValues[2]) ?: return null
-      val occurredAt = parseDate(lien.groupValues[3], lien.groupValues[4]) ?: return null
+      val occurredAt = parseDate(lien.groupValues[3], lien.groupValues[4], lien.groupValues.getOrNull(5)) ?: return null
       val event = JSONObject()
         .put("bankName", "Union Bank of India")
         .put("eventType", "lien_removed")
@@ -108,30 +119,35 @@ object UnionBankNotificationParser {
         .put("importSource", "union_bank_event")
         .put("capturedAt", isoFormat().format(System.currentTimeMillis()))
 
-      event.put("importSourceKey", buildReviewEventKey(event))
+      event.put("importSourceKey", buildReviewEventKey(event, text))
       return event
     }
 
     return null
   }
 
-  fun buildTransactionKey(parsed: JSONObject): String {
+  fun buildTransactionKey(parsed: JSONObject, message: String? = null): String {
     val referenceNumber = parsed.nullableString("referenceNumber")
     if (!referenceNumber.isNullOrBlank()) {
       return "union-bank:ref:$referenceNumber"
     }
 
+    if (!message.isNullOrBlank()) {
+      return "union-bank:message:${hashNormalizedMessage(message)}"
+    }
     return listOf(
       "union-bank:fallback",
       parsed.optString("accountSuffix"),
       parsed.optString("type"),
       "%.2f".format(Locale.US, parsed.optDouble("amount")),
-      parsed.optString("occurredAt"),
-      "%.2f".format(Locale.US, parsed.optDouble("availableBalance"))
+      parsed.optString("occurredAt")
     ).joinToString(":")
   }
 
-  fun buildReviewEventKey(event: JSONObject): String {
+  fun buildReviewEventKey(event: JSONObject, message: String? = null): String {
+    if (!message.isNullOrBlank()) {
+      return "union-bank:event:message:${hashNormalizedMessage(message)}"
+    }
     val amount = if (event.has("amount") && !event.isNull("amount")) {
       "%.2f".format(Locale.US, event.optDouble("amount"))
     } else {
@@ -151,13 +167,16 @@ object UnionBankNotificationParser {
     return value.replace(",", "").toDoubleOrNull()
   }
 
-  private fun parseDate(datePart: String, timePart: String): String? {
+  private fun parseDate(datePart: String, timePart: String, meridiem: String? = null): String? {
     return try {
-      val normalizedTime = Regex("^(\\d{2}:\\d{2}:\\d{2})").find(timePart)?.groupValues?.get(1)
-        ?: return null
-      val input = SimpleDateFormat("dd-MM-yyyy HH:mm:ss", Locale.US)
+      val normalizedDate = datePart.replace('/', '-')
+      val hasSeconds = timePart.count { it == ':' } == 2
+      val normalizedTime = if (hasSeconds) timePart.substringBefore('.') else "$timePart:00"
+      val marker = meridiem?.trim()?.uppercase(Locale.US).orEmpty()
+      val input = SimpleDateFormat(if (marker.isBlank()) "dd-MM-yyyy HH:mm:ss" else "dd-MM-yyyy hh:mm:ss a", Locale.US)
+      input.isLenient = false
       input.timeZone = TimeZone.getTimeZone("Asia/Kolkata")
-      val parsed = input.parse("$datePart $normalizedTime") ?: return null
+      val parsed = input.parse("$normalizedDate $normalizedTime${if (marker.isBlank()) "" else " $marker"}") ?: return null
       isoFormat().format(parsed)
     } catch (_: Exception) {
       null
@@ -166,6 +185,12 @@ object UnionBankNotificationParser {
 
   private fun normalizeText(value: String): String {
     return value.replace(Regex("\\s+"), " ").trim()
+  }
+
+  private fun hashNormalizedMessage(value: String): String {
+    return MessageDigest.getInstance("SHA-256")
+      .digest(normalizeText(value).toByteArray(Charsets.UTF_8))
+      .joinToString("") { "%02x".format(it) }
   }
 
   private fun normalizeReferenceValue(value: String?): String {

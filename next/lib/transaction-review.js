@@ -14,35 +14,36 @@ export function deriveTransactionReviewState(value) {
 
   if (!isImportedTransaction(value)) {
     return {
-      description: description || "No description",
+      description,
       category: rawCategory || "General",
-      reviewStatus: "complete",
+      reviewStatus: "active",
     };
   }
 
-  const category = rawCategory || IMPORTED_FALLBACK_CATEGORY;
+  const category =
+    rawCategory.toLowerCase() === IMPORTED_FALLBACK_CATEGORY ? "" : rawCategory;
 
-  if (!description || !category) {
+  if (!category) {
     return {
       description,
       category,
-      reviewStatus: "pending",
+      reviewStatus: "needs_category",
     };
   }
 
   return {
     description,
     category,
-    reviewStatus: "complete",
+    reviewStatus: "active",
   };
 }
 
 export function getTransactionDisplayFields(value) {
-  if (value.reviewStatus === "pending") {
+  if (value.reviewStatus === "needs_category") {
     const category = trimText(value.category);
 
     return {
-      description: trimText(value.description) || "Pending details",
+      description: trimText(value.description) || "Bank transaction",
       category: category === IMPORTED_FALLBACK_CATEGORY ? "" : category,
     };
   }

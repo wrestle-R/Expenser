@@ -6,7 +6,7 @@ export type QueuedBankImport = {
   occurredAt: string;
   referenceNumber: string | null;
   payee: string | null;
-  availableBalance: number;
+  availableBalance: number | null;
   confidence: "high" | "medium";
   importSource: string;
   importSourceKey: string;
@@ -51,3 +51,6 @@ export function getQueuedRawBankCandidates(): QueuedRawBankCandidate[];
 export function clearQueuedRawBankCandidates(sourceKeys: string[]): void;
 export function getQueuedBankReviewEvents(): QueuedBankReviewEvent[];
 export function clearQueuedBankReviewEvents(sourceKeys: string[]): void;
+export function addBankImportQueuedListener(
+  listener: (event: { queued: boolean }) => void
+): { remove: () => void };

@@ -65,7 +65,7 @@ interface Transaction {
   amount: number;
   description: string;
   category: string;
-  reviewStatus: "pending" | "complete";
+  reviewStatus: "needs_category" | "active";
   paymentMethod: "bank" | "cash" | "splitwise";
   splitAmount?: number;
   date: string;
@@ -374,7 +374,7 @@ export default function TransactionsPage() {
     setEditDescription(txn.description);
 
     const normalizedCategory = txn.category.trim().toLowerCase();
-    if (!normalizedCategory && txn.reviewStatus === "pending") {
+    if (!normalizedCategory && txn.reviewStatus === "needs_category") {
       setEditCategory("");
       setEditCustomCategory("");
     } else {
@@ -410,7 +410,7 @@ export default function TransactionsPage() {
     const display = getTransactionDisplayFields({
       description: transaction.description,
       category: transaction.category,
-      reviewStatus: "complete",
+      reviewStatus: "active",
     });
     return `${display.description} • ${display.category} • ${new Date(
       transaction.date || 0
@@ -456,11 +456,9 @@ export default function TransactionsPage() {
 
     setEditSaving(true);
     const finalCategory = editCategory === "other" && editCustomCategory ? editCustomCategory : editCategory;
-    const allowsPendingReview = Boolean(editingTransaction.importSource);
-    const nextDescription = allowsPendingReview
-      ? editDescription.trim()
-      : editDescription.trim() || "No description";
-    const nextCategory = allowsPendingReview
+    const allowsCategoryReview = Boolean(editingTransaction.importSource);
+    const nextDescription = editDescription.trim();
+    const nextCategory = allowsCategoryReview
       ? finalCategory?.trim() || ""
       : finalCategory || "General";
 
@@ -540,7 +538,7 @@ export default function TransactionsPage() {
     const payload = {
       type: newType,
       amount: Number(newAmount),
-      description: newDescription.trim() || "No description",
+      description: newDescription.trim(),
       category: finalCategory || "General",
       paymentMethod: newMethod,
       splitAmount: isSplit ? Number(splitAmount) : 0,
@@ -702,7 +700,7 @@ export default function TransactionsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Description</Label>
+                <Label>Description (optional)</Label>
                 <Input
                   placeholder="What was this for?"
                   value={newDescription}
@@ -903,9 +901,9 @@ export default function TransactionsPage() {
                              Split
                            </span>
                         )}
-                        {txn.reviewStatus === "pending" && (
+                        {txn.reviewStatus === "needs_category" && (
                           <span className="ml-2 inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20">
-                            Pending review
+                            Choose category
                           </span>
                         )}
                       </p>
@@ -1068,7 +1066,7 @@ export default function TransactionsPage() {
             </div>
 
             <div className="space-y-2">
-              <Label>Description</Label>
+              <Label>Description (optional)</Label>
               <Input
                 placeholder="What was this for?"
                 value={editDescription}

@@ -6,7 +6,7 @@ import {
   getTransactionDisplayFields,
 } from "./transaction-review.js";
 
-test("marks imported transactions with missing description/category as pending review", () => {
+test("marks imported transactions with a missing category as needing a category", () => {
   const result = deriveTransactionReviewState({
     description: "",
     category: "",
@@ -16,12 +16,12 @@ test("marks imported transactions with missing description/category as pending r
 
   assert.deepEqual(result, {
     description: "",
-    category: "bank import",
-    reviewStatus: "pending",
+    category: "",
+    reviewStatus: "needs_category",
   });
 });
 
-test("keeps manual transactions complete with existing fallback behavior", () => {
+test("keeps manual transactions active with an optional description", () => {
   const result = deriveTransactionReviewState({
     description: "",
     category: "",
@@ -30,13 +30,13 @@ test("keeps manual transactions complete with existing fallback behavior", () =>
   });
 
   assert.deepEqual(result, {
-    description: "No description",
+    description: "",
     category: "General",
-    reviewStatus: "complete",
+    reviewStatus: "active",
   });
 });
 
-test("marks imported transactions complete once both fields are filled", () => {
+test("marks imported transactions active once a category is filled", () => {
   const result = deriveTransactionReviewState({
     description: "Metro recharge",
     category: "transport",
@@ -47,7 +47,22 @@ test("marks imported transactions complete once both fields are filled", () => {
   assert.deepEqual(result, {
     description: "Metro recharge",
     category: "transport",
-    reviewStatus: "complete",
+    reviewStatus: "active",
+  });
+});
+
+test("does not require an imported transaction description", () => {
+  const result = deriveTransactionReviewState({
+    description: "",
+    category: "transport",
+    importSource: "union_bank_notification",
+    importSourceKey: "union-bank:ref:789",
+  });
+
+  assert.deepEqual(result, {
+    description: "",
+    category: "transport",
+    reviewStatus: "active",
   });
 });
 
@@ -55,11 +70,11 @@ test("uses pending display labels without writing placeholders into stored field
   const result = getTransactionDisplayFields({
     description: "",
     category: "",
-    reviewStatus: "pending",
+    reviewStatus: "needs_category",
   });
 
   assert.deepEqual(result, {
-    description: "Pending details",
+    description: "Bank transaction",
     category: "",
   });
 });
@@ -68,7 +83,7 @@ test("hides the internal bank import placeholder in pending display labels", () 
   const result = getTransactionDisplayFields({
     description: "Juice",
     category: "bank import",
-    reviewStatus: "pending",
+    reviewStatus: "needs_category",
   });
 
   assert.deepEqual(result, {
@@ -77,7 +92,7 @@ test("hides the internal bank import placeholder in pending display labels", () 
   });
 });
 
-test("uses an internal imported category instead of a pending category placeholder", () => {
+test("treats the legacy bank import category as missing", () => {
   const result = deriveTransactionReviewState({
     description: "",
     category: "",
@@ -87,7 +102,7 @@ test("uses an internal imported category instead of a pending category placehold
 
   assert.deepEqual(result, {
     description: "",
-    category: "bank import",
-    reviewStatus: "pending",
+    category: "",
+    reviewStatus: "needs_category",
   });
 });

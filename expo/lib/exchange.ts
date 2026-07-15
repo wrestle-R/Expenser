@@ -52,7 +52,7 @@ export function getExpenseOffsetSummary(
 
 export function getSelectableExchangeExpenses(transactions: ITransaction[]) {
   return transactions
-    .filter((transaction) => transaction.type === "expense" && !transaction.isLocal)
+    .filter((transaction) => transaction.type === "expense")
     .map((transaction) => {
       const summary = getExpenseOffsetSummary(transactions, transaction._id);
 

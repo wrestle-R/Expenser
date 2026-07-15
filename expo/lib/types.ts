@@ -15,17 +15,13 @@ export interface ITransaction {
   amount: number;
   description: string;
   category: string;
-  reviewStatus?: "pending" | "complete";
+  reviewStatus: "needs_category" | "active";
   paymentMethod: "bank" | "cash" | "splitwise";
   splitAmount?: number;
   date: string;
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
-  // For offline sync
-  isLocal?: boolean;
-  syncStatus?: "pending" | "synced" | "failed";
-  syncError?: string;
 }
 
 export interface IWorkflow {
@@ -41,10 +37,6 @@ export interface IWorkflow {
   splitAmount?: number;
   createdAt: string;
   updatedAt: string;
-  // For offline sync
-  isLocal?: boolean;
-  syncStatus?: "pending" | "synced" | "failed";
-  syncError?: string;
 }
 
 export interface IUserProfile {
@@ -59,6 +51,12 @@ export interface IUserProfile {
     cash: number;
     splitwise: number;
   };
+  balanceAccounts: {
+    paymentMethod: PaymentMethod;
+    openingBalance: number;
+    openingAt: string | null;
+    currentBalance: number;
+  }[];
   onboarded: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -78,7 +76,7 @@ export type BottomTabSlot = "transactions" | "workflows" | "analysis" | "empty";
 export interface CreateTransactionPayload {
   type: TransactionType;
   amount: number;
-  description: string;
+  description?: string;
   category: string;
   paymentMethod: PaymentMethod;
   splitAmount?: number;
@@ -109,7 +107,7 @@ export interface BankReviewEvent {
 }
 
 export type ParsedBankNotificationResponse =
-  | { parsed: null }
+  | { kind: "unparsed"; parser?: "regex" | "groq" | string }
   | {
       kind: "transaction";
       parsed: {
@@ -120,7 +118,7 @@ export type ParsedBankNotificationResponse =
         occurredAt: string;
         referenceNumber: string | null;
         payee: string | null;
-        availableBalance: number;
+        availableBalance: number | null;
         confidence: "high" | "medium" | string;
       };
       importSource: string;

@@ -72,10 +72,6 @@ function normalizeEditableCategory(category: string) {
   return trimmed;
 }
 
-function isTransactionEditable(transaction: ITransaction) {
-  return !transaction.isLocal && !transaction._id.startsWith("temp_");
-}
-
 function getCategoriesForType(
   type: TransactionType,
   userCategories: IUserCategory[],
@@ -120,7 +116,6 @@ export default function TransactionsScreen() {
     transactions,
     loading,
     deleteTransaction,
-    retryFailedTransaction,
     updateTransaction,
     isOnline,
     manualRefresh,
@@ -210,12 +205,8 @@ export default function TransactionsScreen() {
   };
 
   const handleEditPress = (txn: ITransaction, mode?: EditMode) => {
-    if (!isTransactionEditable(txn)) {
-      return;
-    }
-
     setEditingTxn(txn);
-    setEditMode(mode ?? (txn.reviewStatus === "pending" ? "review" : "edit"));
+    setEditMode(mode ?? (txn.reviewStatus === "needs_category" ? "review" : "edit"));
     setEditType(txn.type);
     setEditAmount(txn.amount.toString());
     setEditDescription(txn.description);
@@ -244,12 +235,6 @@ export default function TransactionsScreen() {
       return;
     }
 
-    if (!isTransactionEditable(targetTransaction)) {
-      showToast("This transaction is still syncing", "error");
-      router.setParams({ reviewId: undefined });
-      return;
-    }
-
     handleEditPress(targetTransaction, "review");
     router.setParams({ reviewId: undefined });
   }, [loading, reviewId, router, showToast, transactions]);
@@ -259,7 +244,6 @@ export default function TransactionsScreen() {
     const parsedAmount = parseFloat(editAmount);
     const trimmedDescription = editDescription.trim();
     const trimmedCategory = editCategory.trim();
-    const requiresReviewCompletion = editMode === "review";
 
     if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
       showToast("Please enter a valid amount", "error");
@@ -268,11 +252,6 @@ export default function TransactionsScreen() {
 
     if (!trimmedCategory) {
       showToast("Please choose a category", "error");
-      return;
-    }
-
-    if (requiresReviewCompletion && !trimmedDescription) {
-      showToast("Please add a description before saving", "error");
       return;
     }
 
@@ -286,9 +265,7 @@ export default function TransactionsScreen() {
       await updateTransaction(editingTxn._id, {
         type: editType,
         amount: parsedAmount,
-        description: requiresReviewCompletion
-          ? trimmedDescription
-          : trimmedDescription || "No description",
+        description: trimmedDescription,
         category: trimmedCategory,
         paymentMethod: editPaymentMethod,
         splitAmount: editIsSplit ? parseFloat(editSplitAmount || "0") : 0,
@@ -302,21 +279,12 @@ export default function TransactionsScreen() {
     }
   };
 
-  const handleRetryPress = async (txn: ITransaction) => {
-    try {
-      await retryFailedTransaction(txn._id);
-      showToast(
-        isOnline ? "Retry started" : "Queued to retry when you are back online",
-        "success"
-      );
-    } catch (error: any) {
-      showToast(error?.message || "Failed to retry transaction", "error");
-    }
-  };
-
   const availableMethods = paymentMethods.filter(
     (m) => profile?.paymentMethods?.includes(m.id)
   );
+  const needsCategoryCount = transactions.filter(
+    (transaction) => transaction.reviewStatus === "needs_category"
+  ).length;
 
   if (loading) {
     return (
@@ -335,7 +303,7 @@ export default function TransactionsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
-      {/* Top Bar with Internet Status */}
+      {/* Top Bar */}
       <View
         style={{
           flexDirection: "row",
@@ -367,14 +335,6 @@ export default function TransactionsScreen() {
               color={colors.text}
             />
           </TouchableOpacity>
-          <View
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: 5,
-              backgroundColor: isOnline ? colors.success : colors.error,
-            }}
-          />
           <TouchableOpacity
             style={{
               backgroundColor: colors.primary,
@@ -411,6 +371,51 @@ export default function TransactionsScreen() {
           />
         }
       >
+        {!isOnline && (
+          <View
+            style={{
+              alignItems: "center",
+              backgroundColor: colors.warningBg,
+              borderRadius: 12,
+              flexDirection: "row",
+              marginBottom: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+            }}
+          >
+            <Ionicons name="cloud-offline-outline" size={16} color={colors.warning} />
+            <Text style={{ color: colors.warning, fontSize: 12, marginLeft: 8, flex: 1 }}>
+              Offline — changes stay on this phone and upload automatically.
+            </Text>
+          </View>
+        )}
+
+        {needsCategoryCount > 0 && (
+          <TouchableOpacity
+            onPress={() => {
+              const next = transactions.find((item) => item.reviewStatus === "needs_category");
+              if (next) handleEditPress(next, "review");
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={`Review ${needsCategoryCount} bank ${needsCategoryCount === 1 ? "import" : "imports"} needing a category`}
+            style={{
+              alignItems: "center",
+              backgroundColor: colors.warningBg,
+              borderColor: colors.warning + "44",
+              borderRadius: 12,
+              borderWidth: 1,
+              flexDirection: "row",
+              marginBottom: 12,
+              padding: 12,
+            }}
+          >
+            <Ionicons name="pricetag-outline" size={18} color={colors.warning} />
+            <Text style={{ color: colors.text, flex: 1, fontWeight: "600", marginLeft: 9 }}>
+              {needsCategoryCount} bank {needsCategoryCount === 1 ? "import needs" : "imports need"} a category
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.warning} />
+          </TouchableOpacity>
+        )}
         {transactions.length === 0 ? (
           <View
             style={{
@@ -459,11 +464,13 @@ export default function TransactionsScreen() {
           >
             {paginatedTransactions.map((txn, index) => {
               const display = getTransactionDisplayFields(txn);
-              const editable = isTransactionEditable(txn);
-
               return (
-              <View
+              <TouchableOpacity
                 key={txn._id}
+                onPress={() => handleEditPress(txn)}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${display.description}, ${txn.type}, ${formatCurrency(txn.amount)}`}
                 style={{
                   flexDirection: "row",
                   justifyContent: "space-between",
@@ -474,11 +481,8 @@ export default function TransactionsScreen() {
                   borderBottomColor: colors.border,
                 }}
               >
-                <TouchableOpacity
+                <View
                   style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
-                  onPress={() => handleEditPress(txn)}
-                  activeOpacity={editable ? 0.8 : 1}
-                  disabled={!editable}
                 >
                   <View
                     style={{
@@ -516,7 +520,7 @@ export default function TransactionsScreen() {
                     >
                       {paymentMethodConfig[txn.paymentMethod]?.label} · {formatDate(txn.date)}
                     </Text>
-                    {txn.reviewStatus === "pending" && (
+                    {txn.reviewStatus === "needs_category" && (
                       <Text
                         style={{
                           fontSize: 11,
@@ -525,7 +529,7 @@ export default function TransactionsScreen() {
                           fontWeight: "600",
                         }}
                       >
-                        Pending review
+                        Choose category
                       </Text>
                     )}
                     {txn.exchangeExpenseId && (
@@ -539,45 +543,8 @@ export default function TransactionsScreen() {
                         Offsets linked expense
                       </Text>
                     )}
-                    {txn.isLocal && (
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          marginTop: 4,
-                        }}
-                      >
-                        <Ionicons
-                          name={
-                            txn.syncStatus === "failed"
-                              ? "alert-circle-outline"
-                              : "cloud-upload-outline"
-                          }
-                          size={12}
-                          color={
-                            txn.syncStatus === "failed"
-                              ? colors.error
-                              : colors.warning
-                          }
-                        />
-                        <Text
-                          style={{
-                            fontSize: 10,
-                            color:
-                              txn.syncStatus === "failed"
-                                ? colors.error
-                                : colors.warning,
-                            marginLeft: 4,
-                          }}
-                        >
-                          {txn.syncStatus === "failed"
-                            ? "Sync failed. Tap retry."
-                            : "Pending sync"}
-                        </Text>
-                      </View>
-                    )}
                   </View>
-                </TouchableOpacity>
+                </View>
 
                 <View style={{ alignItems: "flex-end" }}>
                   <Text
@@ -603,41 +570,8 @@ export default function TransactionsScreen() {
                     </Text>
                   )}
                 </View>
-
-                {/* Action buttons */}
-                <View style={{ flexDirection: "row", marginLeft: 8 }}>
-                  {txn.syncStatus === "failed" && (
-                    <TouchableOpacity
-                      style={{ padding: 8 }}
-                      onPress={() => handleRetryPress(txn)}
-                    >
-                      <Ionicons name="refresh-outline" size={18} color={colors.info} />
-                    </TouchableOpacity>
-                  )}
-                  {/* Edit button */}
-                  {editable && (
-                    <TouchableOpacity
-                      style={{ padding: 8 }}
-                      onPress={() => handleEditPress(txn)}
-                    >
-                      <Ionicons name="pencil-outline" size={18} color={colors.primary} />
-                    </TouchableOpacity>
-                  )}
-                  
-                  {/* Delete button */}
-                  <TouchableOpacity
-                    style={{ padding: 8 }}
-                    onPress={() => handleDeletePress(txn)}
-                    disabled={deleting === txn._id}
-                  >
-                    {deleting === txn._id ? (
-                      <ActivityIndicator size="small" color={colors.error} />
-                    ) : (
-                      <Ionicons name="trash-outline" size={18} color={colors.error} />
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 8 }} />
+              </TouchableOpacity>
               );
             })}
           </View>
@@ -725,11 +659,11 @@ export default function TransactionsScreen() {
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                     <View style={{ flex: 1, paddingRight: 12 }}>
                       <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-                        {editMode === "review" ? "Review Pending Transaction" : "Edit Transaction"}
+                        {editMode === "review" ? "Choose a Category" : "Edit Transaction"}
                       </Text>
                       <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 4 }}>
                         {editMode === "review"
-                          ? "Complete the missing details before saving this imported transaction."
+                          ? "Categorize this bank import. The description is optional."
                           : "Update the transaction details."}
                       </Text>
                     </View>
@@ -751,10 +685,10 @@ export default function TransactionsScreen() {
                         }}
                       >
                         <Text style={{ color: colors.warning, fontWeight: "700", fontSize: 13 }}>
-                          Pending review
+                          Category needed
                         </Text>
                         <Text style={{ color: colors.text, fontSize: 12, marginTop: 4, lineHeight: 18 }}>
-                          Add a proper category and description so this import is no longer left in review.
+                          Choose a category to make this transaction active.
                         </Text>
                       </View>
                     )}
@@ -822,7 +756,7 @@ export default function TransactionsScreen() {
                     />
 
                     {/* Description */}
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Description</Text>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Description (optional)</Text>
                     <TextInput
                       style={{
                         backgroundColor: colors.backgroundSecondary,
@@ -955,8 +889,7 @@ export default function TransactionsScreen() {
                       disabled={
                         saving ||
                         !editAmount ||
-                        !editCategory.trim() ||
-                        (editMode === "review" && !editDescription.trim())
+                        !editCategory.trim()
                       }
                     >
                       {saving ? (
@@ -966,6 +899,19 @@ export default function TransactionsScreen() {
                           {editMode === "review" ? "Save Review" : "Save Changes"}
                         </Text>
                       )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={{ alignItems: "center", padding: 14, marginTop: 8 }}
+                      onPress={() => {
+                        if (!editingTxn) return;
+                        closeEditModal();
+                        handleDeletePress(editingTxn);
+                      }}
+                    >
+                      <Text style={{ color: colors.error, fontSize: 15, fontWeight: "600" }}>
+                        Delete transaction
+                      </Text>
                     </TouchableOpacity>
                   </ScrollView>
                 </View>

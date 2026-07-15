@@ -1,51 +1,34 @@
-// Local notification service for sync reminders
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Device from "expo-device";
-import { Platform, AppState, AppStateStatus } from "react-native";
-import {
-  getPendingTransactions,
-  getPendingWorkflows,
-  getPendingDeletes,
-  getLastSyncTime,
-  getPendingProfileUpdate,
-} from "./storage";
+import { Platform } from "react-native";
 
-const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+const CHANNEL_ID = "transaction-imports";
+const NOTIFIED_KEYS = "@expenser_notified_bank_imports_v1";
+const MAX_NOTIFIED_KEYS = 250;
 
 type NotificationsModule = typeof import("expo-notifications");
 
 class NotificationService {
   private initialized = false;
   private notifications: NotificationsModule | null | undefined;
-  private checkInterval: ReturnType<typeof setInterval> | null = null;
-  private appStateSubscription: { remove: () => void } | null = null;
-  private scheduledUnsyncedReminderId: string | null = null;
-  private activeUnsyncedNotificationId: string | null = null;
-  private activeStaleNotificationId: string | null = null;
-  private lastUnsyncedCountNotified = 0;
-  private lastStaleHoursNotified = -1;
 
   private async getNotifications() {
-    if (this.notifications !== undefined) {
-      return this.notifications;
-    }
+    if (this.notifications !== undefined) return this.notifications;
 
     try {
       const notifications = await import("expo-notifications");
-
-      // Configure how notifications appear when the app is in the foreground.
       notifications.setNotificationHandler({
         handleNotification: async () => ({
           shouldShowAlert: true,
           shouldPlaySound: true,
-          shouldSetBadge: true,
+          shouldSetBadge: false,
           shouldShowBanner: true,
           shouldShowList: true,
         }),
       });
-
       this.notifications = notifications;
     } catch (error) {
-      console.warn("[Notifications] Notifications unavailable in this runtime:", error);
+      console.warn("[Notifications] Unavailable in this runtime:", error);
       this.notifications = null;
     }
 
@@ -54,368 +37,87 @@ class NotificationService {
 
   async initialize() {
     if (this.initialized) return;
-
-    try {
-      const Notifications = await this.getNotifications();
-
-      if (!Notifications) {
-        return;
-      }
-
-      // Request permissions
-      if (Device.isDevice) {
-        const { status: existing } = await Notifications.getPermissionsAsync();
-        let finalStatus = existing;
-
-        if (existing !== "granted") {
-          const { status } = await Notifications.requestPermissionsAsync();
-          finalStatus = status;
-        }
-
-        if (finalStatus !== "granted") {
-          console.log("[Notifications] Permission not granted");
-          return;
-        }
-        
-        console.log("[Notifications] Permission granted:", finalStatus);
-      } else {
-        console.log("[Notifications] Running on simulator/emulator - notifications may not work");
-      }
-
-      // Android notification channel
-      if (Platform.OS === "android") {
-        await Notifications.setNotificationChannelAsync("sync-reminders", {
-          name: "Sync Reminders",
-          importance: Notifications.AndroidImportance.HIGH,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: "#f59e0b",
-          sound: "default",
-        });
-        console.log("[Notifications] Android channel created");
-      }
-
-      this.initialized = true;
-      console.log("[Notifications] Initialized successfully");
-
-      // Listen for app state changes to check when app comes to foreground
-      this.appStateSubscription = AppState.addEventListener("change", this.handleAppStateChange);
-
-      // Start periodic check (every 30 minutes while app is open)
-      this.startPeriodicCheck();
-      
-      // Schedule a delayed notification check for when the app goes to background
-      await this.scheduleBackgroundReminder();
-    } catch (error) {
-      console.error("[Notifications] Error initializing:", error);
-    }
-  }
-
-  private handleAppStateChange = async (nextAppState: AppStateStatus) => {
-    if (nextAppState === "active") {
-      // App came to foreground - check and notify
-      console.log("[Notifications] App came to foreground, checking...");
-      await this.checkAndNotify();
-    } else if (nextAppState === "background") {
-      // App went to background - schedule future notification
-      console.log("[Notifications] App went to background, scheduling reminder...");
-      await this.scheduleBackgroundReminder();
-    }
-  };
-
-  // Schedule a notification to fire later when the app is in background
-  private async scheduleBackgroundReminder() {
-    try {
-      const Notifications = await this.getNotifications();
-
-      if (!Notifications) {
-        return;
-      }
-
-      // Cancel any existing scheduled reminder first.
-      if (this.scheduledUnsyncedReminderId) {
-        await Notifications.cancelScheduledNotificationAsync(this.scheduledUnsyncedReminderId).catch(() => {});
-        this.scheduledUnsyncedReminderId = null;
-      }
-      
-      // Check if there's pending data to sync
-      const [pendingTxns, pendingWorkflows, pendingDeletes, pendingProfile] = await Promise.all([
-        getPendingTransactions(),
-        getPendingWorkflows(),
-        getPendingDeletes(),
-        getPendingProfileUpdate(),
-      ]);
-      
-      const totalPending =
-        pendingTxns.length +
-        pendingWorkflows.length +
-        pendingDeletes.length +
-        (pendingProfile ? 1 : 0);
-      
-      if (totalPending > 0) {
-        // Schedule a notification to remind user about unsynced data in 1 hour
-        this.scheduledUnsyncedReminderId = await Notifications.scheduleNotificationAsync({
-          content: {
-            title: "Don't forget to sync!",
-            body: `You have ${totalPending} item${totalPending > 1 ? "s" : ""} waiting to sync. Open Expenser to upload your changes.`,
-            data: { type: "unsynced-reminder" },
-            sound: true,
-            ...(Platform.OS === "android" && { channelId: "sync-reminders" }),
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-            seconds: 60 * 60, // 1 hour
-          },
-        });
-        console.log("[Notifications] Scheduled background reminder for 1 hour");
-      }
-    } catch (error) {
-      console.error("[Notifications] Error scheduling background reminder:", error);
-    }
-  }
-
-  private startPeriodicCheck() {
-    // Check immediately on init
-    this.checkAndNotify();
-
-    // Then every 30 minutes
-    this.checkInterval = setInterval(() => {
-      this.checkAndNotify();
-    }, 30 * 60 * 1000);
-  }
-
-  cleanup() {
-    if (this.checkInterval) {
-      clearInterval(this.checkInterval);
-      this.checkInterval = null;
-    }
-    if (this.appStateSubscription) {
-      this.appStateSubscription.remove();
-      this.appStateSubscription = null;
-    }
-    this.scheduledUnsyncedReminderId = null;
-    this.activeUnsyncedNotificationId = null;
-    this.activeStaleNotificationId = null;
-    this.lastUnsyncedCountNotified = 0;
-    this.lastStaleHoursNotified = -1;
-  }
-
-  /**
-   * Check for unsynced data and stale data, fire notifications as needed.
-   */
-  async checkAndNotify() {
-    if (!this.initialized) return;
-
-    try {
-      await Promise.all([
-        this.checkUnsyncedData(),
-        this.checkStaleData(),
-      ]);
-    } catch (error) {
-      console.error("[Notifications] Error checking:", error);
-    }
-  }
-
-  /**
-   * Notification 1: Unsynced data reminder
-   * Fires when there are pending transactions/workflows/deletes that haven't been synced.
-   */
-  private async checkUnsyncedData() {
     const Notifications = await this.getNotifications();
+    if (!Notifications) return;
 
-    if (!Notifications) {
-      return;
+    if (Device.isDevice) {
+      const existing = await Notifications.getPermissionsAsync();
+      const permission =
+        existing.status === "granted"
+          ? existing
+          : await Notifications.requestPermissionsAsync();
+      if (permission.status !== "granted") return;
     }
 
-    const [pendingTxns, pendingWorkflows, pendingDeletes, pendingProfile] = await Promise.all([
-      getPendingTransactions(),
-      getPendingWorkflows(),
-      getPendingDeletes(),
-      getPendingProfileUpdate(),
-    ]);
-
-    const totalPending =
-      pendingTxns.length +
-      pendingWorkflows.length +
-      pendingDeletes.length +
-      (pendingProfile ? 1 : 0);
-
-    if (totalPending > 0) {
-      if (this.lastUnsyncedCountNotified === totalPending && this.activeUnsyncedNotificationId) {
-        return;
-      }
-
-      if (this.activeUnsyncedNotificationId) {
-        await Notifications.dismissNotificationAsync(this.activeUnsyncedNotificationId).catch(() => {});
-      }
-
-      const itemWord = totalPending === 1 ? "item" : "items";
-      this.activeUnsyncedNotificationId = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "Unsynced Data",
-          body: `You have ${totalPending} ${itemWord} waiting to sync. Connect to the internet to upload your changes.`,
-          data: { type: "unsynced" },
-          ...(Platform.OS === "android" && { channelId: "sync-reminders" }),
-        },
-        trigger: null, // Show immediately
+    if (Platform.OS === "android") {
+      await Notifications.deleteNotificationChannelAsync("sync-reminders").catch(() => {});
+      await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
+        name: "Imported transactions",
+        importance: Notifications.AndroidImportance.DEFAULT,
+        sound: "default",
       });
-      this.lastUnsyncedCountNotified = totalPending;
-      console.log(`[Notifications] Sent unsynced data notification (${totalPending} items)`);
-    } else {
-      // Clear the notification if everything is synced
-      if (this.activeUnsyncedNotificationId) {
-        await Notifications.dismissNotificationAsync(this.activeUnsyncedNotificationId).catch(() => {});
-        this.activeUnsyncedNotificationId = null;
-      }
-      this.lastUnsyncedCountNotified = 0;
     }
+
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(
+      scheduled
+        .filter((item) =>
+          ["unsynced-reminder", "unsynced", "stale"].includes(
+            String(item.content.data?.type ?? "")
+          )
+        )
+        .map((item) =>
+          Notifications.cancelScheduledNotificationAsync(item.identifier).catch(() => {})
+        )
+    );
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    await Promise.all(
+      presented
+        .filter((item) =>
+          ["unsynced-reminder", "unsynced", "stale"].includes(
+            String(item.request.content.data?.type ?? "")
+          )
+        )
+        .map((item) =>
+          Notifications.dismissNotificationAsync(item.request.identifier).catch(() => {})
+        )
+    );
+    this.initialized = true;
   }
 
-  /**
-   * Notification 2: Stale data reminder
-   * Fires when the app hasn't successfully refreshed from the server in 4+ hours.
-   */
-  private async checkStaleData() {
+  async notifyImportedTransaction(input: {
+    importSourceKey: string;
+    amount: number;
+    type: "income" | "expense";
+    stealthMode: boolean;
+  }) {
+    await this.initialize();
     const Notifications = await this.getNotifications();
+    if (!Notifications || !this.initialized) return;
 
-    if (!Notifications) {
-      return;
-    }
+    const rawKeys = await AsyncStorage.getItem(NOTIFIED_KEYS);
+    const keys: string[] = rawKeys ? JSON.parse(rawKeys) : [];
+    if (keys.includes(input.importSourceKey)) return;
 
-    const lastSync = await getLastSyncTime();
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Transaction added",
+        body: input.stealthMode
+          ? "A bank transaction was added to Expenser."
+          : `${input.type === "income" ? "Received" : "Spent"} ₹${input.amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}. Choose a category if needed.`,
+        data: { type: "transaction-imported", importSourceKey: input.importSourceKey },
+        ...(Platform.OS === "android" ? { channelId: CHANNEL_ID } : {}),
+      },
+      trigger: null,
+    });
 
-    if (!lastSync) {
-      if (this.activeStaleNotificationId) {
-        return;
-      }
-
-      // Never synced — notify once
-      this.activeStaleNotificationId = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "Data May Be Outdated",
-          body: "Your data hasn't been refreshed yet. Open the app with internet to get the latest data.",
-          data: { type: "stale" },
-          ...(Platform.OS === "android" && { channelId: "sync-reminders" }),
-        },
-        trigger: null,
-      });
-      this.lastStaleHoursNotified = 0;
-      console.log("[Notifications] Sent stale data notification (never synced)");
-      return;
-    }
-
-    const timeSinceSync = Date.now() - lastSync;
-    if (timeSinceSync >= FOUR_HOURS_MS) {
-      const hours = Math.floor(timeSinceSync / (60 * 60 * 1000));
-      if (hours <= this.lastStaleHoursNotified && this.activeStaleNotificationId) {
-        return;
-      }
-
-      if (this.activeStaleNotificationId) {
-        await Notifications.dismissNotificationAsync(this.activeStaleNotificationId).catch(() => {});
-      }
-
-      this.activeStaleNotificationId = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "Data May Be Outdated",
-          body: `Your data hasn't been refreshed in ${hours}+ hours. Open the app to sync.`,
-          data: { type: "stale" },
-          ...(Platform.OS === "android" && { channelId: "sync-reminders" }),
-        },
-        trigger: null,
-      });
-      this.lastStaleHoursNotified = hours;
-      console.log(`[Notifications] Sent stale data notification (${hours}h ago)`);
-    } else {
-      // Data is fresh — clear the notification
-      if (this.activeStaleNotificationId) {
-        await Notifications.dismissNotificationAsync(this.activeStaleNotificationId).catch(() => {});
-        this.activeStaleNotificationId = null;
-      }
-      this.lastStaleHoursNotified = -1;
-    }
+    await AsyncStorage.setItem(
+      NOTIFIED_KEYS,
+      JSON.stringify([input.importSourceKey, ...keys].slice(0, MAX_NOTIFIED_KEYS))
+    );
   }
 
-  /**
-   * Called after a successful sync to clear the unsynced notification
-   * and update the stale check.
-   */
-  async onSyncComplete() {
-    try {
-      const Notifications = await this.getNotifications();
-
-      if (!Notifications) {
-        return;
-      }
-
-      if (this.scheduledUnsyncedReminderId) {
-        await Notifications.cancelScheduledNotificationAsync(this.scheduledUnsyncedReminderId).catch(() => {});
-        this.scheduledUnsyncedReminderId = null;
-      }
-
-      if (this.activeUnsyncedNotificationId) {
-        await Notifications.dismissNotificationAsync(this.activeUnsyncedNotificationId).catch(() => {});
-        this.activeUnsyncedNotificationId = null;
-      }
-
-      if (this.activeStaleNotificationId) {
-        await Notifications.dismissNotificationAsync(this.activeStaleNotificationId).catch(() => {});
-        this.activeStaleNotificationId = null;
-      }
-
-      this.lastUnsyncedCountNotified = 0;
-      this.lastStaleHoursNotified = -1;
-    } catch {
-      // Ignore
-    }
-  }
-
-  /**
-   * Called when a new pending item is added while offline
-   */
-  async onPendingItemAdded(pendingCount: number) {
-    if (!this.initialized || pendingCount === 0) return;
-
-    try {
-      // Force a refreshed unsynced message and schedule background reminder.
-      this.lastUnsyncedCountNotified = 0;
-      await this.checkUnsyncedData();
-      await this.scheduleBackgroundReminder();
-      console.log(`[Notifications] Pending item added (${pendingCount} items)`);
-    } catch (error) {
-      console.error("[Notifications] Error sending pending notification:", error);
-    }
-  }
-
-  /**
-   * Send a test notification (for debugging)
-   */
-  async sendTestNotification() {
-    if (!this.initialized) {
-      console.log("[Notifications] Not initialized, cannot send test");
-      return;
-    }
-    
-    try {
-      const Notifications = await this.getNotifications();
-
-      if (!Notifications) {
-        return;
-      }
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "Test Notification",
-          body: "Notifications are working correctly!",
-          sound: true,
-          ...(Platform.OS === "android" && { channelId: "sync-reminders" }),
-        },
-        trigger: null,
-      });
-      console.log("[Notifications] Test notification sent");
-    } catch (error) {
-      console.error("[Notifications] Error sending test:", error);
-    }
-  }
+  cleanup() {}
 }
 
 export const notificationService = new NotificationService();

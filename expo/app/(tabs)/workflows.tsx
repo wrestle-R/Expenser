@@ -379,49 +379,6 @@ export default function WorkflowsScreen() {
                           </View>
                         )}
 
-                        {workflow.isLocal && (
-                          <View
-                            style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              backgroundColor:
-                                workflow.syncStatus === "failed"
-                                  ? colors.errorBg
-                                  : colors.warningBg,
-                              paddingHorizontal: 8,
-                              paddingVertical: 4,
-                              borderRadius: 6,
-                            }}
-                          >
-                            <Ionicons
-                              name={
-                                workflow.syncStatus === "failed"
-                                  ? "alert-circle-outline"
-                                  : "cloud-upload-outline"
-                              }
-                              size={12}
-                              color={
-                                workflow.syncStatus === "failed"
-                                  ? colors.error
-                                  : colors.warning
-                              }
-                            />
-                            <Text
-                              style={{
-                                fontSize: 12,
-                                color:
-                                  workflow.syncStatus === "failed"
-                                    ? colors.error
-                                    : colors.warning,
-                                marginLeft: 4,
-                              }}
-                            >
-                              {workflow.syncStatus === "failed"
-                                ? "Sync failed"
-                                : "Pending"}
-                            </Text>
-                          </View>
-                        )}
                       </View>
                     </View>
 

@@ -2,6 +2,7 @@ import {
   clearQueuedBankReviewEvents,
   clearQueuedImports,
   clearQueuedRawBankCandidates,
+  addBankImportQueuedListener,
   getNotificationAccessHealth,
   getQueuedBankReviewEvents,
   getQueuedImports,
@@ -19,6 +20,7 @@ export type NativeBankImport = QueuedBankImport;
 export type NativeNotificationAccessHealth = NotificationAccessHealth;
 export type NativeRawBankCandidate = QueuedRawBankCandidate;
 export type NativeBankReviewEvent = QueuedBankReviewEvent;
+export { addBankImportQueuedListener };
 
 export function getBankNotificationAccessEnabled() {
   return isNotificationAccessEnabled();
@@ -63,14 +65,15 @@ export function bankImportToTransactionPayload(
     type: item.type,
     amount: Number(item.amount),
     description: item.payee ?? "",
-    category: "bank import",
+    category: "",
     paymentMethod: "bank",
     splitAmount: 0,
     date: item.occurredAt,
     importSource: item.importSource,
     importSourceKey: item.importSourceKey,
     importedAccountSuffix: item.accountSuffix,
-    importedBankBalance: Number(item.availableBalance),
+    importedBankBalance:
+      item.availableBalance == null ? undefined : Number(item.availableBalance),
     importedBankReference: item.referenceNumber ?? undefined,
     importedBankConfidence: item.confidence,
   };

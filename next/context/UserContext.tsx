@@ -15,6 +15,12 @@ export interface UserProfile {
     cash: number;
     splitwise: number;
   };
+  balanceAccounts: {
+    paymentMethod: "bank" | "cash" | "splitwise";
+    openingBalance: number;
+    openingAt: string | null;
+    currentBalance: number;
+  }[];
   onboarded: boolean;
   dashboardTutorialCompleted: boolean;
   workflows?: {

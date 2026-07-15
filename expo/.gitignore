@@ -4,3 +4,24 @@
 
 expo-env.d.ts
 # @end expo-cli
+
+.expo/
+.expo-shared/
+node_modules/
+android/
+ios/
+dist/
+web-build/
+android/.gradle/
+android/.cxx/
+android/app/build/
+**/.gradle/
+**/.cxx/
+**/build/
+*.apk
+*.aab
+*.jks
+*.keystore
+.env
+.env.*
+!.env.example

@@ -17,15 +17,12 @@ import { useTheme } from "../../context/ThemeContext";
 import { useUserContext } from "../../context/UserContext";
 import { useTabPreferences } from "../../context/TabPreferencesContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
-import { clearAllData, getStoredBankReviewEvents } from "../../lib/storage";
+import { clearAllData } from "../../lib/storage";
 import ConfirmModal from "../../components/ConfirmModal";
 import { supabase } from "../../lib/supabase";
 import type { BottomTabSlot } from "../../lib/types";
 import {
   getBankNotificationAccessHealth,
-  getQueuedNativeBankReviewEvents,
-  getQueuedBankImports,
-  getQueuedRawBankImportCandidates,
   openBankNotificationAccessSettings,
   type NativeNotificationAccessHealth,
 } from "../../lib/bank-imports";
@@ -70,7 +67,6 @@ export default function ProfileScreen() {
     profile,
     loading,
     isOnline,
-    pendingCount,
     manualRefresh,
     transactions,
     updateProfile,
@@ -85,14 +81,8 @@ export default function ProfileScreen() {
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [accessHealth, setAccessHealth] = useState<NativeNotificationAccessHealth>(EMPTY_ACCESS_HEALTH);
-  const [queuedCount, setQueuedCount] = useState(0);
-  const [rawCandidateCount, setRawCandidateCount] = useState(0);
-  const [reviewEventCount, setReviewEventCount] = useState(0);
   const pendingReviewTransactions = transactions.filter(
-    (transaction) =>
-      transaction.reviewStatus === "pending" &&
-      !transaction.isLocal &&
-      !transaction._id.startsWith("temp_")
+    (transaction) => transaction.reviewStatus === "needs_category"
   );
   const firstPendingReviewId = pendingReviewTransactions[0]?._id;
 
@@ -107,12 +97,6 @@ export default function ProfileScreen() {
 
   const refreshSetup = useCallback(async () => {
     setAccessHealth(getBankNotificationAccessHealth());
-    setQueuedCount(getQueuedBankImports().length);
-    setRawCandidateCount(getQueuedRawBankImportCandidates().length);
-    const storedReviewEvents = await getStoredBankReviewEvents();
-    setReviewEventCount(
-      getQueuedNativeBankReviewEvents().length + storedReviewEvents.length
-    );
   }, []);
 
   useEffect(() => {
@@ -348,7 +332,7 @@ export default function ProfileScreen() {
                 marginLeft: 6,
               }}
             >
-              Offline {pendingCount > 0 && `(${pendingCount} pending)`}
+              Offline — changes upload automatically
             </Text>
           </View>
         )}
@@ -692,25 +676,16 @@ export default function ProfileScreen() {
           Bank SMS Import
         </Text>
         <Text style={{ color: colors.textMuted }}>
-          Notification access: {accessHealth.hasRecentReads ? "working" : "Permission has not been given"}
+          Permission: {accessHealth.settingEnabled ? "enabled" : "needs attention"}
         </Text>
         <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Android setting: {accessHealth.settingEnabled ? "enabled" : "not enabled"}
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Notifications read in last 4 hours: {accessHealth.recentReadCount}
+          Listener health: {accessHealth.hasRecentReads ? "working" : "waiting for a bank notification"}
         </Text>
         <Text style={{ color: colors.textMuted, marginTop: 6 }}>
           Last notification read: {formatLastRead(accessHealth.lastReadAt)}
         </Text>
         <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Queued imports: {queuedCount}
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Raw Union Bank retries: {rawCandidateCount}
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Bank events needing review: {reviewEventCount}
+          Needs a category: {pendingReviewTransactions.length}
         </Text>
         <TouchableOpacity
           style={{
@@ -730,7 +705,7 @@ export default function ProfileScreen() {
             <Ionicons name="create-outline" size={18} color={colors.primary} />
             <View style={{ marginLeft: 10, flex: 1 }}>
               <Text style={{ color: colors.text, fontWeight: "600" }}>
-                Pending review transactions
+                Transactions needing a category
               </Text>
               <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
                 {pendingReviewTransactions.length > 0
@@ -793,7 +768,7 @@ export default function ProfileScreen() {
         onClose={() => setShowSignOutConfirm(false)}
         onConfirm={handleConfirmSignOut}
         title="Sign Out"
-        message="Are you sure you want to sign out? Any unsynced data will be lost."
+        message="Are you sure you want to sign out of Expenser?"
         confirmText="Sign Out"
         cancelText="Cancel"
         confirmColor="destructive"

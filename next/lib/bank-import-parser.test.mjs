@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildBankImportKey,
+  hashNormalizedBankMessage,
   parseBankNotification,
   parseUnionBankNotification,
 } from "./bank-import-parser.js";
@@ -30,6 +31,9 @@ const creditWithPayeeReference =
 
 const lienRemoval =
   "Dear customer,lien of Rs.79.36 due to LIEN FOR GENERAL SERVICE CHARGES has been removed from your account **74280on 30-06-2026 07:42:08.6425.Union Bank of India";
+
+const debitWithoutBalance =
+  "Union Bank of India A/C **4280 Debited INR 42.50 on 06/07/2026 8:04 PM ref no 123456789012";
 
 test("parses Union Bank debit notification with payee and reference", () => {
   const parsed = parseUnionBankNotification(debitSmall);
@@ -120,6 +124,15 @@ test("parses Union Bank credit notification with Alc prefix and payee-like refer
   assert.equal(result.parsed.occurredAt, "2026-07-05T09:33:59.000Z");
 });
 
+test("parses A/C, INR, slash dates, 12-hour time, and no available balance", () => {
+  const parsed = parseUnionBankNotification(debitWithoutBalance);
+  assert.equal(parsed?.accountSuffix, "4280");
+  assert.equal(parsed?.type, "expense");
+  assert.equal(parsed?.amount, 42.5);
+  assert.equal(parsed?.availableBalance, null);
+  assert.equal(parsed?.occurredAt, "2026-07-06T14:34:00.000Z");
+});
+
 test("returns review event for Union Bank lien removal with missing spacing and fractional seconds", () => {
   const result = parseBankNotification(lienRemoval);
 
@@ -150,8 +163,8 @@ test("builds a stable fallback import key when reference number is missing", () 
   const parsed = parseUnionBankNotification(creditMissingRef);
 
   assert.equal(
-    buildBankImportKey(parsed),
-    "union-bank:fallback:4280:income:5.00:2026-06-13T12:00:43.000Z:504.19"
+    buildBankImportKey(parsed, creditMissingRef),
+    `union-bank:message:${hashNormalizedBankMessage(creditMissingRef)}`
   );
 });
 

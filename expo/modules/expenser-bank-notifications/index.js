@@ -68,3 +68,8 @@ export function getQueuedBankReviewEvents() {
 export function clearQueuedBankReviewEvents(sourceKeys) {
   getNativeModule()?.clearQueuedBankReviewEvents?.(sourceKeys);
 }
+
+export function addBankImportQueuedListener(listener) {
+  const module = getNativeModule();
+  return module?.addListener?.("onBankImportQueued", listener) ?? { remove() {} };
+}

@@ -1,4 +1,4 @@
-/node_modules
+**/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -9,10 +9,13 @@
 
 /coverage
 
-/.next/
-/out/
+**/.next/
+**/out/
+**/.turbo/
+**/.cache/
 
-/build
+**/build/
+**/dist/
 
 /next/node_modules
 /next/.next
@@ -20,11 +23,37 @@
 /next/.env
 /next/next-env.d.ts
 
-/expo/.expo
+**/.expo/
 /expo/node_modules
-/expo/.expo-shared  
+/expo/.expo-shared/
 /expo/.env
 /expo/expo-env.d.ts
+/expo/android/
+/expo/ios/
+
+# Android / Gradle native output
+**/.gradle/
+**/.cxx/
+**/android/app/build/
+**/android/build/
+**/captures/
+*.apk
+*.aab
+*.jks
+*.keystore
+local.properties
+
+# Expo / Metro output
+**/.expo-shared/
+**/.metro-health-check*
+**/.react-native/
+
+# Logs and test caches
+*.log
+**/.eslintcache
+**/.stylelintcache
+**/.nyc_output/
+**/coverage/
 
 .codex
 .agents
@@ -36,7 +65,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-.env*
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
 
 .vercel
 

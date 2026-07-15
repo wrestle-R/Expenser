@@ -1,4 +1,4 @@
-export type TransactionReviewStatus = "pending" | "complete";
+export type TransactionReviewStatus = "needs_category" | "active";
 
 export function deriveTransactionReviewState(value: {
   description?: unknown;

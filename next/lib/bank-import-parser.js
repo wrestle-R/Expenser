@@ -1,224 +1,136 @@
+import { createHash } from "node:crypto";
+
 const IST_OFFSET_MINUTES = 5 * 60 + 30;
+
+function normalizeBankMessage(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
 
 function parseAmount(value) {
   const amount = Number(String(value).replace(/,/g, ""));
   return Number.isFinite(amount) ? amount : null;
 }
 
-function parseUnionBankDate(datePart, timePart) {
-  const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(datePart);
-  if (!match) {
-    return null;
+function parseUnionBankDate(datePart, timePart, meridiem) {
+  const dateMatch = /^(\d{2})[-/](\d{2})[-/](\d{4})$/.exec(datePart);
+  const timeMatch = /^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/.exec(timePart);
+  if (!dateMatch || !timeMatch) return null;
+  const [, day, month, year] = dateMatch;
+  let hours = Number(timeMatch[1]);
+  const minutes = Number(timeMatch[2]);
+  const seconds = Number(timeMatch[3] ?? 0);
+  const normalizedMeridiem = String(meridiem ?? "").toUpperCase();
+  if (normalizedMeridiem) {
+    if (hours < 1 || hours > 12) return null;
+    if (normalizedMeridiem === "PM" && hours !== 12) hours += 12;
+    if (normalizedMeridiem === "AM" && hours === 12) hours = 0;
   }
-
-  const [, day, month, year] = match;
-  const timeMatch = /^(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(timePart);
-  if (!timeMatch) {
-    return null;
-  }
-
-  const [, rawHours, rawMinutes, rawSeconds] = timeMatch;
-  const [hours, minutes, seconds] = [rawHours, rawMinutes, rawSeconds].map(Number);
-  if ([hours, minutes, seconds].some((part) => !Number.isFinite(part))) {
-    return null;
-  }
-
-  const utcMs =
-    Date.UTC(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      hours,
-      minutes,
-      seconds
-    ) -
-    IST_OFFSET_MINUTES * 60 * 1000;
-
-  return new Date(utcMs).toISOString();
+  if (hours > 23 || minutes > 59 || seconds > 59) return null;
+  const utcMs = Date.UTC(Number(year), Number(month) - 1, Number(day), hours, minutes, seconds) - IST_OFFSET_MINUTES * 60 * 1000;
+  const date = new Date(utcMs);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function normalizePayee(value) {
-  if (!value) {
-    return null;
-  }
-
-  const cleaned = value
-    .replace(/\s+Avl\s+Bal.*$/i, "")
+  const cleaned = String(value ?? "")
+    .replace(/\s+(?:Avl|Available)\s+Bal.*$/i, "")
     .replace(/\s+Never\s+Share.*$/i, "")
     .replace(/\s+Not\s+you\?.*$/i, "")
     .replace(/[.,\s]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
-
   return cleaned || null;
 }
 
 function normalizeAccountSuffix(value) {
-  if (!value) {
-    return null;
-  }
-
-  const digits = String(value).replace(/\D/g, "");
-  if (!digits) {
-    return null;
-  }
-
-  return digits.length > 4 ? digits.slice(-4) : digits;
-}
-
-function normalizeSummary(value) {
-  return String(value).replace(/\s+/g, " ").trim();
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits ? digits.slice(-4) : null;
 }
 
 function isUnionBankLike(message) {
-  if (typeof message !== "string") {
-    return false;
-  }
-
-  return (
-    /Union Bank of India/i.test(message) ||
-    /\bA\/c\s+\*\d{3,8}\b/i.test(message) ||
-    /\bAlc\s+[%*]\d{3,8}\b/i.test(message)
-  );
+  const text = normalizeBankMessage(message);
+  return /Union Bank of India/i.test(text) || /\b(?:A\/?c|Alc|Acct(?:ount)?)\s*(?:No\.?\s*)?[*%xX-]+\d{3,12}\b/i.test(text);
 }
 
 function parseUnionBankNotification(message) {
-  if (typeof message !== "string") {
-    return null;
-  }
-
-  const text = message.replace(/\s+/g, " ").trim();
-  if (!isUnionBankLike(text)) {
-    return null;
-  }
-
-  const coreMatch =
-    /\b(?:A\/c|Alc)\s+[%*](\d{3,8})\s+(Debited|Credited(?:\s+for)?)\s+Rs:?([\d,]+(?:\.\d{1,2})?)\s+on\s+(\d{2}-\d{2}-\d{4})\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/i.exec(
-      text
-    );
-  const balanceMatch = /\bAvl\s+Bal\s+Rs:?([\d,]+(?:\.\d{1,2})?)/i.exec(text);
-
-  if (!coreMatch || !balanceMatch) {
-    return null;
-  }
-
-  const [, accountSuffix, rawType, rawAmount, datePart, timePart] = coreMatch;
-  const amount = parseAmount(rawAmount);
-  const availableBalance = parseAmount(balanceMatch[1]);
-  const occurredAt = parseUnionBankDate(datePart, timePart);
-  const normalizedAccountSuffix = normalizeAccountSuffix(accountSuffix);
-
-  if (amount == null || availableBalance == null || !occurredAt || !normalizedAccountSuffix) {
-    return null;
-  }
-
-  const refValueMatch = /\bref\s+no\s+([^,]*?)(?=\s+Avl\s+Bal\b|,|$)/i.exec(text);
-  const payeeMatch = /\bFvg:\s*(.*?)(?:\s+Avl\s+Bal\b|$)/i.exec(text);
-  const rawReferenceValue = normalizeSummary(refValueMatch?.[1] ?? "");
-  const rawReference = /^Avl\s+Bal\b/i.test(rawReferenceValue) ? "" : rawReferenceValue;
+  if (typeof message !== "string") return null;
+  const text = normalizeBankMessage(message);
+  if (!isUnionBankLike(text)) return null;
+  const accountMatch = /\b(?:A\/?c|Alc|Acct(?:ount)?)\s*(?:No\.?\s*)?[*%xX-]+\s*(\d{3,12})\b/i.exec(text);
+  const directionMatch = /\b(Debited|Debit|Dr|Credited(?:\s+for)?|Credit|Cr)\b/i.exec(text);
+  const dateMatch = /\b(\d{2}[-/]\d{2}[-/]\d{4})\s+(\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)\s*(AM|PM)?\b/i.exec(text);
+  if (!accountMatch || !directionMatch || !dateMatch) return null;
+  const afterDirection = text.slice(directionMatch.index + directionMatch[0].length);
+  const amountMatch = /(?:Rs\.?|INR|₹)\s*:?\s*([\d,]+(?:\.\d{1,2})?)/i.exec(afterDirection);
+  if (!amountMatch) return null;
+  const balanceMatch = /\b(?:Avl|Available)\s+Bal(?:ance)?\s*(?:Rs\.?|INR|₹)?\s*:?\s*([\d,]+(?:\.\d{1,2})?)/i.exec(text);
+  const amount = parseAmount(amountMatch[1]);
+  const availableBalance = balanceMatch ? parseAmount(balanceMatch[1]) : null;
+  const occurredAt = parseUnionBankDate(dateMatch[1], dateMatch[2], dateMatch[3]);
+  const accountSuffix = normalizeAccountSuffix(accountMatch[1]);
+  if (amount == null || !occurredAt || !accountSuffix) return null;
+  const refMatch = /\bref(?:erence)?\s*(?:no\.?|number)?\s*[:#-]?\s*([^,]*?)(?=\s+(?:Avl|Available)\s+Bal\b|,|$)/i.exec(text);
+  const payeeMatch = /\b(?:Fvg|To|At)\s*:\s*(.*?)(?=\s+(?:Avl|Available)\s+Bal\b|$)/i.exec(text);
+  const rawReference = normalizeBankMessage(refMatch?.[1] ?? "");
   const referenceNumber = /^\d{6,}$/.test(rawReference) ? rawReference : null;
-  const payee = normalizePayee(payeeMatch?.[1]) ?? (rawReference && !referenceNumber ? normalizePayee(rawReference) : null);
-
+  const payee = normalizePayee(payeeMatch?.[1]) ?? (rawReference && !referenceNumber && !/^(?:Avl|Available)\s+Bal\b/i.test(rawReference) ? normalizePayee(rawReference) : null);
   return {
     bankName: "Union Bank of India",
-    accountSuffix: normalizedAccountSuffix,
-    type: /^Debited$/i.test(rawType) ? "expense" : "income",
+    accountSuffix,
+    type: /^(?:debited|debit|dr)$/i.test(directionMatch[1]) ? "expense" : "income",
     amount,
     occurredAt,
     referenceNumber,
     payee,
     availableBalance,
-    confidence: referenceNumber ? "high" : "medium",
+    confidence: referenceNumber && availableBalance != null ? "high" : "medium",
   };
 }
 
 function parseUnionBankReviewEvent(message) {
-  if (typeof message !== "string") {
-    return null;
-  }
-
-  const text = normalizeSummary(message.replace(/(\d)(on\s+\d{2}-\d{2}-\d{4})/i, "$1 $2"));
-  if (!isUnionBankLike(text)) {
-    return null;
-  }
-
-  const lienMatch =
-    /\blien\s+of\s+Rs\.?:?([\d,]+(?:\.\d{1,2})?).*?\bremoved\b.*?\baccount\s+\*+(\d{3,8})\s*on\s+(\d{2}-\d{2}-\d{4})\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/i.exec(
-      text
-    );
-
-  if (lienMatch) {
-    const amount = parseAmount(lienMatch[1]);
-    const accountSuffix = normalizeAccountSuffix(lienMatch[2]);
-    const occurredAt = parseUnionBankDate(lienMatch[3], lienMatch[4]);
-
-    if (amount == null || !accountSuffix || !occurredAt) {
-      return null;
-    }
-
-    return {
-      bankName: "Union Bank of India",
-      eventType: "lien_removed",
-      amount,
-      accountSuffix,
-      occurredAt,
-      summary: "Lien removed for general service charges",
-      confidence: "medium",
-    };
-  }
-
-  return null;
+  if (typeof message !== "string") return null;
+  const text = normalizeBankMessage(message.replace(/(\d)(on\s+\d{2}[-/]\d{2}[-/]\d{4})/i, "$1 $2"));
+  if (!isUnionBankLike(text)) return null;
+  const match = /\blien\s+of\s+(?:Rs\.?)?\s*:?\s*([\d,]+(?:\.\d{1,2})?).*?\bremoved\b.*?\baccount\s+\*+(\d{3,12})\s*on\s+(\d{2}[-/]\d{2}[-/]\d{4})\s+(\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)\s*(AM|PM)?/i.exec(text);
+  if (!match) return null;
+  const amount = parseAmount(match[1]);
+  const accountSuffix = normalizeAccountSuffix(match[2]);
+  const occurredAt = parseUnionBankDate(match[3], match[4], match[5]);
+  if (amount == null || !accountSuffix || !occurredAt) return null;
+  return { bankName: "Union Bank of India", eventType: "lien_removed", amount, accountSuffix, occurredAt, summary: "Lien removed for general service charges", confidence: "medium" };
 }
 
 function parseBankNotification(message) {
   const transaction = parseUnionBankNotification(message);
-  if (transaction) {
-    return { kind: "transaction", parsed: transaction };
-  }
-
+  if (transaction) return { kind: "transaction", parsed: transaction };
   const event = parseUnionBankReviewEvent(message);
-  if (event) {
-    return { kind: "review_event", event };
-  }
-
-  return null;
+  return event ? { kind: "review_event", event } : null;
 }
 
-function buildBankImportKey(parsed) {
-  if (!parsed) {
-    return null;
-  }
-
-  if (parsed.referenceNumber) {
-    return `union-bank:ref:${parsed.referenceNumber}`;
-  }
-
-  return [
-    "union-bank:fallback",
-    parsed.accountSuffix,
-    parsed.type,
-    parsed.amount.toFixed(2),
-    parsed.occurredAt,
-    parsed.availableBalance.toFixed(2),
-  ].join(":");
+function hashNormalizedBankMessage(message) {
+  return createHash("sha256").update(normalizeBankMessage(message)).digest("hex");
 }
 
-function buildBankReviewEventKey(event) {
-  if (!event) {
-    return null;
-  }
-
-  return [
-    "union-bank:event",
-    event.eventType,
-    event.accountSuffix ?? "unknown",
-    event.amount == null ? "unknown" : event.amount.toFixed(2),
-    event.occurredAt ?? "unknown",
-  ].join(":");
+function buildBankImportKey(parsed, message) {
+  if (!parsed) return null;
+  if (parsed.referenceNumber) return `union-bank:ref:${parsed.referenceNumber}`;
+  if (message) return `union-bank:message:${hashNormalizedBankMessage(message)}`;
+  return ["union-bank:fallback", parsed.accountSuffix, parsed.type, Number(parsed.amount).toFixed(2), parsed.occurredAt].join(":");
 }
 
-exports.parseUnionBankNotification = parseUnionBankNotification;
-exports.parseUnionBankReviewEvent = parseUnionBankReviewEvent;
-exports.parseBankNotification = parseBankNotification;
-exports.buildBankImportKey = buildBankImportKey;
-exports.buildBankReviewEventKey = buildBankReviewEventKey;
+function buildBankReviewEventKey(event, message) {
+  if (!event) return null;
+  if (message) return `union-bank:event:message:${hashNormalizedBankMessage(message)}`;
+  return ["union-bank:event", event.eventType, event.accountSuffix ?? "unknown", event.amount == null ? "unknown" : Number(event.amount).toFixed(2), event.occurredAt ?? "unknown"].join(":");
+}
+
+export {
+  buildBankImportKey,
+  buildBankReviewEventKey,
+  hashNormalizedBankMessage,
+  isUnionBankLike,
+  normalizeBankMessage,
+  parseBankNotification,
+  parseUnionBankNotification,
+  parseUnionBankReviewEvent,
+};

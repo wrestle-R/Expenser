@@ -6,7 +6,7 @@ export type ParsedUnionBankNotification = {
   occurredAt: string;
   referenceNumber: string | null;
   payee: string | null;
-  availableBalance: number;
+  availableBalance: number | null;
   confidence: "high" | "medium";
 };
 
@@ -42,10 +42,16 @@ export function parseBankNotification(
   message: unknown
 ): ParsedBankNotificationResult | null;
 
+export function normalizeBankMessage(message: unknown): string;
+export function hashNormalizedBankMessage(message: unknown): string;
+export function isUnionBankLike(message: unknown): boolean;
+
 export function buildBankImportKey(
-  parsed: ParsedUnionBankNotification | null
+  parsed: ParsedUnionBankNotification | null,
+  message?: string
 ): string | null;
 
 export function buildBankReviewEventKey(
-  event: ParsedBankReviewEvent | null
+  event: ParsedBankReviewEvent | null,
+  message?: string
 ): string | null;

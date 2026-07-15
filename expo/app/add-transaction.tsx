@@ -84,7 +84,7 @@ export default function AddTransactionScreen() {
       const payload = {
         type,
         amount: payAmount,
-        description: description.trim() || "No description",
+        description: description.trim(),
         category: type === "income" ? "income" : "expense",
         paymentMethod,
         splitAmount: finalSplit,
@@ -241,7 +241,7 @@ export default function AddTransactionScreen() {
               marginBottom: 8,
             }}
           >
-            Description
+            Description (optional)
           </Text>
           <TextInput
             style={{

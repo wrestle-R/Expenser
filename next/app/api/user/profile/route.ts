@@ -8,6 +8,10 @@ import {
   type PaymentMethod,
   type UserRow,
 } from "@/lib/db";
+import {
+  requirePaymentMethods,
+  withDefaultPaymentMethod,
+} from "@/lib/payment-methods.js";
 
 const PAYMENT_METHODS: PaymentMethod[] = ["bank", "cash", "splitwise"];
 
@@ -29,17 +33,6 @@ function sanitizeText(
     throw new Error(`${field} must be ${maxLength} characters or fewer`);
   }
   return normalized;
-}
-
-function parsePaymentMethods(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return Array.from(
-    new Set(
-      value.filter((method): method is PaymentMethod =>
-        PAYMENT_METHODS.includes(method as PaymentMethod)
-      )
-    )
-  );
 }
 
 function parseBalanceUpdates(value: unknown) {
@@ -81,11 +74,26 @@ export async function GET(req: Request) {
           user_id, email, name, occupation, payment_methods,
           onboarded, dashboard_tutorial_completed
         ) values (
-          ${authUser.userId}, ${authUser.email}, ${authUser.name}, ${""}, ${[]},
+          ${authUser.userId}, ${authUser.email}, ${authUser.name}, ${""}, ${["bank"]},
           ${false}, ${false}
         )
         returning *
       `;
+    } else {
+      const normalizedMethods = withDefaultPaymentMethod(
+        users[0].payment_methods
+      );
+      if (
+        normalizedMethods.join("|") !==
+        (users[0].payment_methods ?? []).join("|")
+      ) {
+        users = await sql<UserRow[]>`
+          update users
+          set payment_methods = ${normalizedMethods}
+          where user_id = ${authUser.userId}
+          returning *
+        `;
+      }
     }
 
     await sql`select recalculate_user_balances(${authUser.userId})`;
@@ -110,7 +118,9 @@ export async function PUT(req: Request) {
       field: "occupation",
       maxLength: 120,
     });
-    const parsedMethods = parsePaymentMethods(data.paymentMethods);
+    const parsedMethods = Array.isArray(data.paymentMethods)
+      ? requirePaymentMethods(data.paymentMethods)
+      : [];
     const balanceUpdates = parseBalanceUpdates(data.balances);
 
     const result = await sql.begin(async (tx) => {
@@ -128,7 +138,7 @@ export async function PUT(req: Request) {
             onboarded, dashboard_tutorial_completed
           ) values (
             ${authUser.userId}, ${authUser.email}, ${name}, ${occupation},
-            ${Array.isArray(data.paymentMethods) ? parsedMethods : []},
+            ${Array.isArray(data.paymentMethods) ? parsedMethods : ["bank"]},
             ${Boolean(data.onboarded ?? false)},
             ${Boolean(data.dashboardTutorialCompleted ?? false)}
           ) returning *
@@ -140,7 +150,11 @@ export async function PUT(req: Request) {
             email = ${authUser.email || existing.email},
             name = ${typeof data.name === "string" ? name : existing.name},
             occupation = ${typeof data.occupation === "string" ? occupation : existing.occupation},
-            payment_methods = ${Array.isArray(data.paymentMethods) ? parsedMethods : existing.payment_methods},
+            payment_methods = ${
+              Array.isArray(data.paymentMethods)
+                ? parsedMethods
+                : withDefaultPaymentMethod(existing.payment_methods)
+            },
             onboarded = ${typeof data.onboarded === "boolean" ? data.onboarded : existing.onboarded},
             dashboard_tutorial_completed = ${
               typeof data.dashboardTutorialCompleted === "boolean"

@@ -9,6 +9,7 @@ import {
   BottomTabSlot,
 } from "./types";
 import { coalesceOutboxOperation } from "./outbox";
+import { withDefaultPaymentMethod } from "./payment-methods.js";
 
 const KEYS = {
   TRANSACTIONS: "@expenser_transactions",
@@ -440,7 +441,12 @@ export async function clearPendingProfileUpdate(): Promise<void> {
 export async function getStoredProfile(): Promise<IUserProfile | null> {
   try {
     const data = await AsyncStorage.getItem(KEYS.PROFILE);
-    return data ? JSON.parse(data) : null;
+    if (!data) return null;
+    const profile = JSON.parse(data) as IUserProfile;
+    return {
+      ...profile,
+      paymentMethods: withDefaultPaymentMethod(profile.paymentMethods),
+    };
   } catch (error) {
     console.error("[Storage] Error getting profile:", error);
     return null;
@@ -449,7 +455,13 @@ export async function getStoredProfile(): Promise<IUserProfile | null> {
 
 export async function setStoredProfile(profile: IUserProfile): Promise<void> {
   try {
-    await AsyncStorage.setItem(KEYS.PROFILE, JSON.stringify(profile));
+    await AsyncStorage.setItem(
+      KEYS.PROFILE,
+      JSON.stringify({
+        ...profile,
+        paymentMethods: withDefaultPaymentMethod(profile.paymentMethods),
+      })
+    );
   } catch (error) {
     console.error("[Storage] Error setting profile:", error);
   }

@@ -89,7 +89,7 @@ function parseWorkflowInput(body: Record<string, unknown>) {
     description: sanitizeText(body.description, {
       field: "description",
       maxLength: 200,
-      required: true,
+      required: false,
     }),
     category: sanitizeText(body.category, {
       field: "category",

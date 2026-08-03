@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { type Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { withDefaultPaymentMethod } from "@/lib/payment-methods.js";
 
 export interface UserProfile {
   userId: string;
@@ -84,8 +85,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch("/api/user/profile");
       if (res.ok) {
         const data = await res.json();
-        setProfile(data.profile);
-        localStorage.setItem("expenser-user-profile", JSON.stringify(data.profile));
+        const normalizedProfile = {
+          ...data.profile,
+          paymentMethods: withDefaultPaymentMethod(data.profile?.paymentMethods),
+        };
+        setProfile(normalizedProfile);
+        localStorage.setItem("expenser-user-profile", JSON.stringify(normalizedProfile));
       } else if (res.status === 404) {
         setProfile(null);
       } else {
@@ -97,7 +102,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const cached = localStorage.getItem("expenser-user-profile");
       if (cached) {
         try {
-          setProfile(JSON.parse(cached));
+          const cachedProfile = JSON.parse(cached);
+          setProfile({
+            ...cachedProfile,
+            paymentMethods: withDefaultPaymentMethod(cachedProfile?.paymentMethods),
+          });
         } catch {
           setError("Failed to load profile");
         }
@@ -117,8 +126,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       if (res.ok) {
         const result = await res.json();
-        setProfile(result.profile);
-        localStorage.setItem("expenser-user-profile", JSON.stringify(result.profile));
+        const normalizedProfile = {
+          ...result.profile,
+          paymentMethods: withDefaultPaymentMethod(result.profile?.paymentMethods),
+        };
+        setProfile(normalizedProfile);
+        localStorage.setItem("expenser-user-profile", JSON.stringify(normalizedProfile));
       } else {
         throw new Error(await readErrorMessage(res));
       }

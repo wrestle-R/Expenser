@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { getApiErrorResponse } from "@/lib/api-errors";
-import { deriveTransactionReviewState } from "@/lib/transaction-review.js";
+import {
+  assertPendingReviewUpdateFields,
+  deriveTransactionReviewState,
+  getPendingReviewUpdate,
+} from "@/lib/transaction-review.js";
 import {
   mapTransactionRow,
   normalizeDate,
@@ -659,11 +663,30 @@ export async function PUT(req: Request) {
         return null;
       }
 
+      const pendingReviewUpdate =
+        oldTransaction.review_status === "needs_category"
+          ? (() => {
+              assertPendingReviewUpdateFields(data);
+              const update = getPendingReviewUpdate({
+                description: data.description ?? oldTransaction.description,
+                category: data.category,
+              });
+              if (!update.category) {
+                throw new Error("Choose a category to complete this review");
+              }
+              return update;
+            })()
+          : null;
+
       const nextTransaction = parseTransactionInput({
         type: data.type ?? oldTransaction.type,
         amount: data.amount ?? oldTransaction.amount,
-        description: data.description ?? oldTransaction.description,
-        category: data.category ?? oldTransaction.category,
+        description:
+          pendingReviewUpdate?.description ??
+          data.description ??
+          oldTransaction.description,
+        category:
+          pendingReviewUpdate?.category ?? data.category ?? oldTransaction.category,
         importSource: oldTransaction.import_source,
         importSourceKey: oldTransaction.import_source_key,
         paymentMethod: data.paymentMethod ?? oldTransaction.payment_method,

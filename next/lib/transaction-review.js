@@ -38,6 +38,26 @@ export function deriveTransactionReviewState(value) {
   };
 }
 
+const PENDING_REVIEW_EDITABLE_FIELDS = new Set(["category", "description"]);
+
+export function getPendingReviewUpdate(value) {
+  return {
+    description: trimText(value.description),
+    category: trimText(value.category),
+  };
+}
+
+export function assertPendingReviewUpdateFields(value) {
+  const invalidFields = Object.keys(value).filter(
+    (field) => !PENDING_REVIEW_EDITABLE_FIELDS.has(field)
+  );
+  if (invalidFields.length > 0) {
+    throw new Error(
+      "Pending review transactions can only update category and description"
+    );
+  }
+}
+
 export function getTransactionDisplayFields(value) {
   if (value.reviewStatus === "needs_category") {
     const category = trimText(value.category);

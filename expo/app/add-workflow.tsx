@@ -79,11 +79,6 @@ export default function AddWorkflowScreen() {
       return;
     }
 
-    if (!description.trim()) {
-      showToast("Please enter a description", "error");
-      return;
-    }
-
     const parsedAmount = amount ? Number(amount) : undefined;
     const parsedSplitAmount = splitAmount ? Number(splitAmount) : undefined;
     if (parsedAmount != null && (!Number.isFinite(parsedAmount) || parsedAmount <= 0)) {
@@ -287,7 +282,7 @@ export default function AddWorkflowScreen() {
               marginBottom: 8,
             }}
           >
-            Description
+            Description (optional)
           </Text>
           <TextInput
             style={{

@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { withDefaultPaymentMethod } from "./payment-methods.js";
 
 const connectionString =
   process.env.SUPABASE_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -173,7 +174,7 @@ export function mapUserRow(row: UserRow, balanceRows: BalanceRow[] = []): UserPr
     name: row.name,
     email: row.email,
     occupation: row.occupation,
-    paymentMethods: row.payment_methods ?? [],
+    paymentMethods: withDefaultPaymentMethod(row.payment_methods),
     balances: {
       bank: currentBalance("bank"),
       cash: currentBalance("cash"),

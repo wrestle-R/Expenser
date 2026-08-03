@@ -23,10 +23,13 @@ import {
 } from "../../constants/theme";
 import { api } from "../../lib/api";
 import { formatCurrency, formatDate } from "../../lib/utils";
-import { ITransaction, IUserCategory, PaymentMethod, TransactionType } from "../../lib/types";
+import { ITransaction, IUserCategory, PaymentMethod, TransactionType, UpdateTransactionPayload } from "../../lib/types";
 import ConfirmModal from "../../components/ConfirmModal";
 import ResponsiveModal from "../../components/ResponsiveModal";
-import { getTransactionDisplayFields } from "../../lib/transaction-review";
+import {
+  getPendingReviewUpdate,
+  getTransactionDisplayFields,
+} from "../../lib/transaction-review";
 
 const PAGE_SIZE = 10;
 const IMPORTED_FALLBACK_CATEGORY = "bank import";
@@ -141,8 +144,11 @@ export default function TransactionsScreen() {
   const reviewId = typeof params.reviewId === "string" ? params.reviewId : undefined;
 
   const categoryOptions = useMemo(
-    () => getCategoriesForType(editType, userCategories, editCategory),
-    [editCategory, editType, userCategories]
+    () =>
+      getCategoriesForType(editType, userCategories, editCategory).filter(
+        (category) => editMode !== "review" || category.id !== "exchange"
+      ),
+    [editCategory, editMode, editType, userCategories]
   );
 
   useEffect(() => {
@@ -235,36 +241,46 @@ export default function TransactionsScreen() {
   }, [loading, reviewId, router, showToast, transactions]);
 
   const handleSaveEdit = async () => {
-    if (!editingTxn || !editAmount) return;
-    const parsedAmount = parseFloat(editAmount);
+    if (!editingTxn) return;
     const trimmedDescription = editDescription.trim();
     const trimmedCategory = editCategory.trim();
-
-    if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-      showToast("Please enter a valid amount", "error");
-      return;
-    }
 
     if (!trimmedCategory) {
       showToast("Please choose a category", "error");
       return;
     }
 
-    if (editIsSplit && Number(editSplitAmount || "0") >= parsedAmount) {
-      showToast("Split amount must be less than total amount", "error");
-      return;
-    }
+    let payload: UpdateTransactionPayload;
+    if (editMode === "review") {
+      payload = getPendingReviewUpdate({
+        description: trimmedDescription,
+        category: trimmedCategory,
+      });
+    } else {
+      const parsedAmount = parseFloat(editAmount);
+      if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+        showToast("Please enter a valid amount", "error");
+        return;
+      }
 
-    setSaving(true);
-    try {
-      await updateTransaction(editingTxn._id, {
+      if (editIsSplit && Number(editSplitAmount || "0") >= parsedAmount) {
+        showToast("Split amount must be less than total amount", "error");
+        return;
+      }
+
+      payload = {
         type: editType,
         amount: parsedAmount,
         description: trimmedDescription,
         category: trimmedCategory,
         paymentMethod: editPaymentMethod,
         splitAmount: editIsSplit ? parseFloat(editSplitAmount || "0") : 0,
-      });
+      };
+    }
+
+    setSaving(true);
+    try {
+      await updateTransaction(editingTxn._id, payload);
       setActiveModal("none");
       setEditingTxn(null);
       setEditMode("edit");
@@ -670,8 +686,10 @@ export default function TransactionsScreen() {
                       </View>
                     )}
 
-                    {/* Type Selector */}
-                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+                    {editMode !== "review" && (
+                      <>
+                        {/* Type Selector */}
+                        <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
                       <TouchableOpacity
                         style={{
                           flex: 1,
@@ -710,11 +728,11 @@ export default function TransactionsScreen() {
                           Income
                         </Text>
                       </TouchableOpacity>
-                    </View>
+                        </View>
 
-                    {/* Amount */}
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Amount</Text>
-                    <TextInput
+                        {/* Amount */}
+                        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Amount</Text>
+                        <TextInput
                       style={{
                         backgroundColor: colors.backgroundSecondary,
                         borderRadius: 10,
@@ -730,7 +748,9 @@ export default function TransactionsScreen() {
                       keyboardType="numeric"
                       placeholder="0.00"
                       placeholderTextColor={colors.textMuted}
-                    />
+                        />
+                      </>
+                    )}
 
                     {/* Description */}
                     <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Description (optional)</Text>
@@ -787,9 +807,11 @@ export default function TransactionsScreen() {
                       })}
                     </View>
 
-                    {/* Payment Method */}
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Payment Method</Text>
-                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                    {editMode !== "review" && (
+                      <>
+                        {/* Payment Method */}
+                        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Payment Method</Text>
+                        <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                       {availableMethods.map((method) => {
                         const config = paymentMethodConfig[method.id];
                         const isSelected = editPaymentMethod === method.id;
@@ -819,11 +841,11 @@ export default function TransactionsScreen() {
                           </TouchableOpacity>
                         );
                       })}
-                    </View>
+                        </View>
 
-                    {/* Split Option (for expenses only) */}
-                    {editType === "expense" && (
-                      <View style={{ marginBottom: 16 }}>
+                        {/* Split Option (for expenses only) */}
+                        {editType === "expense" && (
+                          <View style={{ marginBottom: 16 }}>
                         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                           <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted }}>Split transaction?</Text>
                           <Switch
@@ -850,7 +872,9 @@ export default function TransactionsScreen() {
                             placeholderTextColor={colors.textMuted}
                           />
                         )}
-                      </View>
+                          </View>
+                        )}
+                      </>
                     )}
 
                     {/* Save Button */}
@@ -865,7 +889,7 @@ export default function TransactionsScreen() {
                       onPress={handleSaveEdit}
                       disabled={
                         saving ||
-                        !editAmount ||
+                        (editMode !== "review" && !editAmount) ||
                         !editCategory.trim()
                       }
                     >
@@ -878,21 +902,23 @@ export default function TransactionsScreen() {
                       )}
                     </TouchableOpacity>
 
-                    <TouchableOpacity
-                      style={{ alignItems: "center", padding: 14, marginTop: 8 }}
-                      onPress={() => {
-                        if (!editingTxn) return;
-                        const transaction = editingTxn;
-                        setEditingTxn(null);
-                        setEditMode("edit");
-                        setEditCategory("");
-                        handleDeletePress(transaction);
-                      }}
-                    >
-                      <Text style={{ color: colors.error, fontSize: 15, fontWeight: "600" }}>
-                        Delete transaction
-                      </Text>
-                    </TouchableOpacity>
+                    {editMode !== "review" && (
+                      <TouchableOpacity
+                        style={{ alignItems: "center", padding: 14, marginTop: 8 }}
+                        onPress={() => {
+                          if (!editingTxn) return;
+                          const transaction = editingTxn;
+                          setEditingTxn(null);
+                          setEditMode("edit");
+                          setEditCategory("");
+                          handleDeletePress(transaction);
+                        }}
+                      >
+                        <Text style={{ color: colors.error, fontSize: 15, fontWeight: "600" }}>
+                          Delete transaction
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </ScrollView>
       </ResponsiveModal>
     </View>

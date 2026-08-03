@@ -49,7 +49,10 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getTransactionDisplayFields } from "@/lib/transaction-review.js";
+import {
+  getPendingReviewUpdate,
+  getTransactionDisplayFields,
+} from "@/lib/transaction-review.js";
 import {
   type ExchangeAwareTransaction,
   getExpenseOffsetSummary,
@@ -197,6 +200,14 @@ export default function TransactionsPage() {
   const numberClassName = cn(
     "transition-all duration-200",
     isStealthMode && "blur-sm select-none"
+  );
+  const isPendingReviewEdit =
+    editingTransaction?.reviewStatus === "needs_category";
+  const editCategoryOptions = getCategoriesForType(
+    editType,
+    userCategories
+  ).filter(
+    (category) => !isPendingReviewEdit || category.id !== "exchange"
   );
   const transactionMap = new Map(transactions.map((transaction) => [transaction._id, transaction]));
   const exchangeExpenseOptions = getOffsettableExpenses(transactions);
@@ -421,40 +432,7 @@ export default function TransactionsPage() {
   };
 
   const handleUpdateTransaction = async () => {
-    if (!editingTransaction || !editAmount || !editMethod) return;
-
-    // Validate split amount
-    if (editIsSplit && Number(editSplitAmount) >= Number(editAmount)) {
-      alert("Split amount must be less than total amount");
-      return;
-    }
-
-    if (editType === "income" && editCategory === "exchange" && !editExchangeExpenseId) {
-      alert("Select the expense transaction this exchange offsets");
-      return;
-    }
-
-    if (editType === "income" && editCategory === "exchange") {
-      const summary = getExpenseOffsetSummary(
-        transactions,
-        editExchangeExpenseId,
-        editingTransaction._id
-      );
-
-      if (!summary) {
-        alert("Selected expense is no longer available");
-        return;
-      }
-
-      if (Number(editAmount) > summary.remainingAmount) {
-        alert(
-          `Exchange amount cannot exceed ₹${summary.remainingAmount.toFixed(2)}`
-        );
-        return;
-      }
-    }
-
-    setEditSaving(true);
+    if (!editingTransaction) return;
     const finalCategory = editCategory === "other" && editCustomCategory ? editCustomCategory : editCategory;
     const allowsCategoryReview = Boolean(editingTransaction.importSource);
     const nextDescription = editDescription.trim();
@@ -462,18 +440,65 @@ export default function TransactionsPage() {
       ? finalCategory?.trim() || ""
       : finalCategory || "General";
 
-    const payload = {
-      type: editType,
-      amount: Number(editAmount),
-      description: nextDescription,
-      category: nextCategory,
-      paymentMethod: editMethod,
-      splitAmount: editIsSplit ? Number(editSplitAmount) : 0,
-      exchangeExpenseId:
-        editType === "income" && finalCategory === "exchange"
-          ? editExchangeExpenseId
-          : undefined,
-    };
+    if (isPendingReviewEdit && !nextCategory) {
+      alert("Choose a category to complete this review");
+      return;
+    }
+
+    let payload: Record<string, unknown>;
+    if (isPendingReviewEdit) {
+      payload = getPendingReviewUpdate({
+        description: nextDescription,
+        category: nextCategory,
+      });
+    } else {
+      if (!editAmount || !editMethod) return;
+
+      if (editIsSplit && Number(editSplitAmount) >= Number(editAmount)) {
+        alert("Split amount must be less than total amount");
+        return;
+      }
+
+      if (editType === "income" && editCategory === "exchange" && !editExchangeExpenseId) {
+        alert("Select the expense transaction this exchange offsets");
+        return;
+      }
+
+      if (editType === "income" && editCategory === "exchange") {
+        const summary = getExpenseOffsetSummary(
+          transactions,
+          editExchangeExpenseId,
+          editingTransaction._id
+        );
+
+        if (!summary) {
+          alert("Selected expense is no longer available");
+          return;
+        }
+
+        if (Number(editAmount) > summary.remainingAmount) {
+          alert(
+            `Exchange amount cannot exceed ₹${summary.remainingAmount.toFixed(2)}`
+          );
+          return;
+        }
+      }
+
+      payload = {
+        type: editType,
+        amount: Number(editAmount),
+        description: nextDescription,
+        category: nextCategory,
+        paymentMethod: editMethod,
+        splitAmount: editIsSplit ? Number(editSplitAmount) : 0,
+        exchangeExpenseId:
+          editType === "income" && finalCategory === "exchange"
+            ? editExchangeExpenseId
+            : undefined,
+      };
+    }
+
+    setEditSaving(true);
 
     console.log("[Transactions] Updating transaction:", payload);
 
@@ -1015,15 +1040,19 @@ export default function TransactionsPage() {
       }}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Edit Transaction</DialogTitle>
+            <DialogTitle>{isPendingReviewEdit ? "Review Transaction" : "Edit Transaction"}</DialogTitle>
             <DialogDescription>
-              Update the transaction details.
+              {isPendingReviewEdit
+                ? "Choose a category. The description is optional."
+                : "Update the transaction details."}
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 pt-2">
-            {/* Type toggle */}
-            <div className="flex gap-2 p-1 bg-muted rounded-lg">
+            {!isPendingReviewEdit && (
+              <>
+                {/* Type toggle */}
+                <div className="flex gap-2 p-1 bg-muted rounded-lg">
               <button
                 onClick={() => setEditType("expense")}
                 className={cn(
@@ -1044,11 +1073,11 @@ export default function TransactionsPage() {
                 <TrendingUp className="size-4 text-green-500" />
                 Income
               </button>
-            </div>
+                </div>
 
-            <div className="space-y-2">
-              <Label>Amount</Label>
-              <div className="relative">
+                <div className="space-y-2">
+                  <Label>Amount</Label>
+                  <div className="relative">
                 <IndianRupee className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
                 <Input
                   placeholder="0.00"
@@ -1062,8 +1091,10 @@ export default function TransactionsPage() {
                     if (val === "" || (!isNaN(Number(val)) && Number(val) >= 0)) setEditAmount(val);
                   }}
                 />
-              </div>
-            </div>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="space-y-2">
               <Label>Description (optional)</Label>
@@ -1077,7 +1108,7 @@ export default function TransactionsPage() {
             <div className="space-y-2">
               <Label>Category</Label>
               <div className="grid grid-cols-2 gap-2">
-                {getCategoriesForType(editType, userCategories).map((cat) => {
+                {editCategoryOptions.map((cat) => {
                   const Icon = cat.icon;
                   return (
                     <button
@@ -1107,7 +1138,7 @@ export default function TransactionsPage() {
               )}
             </div>
 
-            {editType === "income" && editCategory === "exchange" && (
+            {!isPendingReviewEdit && editType === "income" && editCategory === "exchange" && (
               <div className="space-y-2">
                 <Label>Offsets Expense</Label>
                 <select
@@ -1128,7 +1159,8 @@ export default function TransactionsPage() {
               </div>
             )}
 
-            <div className="space-y-2">
+            {!isPendingReviewEdit && (
+              <div className="space-y-2">
               <Label>Payment Method</Label>
               <div className="flex gap-2 flex-wrap">
                 {profile?.paymentMethods.map((method) => {
@@ -1152,9 +1184,10 @@ export default function TransactionsPage() {
                   );
                 })}
               </div>
-            </div>
+              </div>
+            )}
 
-            {editType === "expense" && (
+            {!isPendingReviewEdit && editType === "expense" && (
               <div className="pt-3 border-t space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="flex items-center gap-2 cursor-pointer">
@@ -1204,9 +1237,13 @@ export default function TransactionsPage() {
             <Button
               className="w-full"
               onClick={handleUpdateTransaction}
-              disabled={!editAmount || !editMethod || editSaving}
+              disabled={
+                editSaving ||
+                !editCategory.trim() ||
+                (!isPendingReviewEdit && (!editAmount || !editMethod))
+              }
             >
-              {editSaving ? "Saving..." : "Save Changes"}
+              {editSaving ? "Saving..." : isPendingReviewEdit ? "Save Review" : "Save Changes"}
             </Button>
           </div>
         </DialogContent>

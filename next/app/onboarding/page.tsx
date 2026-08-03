@@ -16,6 +16,7 @@ import {
   Check,
   IndianRupee,
 } from "lucide-react";
+import { toggleRequiredPaymentMethod } from "@/lib/payment-methods.js";
 
 const paymentOptions = [
   {
@@ -51,7 +52,8 @@ export default function OnboardingPage() {
   const [step, setStep] = useState(1);
   const [name, setName] = useState("");
   const [occupation, setOccupation] = useState("");
-  const [selectedMethods, setSelectedMethods] = useState<string[]>([]);
+  const [selectedMethods, setSelectedMethods] = useState<string[]>(["bank"]);
+  const [paymentMethodNotice, setPaymentMethodNotice] = useState("");
   const [balances, setBalances] = useState({ bank: 0, cash: 0, splitwise: 0 });
   const [saving, setSaving] = useState(false);
 
@@ -69,9 +71,11 @@ export default function OnboardingPage() {
   }, [profile, router]);
 
   const toggleMethod = (id: string) => {
-    setSelectedMethods((prev) =>
-      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
+    const result = toggleRequiredPaymentMethod(selectedMethods, id);
+    setPaymentMethodNotice(
+      result.blocked ? "At least one payment method must remain enabled." : ""
     );
+    setSelectedMethods(result.methods);
   };
 
   const handleComplete = async () => {
@@ -210,6 +214,16 @@ export default function OnboardingPage() {
                 );
               })}
             </div>
+            <p
+              className={`text-sm ${
+                paymentMethodNotice
+                  ? "font-medium text-destructive"
+                  : "text-muted-foreground"
+              }`}
+              role={paymentMethodNotice ? "alert" : undefined}
+            >
+              {paymentMethodNotice || "Keep at least one payment method enabled."}
+            </p>
             <div className="flex gap-3">
               <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
                 Back

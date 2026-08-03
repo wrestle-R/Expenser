@@ -38,3 +38,13 @@ export function getTransactionDisplayFields(
     category: transaction.category.trim() || "General",
   };
 }
+
+export function getPendingReviewUpdate(value: {
+  description?: string | null;
+  category?: string | null;
+}) {
+  return {
+    description: value.description?.trim() ?? "",
+    category: value.category?.trim() ?? "",
+  };
+}

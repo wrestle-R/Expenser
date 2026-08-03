@@ -51,6 +51,7 @@ import {
   getQueuedRawBankImportCandidates,
 } from "../lib/bank-imports";
 import { getPendingReviewStatus } from "../lib/transaction-review";
+import { withDefaultPaymentMethod } from "../lib/payment-methods.js";
 import { processBankImportCandidate } from "../lib/bank-import-processing";
 
 function dedupeTransactions(items: ITransaction[]) {
@@ -320,14 +321,28 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   const updateProfile = useCallback(async (data: Partial<IUserProfile>) => {
     if (!profile) return;
-    const updated = { ...profile, ...data };
+    const normalizedData = Array.isArray(data.paymentMethods)
+      ? {
+          ...data,
+          paymentMethods: withDefaultPaymentMethod(data.paymentMethods),
+        }
+      : data;
+    const updated = {
+      ...profile,
+      ...normalizedData,
+      paymentMethods: withDefaultPaymentMethod(
+        Array.isArray(normalizedData.paymentMethods)
+          ? normalizedData.paymentMethods
+          : profile.paymentMethods
+      ),
+    };
     setProfile(updated);
     await setStoredProfile(updated);
     await enqueueOutbox({
       entity: "profile",
       entityId: "current",
       action: "update",
-      payload: data as Record<string, unknown>,
+      payload: normalizedData as Record<string, unknown>,
     });
     void syncService.syncAll();
   }, [profile]);

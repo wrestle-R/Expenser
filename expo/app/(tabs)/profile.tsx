@@ -22,6 +22,11 @@ import ConfirmModal from "../../components/ConfirmModal";
 import { supabase } from "../../lib/supabase";
 import type { BottomTabSlot } from "../../lib/types";
 import {
+  toggleRequiredPaymentMethod,
+  withDefaultPaymentMethod,
+} from "../../lib/payment-methods.js";
+import { useToast } from "../../context/ToastContext";
+import {
   getBankNotificationAccessHealth,
   openBankNotificationAccessSettings,
   type NativeNotificationAccessHealth,
@@ -78,6 +83,7 @@ export default function ProfileScreen() {
     updateProfile,
   } = useUserContext();
   const { slots, updateSlots } = useTabPreferences();
+  const { showToast } = useToast();
   const hydratedProfileRef = useRef(false);
 
   const [name, setName] = useState("");
@@ -96,7 +102,7 @@ export default function ProfileScreen() {
     if (profile) {
       setName(profile.name || "");
       setOccupation(profile.occupation || "");
-      setSelectedMethods(profile.paymentMethods || []);
+      setSelectedMethods(withDefaultPaymentMethod(profile.paymentMethods));
       hydratedProfileRef.current = true;
     }
   }, [profile]);
@@ -110,13 +116,15 @@ export default function ProfileScreen() {
   }, [refreshSetup]);
 
   const toggleMethod = (id: string) => {
-    setSelectedMethods((prev) =>
-      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
-    );
+    const result = toggleRequiredPaymentMethod(selectedMethods, id);
+    if (result.blocked) {
+      showToast("Keep at least one payment method enabled", "error");
+    }
+    setSelectedMethods(result.methods);
   };
 
   useEffect(() => {
-    if (!profile || !hydratedProfileRef.current || selectedMethods.length === 0) {
+    if (!profile || !hydratedProfileRef.current) {
       return;
     }
 
@@ -494,6 +502,9 @@ export default function ProfileScreen() {
               );
             })}
           </View>
+          <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 10 }}>
+            Keep at least one payment method enabled.
+          </Text>
         </View>
       </View>
 

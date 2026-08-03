@@ -13,6 +13,10 @@ import { Separator } from "@/components/ui/separator";
 import { ProfileSetupPanel } from "@/components/profile-setup-panel";
 import { replayDashboardTutorial } from "@/components/dashboard-tutorial";
 import { PROFILE_SETUP_HASH } from "@/lib/profile-navigation";
+import {
+  toggleRequiredPaymentMethod,
+  withDefaultPaymentMethod,
+} from "@/lib/payment-methods.js";
 
 const paymentOptions = [
   { id: "bank", label: "Bank (UPI)", icon: CreditCard, color: "text-blue-500", bg: "bg-blue-500/10" },
@@ -26,6 +30,7 @@ export default function ProfilePage() {
   const [name, setName] = useState("");
   const [occupation, setOccupation] = useState("");
   const [selectedMethods, setSelectedMethods] = useState<string[]>([]);
+  const [paymentMethodNotice, setPaymentMethodNotice] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const hydratedProfileRef = useRef(false);
 
@@ -34,7 +39,7 @@ export default function ProfilePage() {
       setTimeout(() => {
         setName(profile.name);
         setOccupation(profile.occupation);
-        setSelectedMethods(profile.paymentMethods);
+        setSelectedMethods(withDefaultPaymentMethod(profile.paymentMethods));
         hydratedProfileRef.current = true;
       }, 0);
     }
@@ -62,9 +67,11 @@ export default function ProfilePage() {
   }, []);
 
   const toggleMethod = (id: string) => {
-    setSelectedMethods((prev) =>
-      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
+    const result = toggleRequiredPaymentMethod(selectedMethods, id);
+    setPaymentMethodNotice(
+      result.blocked ? "At least one payment method must remain enabled." : ""
     );
+    setSelectedMethods(result.methods);
   };
 
   useEffect(() => {
@@ -195,6 +202,7 @@ export default function ProfilePage() {
                 {paymentOptions.map((option) => (
                   <button
                     key={option.id}
+                    type="button"
                     onClick={() => toggleMethod(option.id)}
                     className={cn(
                       "relative flex flex-col items-center gap-4 rounded-[1.5rem] border-2 p-6 transition-all duration-300 group ring-offset-background",
@@ -215,6 +223,17 @@ export default function ProfilePage() {
                   </button>
                 ))}
               </div>
+              <p
+                className={cn(
+                  "text-sm",
+                  paymentMethodNotice
+                    ? "font-medium text-destructive"
+                    : "text-muted-foreground"
+                )}
+                role={paymentMethodNotice ? "alert" : undefined}
+              >
+                {paymentMethodNotice || "Keep at least one payment method enabled."}
+              </p>
             </div>
 
             <p

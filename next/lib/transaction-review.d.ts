@@ -19,3 +19,15 @@ export function getTransactionDisplayFields(value: {
   description: string;
   category: string;
 };
+
+export function getPendingReviewUpdate(value: {
+  description?: unknown;
+  category?: unknown;
+}): {
+  description: string;
+  category: string;
+};
+
+export function assertPendingReviewUpdateFields(
+  value: Record<string, unknown>
+): void;

@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assertPendingReviewUpdateFields,
   deriveTransactionReviewState,
+  getPendingReviewUpdate,
   getTransactionDisplayFields,
 } from "./transaction-review.js";
 
@@ -64,6 +66,20 @@ test("does not require an imported transaction description", () => {
     category: "transport",
     reviewStatus: "active",
   });
+});
+
+test("pending review edits only keep category and optional description", () => {
+  assert.deepEqual(
+    getPendingReviewUpdate({ category: " transport ", description: " " }),
+    { category: "transport", description: "" }
+  );
+  assert.doesNotThrow(() =>
+    assertPendingReviewUpdateFields({ category: "transport", description: "" })
+  );
+  assert.throws(
+    () => assertPendingReviewUpdateFields({ category: "transport", amount: 50 }),
+    /only update category and description/
+  );
 });
 
 test("uses pending display labels without writing placeholders into stored fields", () => {

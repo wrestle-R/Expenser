@@ -128,6 +128,14 @@ test("parses A/C, INR, slash dates, 12-hour time, and no available balance", () 
   assert.equal(parsed?.occurredAt, "2026-07-06T14:34:00.000Z");
 });
 
+test("preserves a zero available balance", () => {
+  const result = parseBankNotification(
+    "A/c *4280 Debited Rs:10.00 on 03-08-2026 12:00:00 Avl Bal Rs:0.00 -Union Bank of India"
+  );
+  assert.equal(result?.kind, "transaction");
+  assert.equal(result.parsed.availableBalance, 0);
+});
+
 test("parses YES Bank card debit using notification capture time", () => {
   const result = parseBankNotification(yesBankPrepaid, {
     sender: "VM-YESBNK",

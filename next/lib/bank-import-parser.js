@@ -7,9 +7,11 @@ function normalizeBankMessage(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-function parseAmount(value) {
+function parseAmount(value, allowZero = false) {
   const amount = Number(String(value).replace(/,/g, ""));
-  return Number.isFinite(amount) && amount > 0 ? amount : null;
+  return Number.isFinite(amount) && (allowZero ? amount >= 0 : amount > 0)
+    ? amount
+    : null;
 }
 
 function parseIndianDate(datePart, timePart, meridiem, capturedAt) {
@@ -193,7 +195,7 @@ function parseFinancialTransaction(message, context = {}) {
   const referenceNumber = extractReference(text);
   const type = /^(?:debited|debit|dr|spent|paid|withdrawn|autopay)$/i.test(direction[1]) ? "expense" : "income";
   const accountSuffix = normalizeAccountSuffix(accountMatch?.[1]);
-  const availableBalance = balanceMatch ? parseAmount(balanceMatch[1]) : null;
+  const availableBalance = balanceMatch ? parseAmount(balanceMatch[1], true) : null;
   const bankName = inferBankName(text, context.sender);
 
   return {

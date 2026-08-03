@@ -32,6 +32,10 @@ export function getNotificationAccessHealth(lookbackMs) {
     recentReadCount: 0,
     lastReadAt: null,
     hasRecentReads: false,
+    defaultSmsPackage: null,
+    queuedCandidateCount: 0,
+    queuedReviewEventCount: 0,
+    legacyParsedCount: 0,
   };
 }
 

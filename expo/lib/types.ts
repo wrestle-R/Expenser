@@ -92,7 +92,7 @@ export interface CreateTransactionPayload {
 }
 
 export interface BankReviewEvent {
-  bankName: string;
+  bankName: string | null;
   eventType: string;
   amount: number | null;
   accountSuffix: string | null;
@@ -104,17 +104,39 @@ export interface BankReviewEvent {
   capturedAt?: string;
   notificationPackage?: string;
   parser?: "regex" | "groq" | string;
+  rawMessage?: string;
+  sender?: string | null;
+  sourcePackage?: string;
+  sourceKey?: string;
+  failureReason?: string;
+}
+
+export interface BankImportStatus {
+  queuedCandidates: number;
+  queuedNativeReviews: number;
+  localReviews: number;
+  retrying: boolean;
 }
 
 export type ParsedBankNotificationResponse =
-  | { kind: "unparsed"; parser?: "regex" | "groq" | string }
+  | {
+      kind: "unparsed";
+      reason: string;
+      parser: "regex" | "groq" | string;
+    }
+  | {
+      kind: "non_transaction";
+      reason: string;
+      parser: "regex" | "groq" | string;
+    }
   | {
       kind: "transaction";
       parsed: {
-        bankName: string;
-        accountSuffix: string;
+        bankName: string | null;
+        accountSuffix: string | null;
         type: TransactionType;
         amount: number;
+        currency: "INR";
         occurredAt: string;
         referenceNumber: string | null;
         payee: string | null;
@@ -132,6 +154,14 @@ export type ParsedBankNotificationResponse =
       importSourceKey: string;
       parser: "regex" | "groq" | string;
     };
+
+export interface NotificationEnvelope {
+  sourceKey: string;
+  sender: string | null;
+  message: string;
+  capturedAt: string;
+  sourcePackage: string;
+}
 
 export interface UpdateTransactionPayload {
   type?: TransactionType;

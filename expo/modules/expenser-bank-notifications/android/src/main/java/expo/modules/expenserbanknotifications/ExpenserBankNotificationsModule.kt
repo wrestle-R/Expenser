@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.provider.Settings
+import android.provider.Telephony
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -43,7 +44,8 @@ class ExpenserBankNotificationsModule : Module() {
 
     Function("getNotificationAccessHealth") { lookbackMs: Double? ->
       val reads = BankNotificationStore.getRecentReads(context)
-      val cutoff = System.currentTimeMillis() - (lookbackMs ?: FOUR_HOURS_MS.toDouble()).toLong()
+      val nowMs = System.currentTimeMillis()
+      val healthLookbackMs = (lookbackMs ?: FOUR_HOURS_MS.toDouble()).toLong()
       var recentReadCount = 0
       var lastReadAt: String? = null
       var lastReadAtMs = 0L
@@ -51,7 +53,11 @@ class ExpenserBankNotificationsModule : Module() {
       for (index in 0 until reads.length()) {
         val item = reads.optJSONObject(index) ?: continue
         val capturedAtMs = item.optLong("capturedAtMs", 0L)
-        if (capturedAtMs >= cutoff) {
+        if (NotificationAccessHealthPolicy.isRecent(
+            capturedAtMs,
+            nowMs,
+            healthLookbackMs
+          )) {
           recentReadCount += 1
         }
         if (capturedAtMs > lastReadAtMs) {
@@ -64,7 +70,11 @@ class ExpenserBankNotificationsModule : Module() {
         "settingEnabled" to isNotificationAccessEnabled(),
         "recentReadCount" to recentReadCount,
         "lastReadAt" to lastReadAt,
-        "hasRecentReads" to (recentReadCount > 0)
+        "hasRecentReads" to (recentReadCount > 0),
+        "defaultSmsPackage" to Telephony.Sms.getDefaultSmsPackage(context),
+        "queuedCandidateCount" to BankNotificationStore.getRawCandidates(context).length(),
+        "queuedReviewEventCount" to BankNotificationStore.getReviewEvents(context).length(),
+        "legacyParsedCount" to BankNotificationStore.getQueued(context).length()
       )
     }
 
@@ -112,8 +122,12 @@ class ExpenserBankNotificationsModule : Module() {
         items.add(
           mapOf(
             "sourceKey" to item.optString("sourceKey"),
+            "sender" to item.nullableString("sender"),
             "message" to item.optString("message"),
             "capturedAt" to item.optString("capturedAt"),
+            "sourcePackage" to item.optString("sourcePackage").ifBlank {
+              item.optString("notificationPackage")
+            },
             "notificationPackage" to item.optString("notificationPackage")
           )
         )

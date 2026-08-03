@@ -19,6 +19,7 @@ import type { CreateTransactionPayload } from "./types";
 export type NativeBankImport = QueuedBankImport;
 export type NativeNotificationAccessHealth = NotificationAccessHealth;
 export type NativeRawBankCandidate = QueuedRawBankCandidate;
+export type NativeNotificationEnvelope = QueuedRawBankCandidate;
 export type NativeBankReviewEvent = QueuedBankReviewEvent;
 export { addBankImportQueuedListener };
 
@@ -52,6 +53,14 @@ export function clearQueuedRawBankImportCandidates(sourceKeys: string[]) {
 
 export function getQueuedNativeBankReviewEvents(): NativeBankReviewEvent[] {
   return getQueuedBankReviewEvents();
+}
+
+export function getBankImportQueueSnapshot() {
+  return {
+    parsed: getQueuedImports().length,
+    candidates: getQueuedRawBankCandidates().length,
+    reviewEvents: getQueuedBankReviewEvents().length,
+  };
 }
 
 export function clearQueuedNativeBankReviewEvents(sourceKeys: string[]) {

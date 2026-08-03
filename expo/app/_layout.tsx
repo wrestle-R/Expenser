@@ -178,6 +178,10 @@ function InnerLayout() {
                 headerTintColor: isDark ? Colors.dark.text : Colors.light.text,
               }}
               />
+            <Stack.Screen
+              name="notification-reviews"
+              options={{ headerShown: false, presentation: "modal" }}
+            />
               </Stack>
             </AuthGuard>
           </ToastProvider>

@@ -9,6 +9,8 @@ expo-env.d.ts
 .expo-shared/
 node_modules/
 android/
+!modules/expenser-bank-notifications/android/
+!modules/expenser-bank-notifications/android/**
 ios/
 dist/
 web-build/

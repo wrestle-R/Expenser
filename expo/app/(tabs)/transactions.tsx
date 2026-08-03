@@ -7,11 +7,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   TextInput,
-  Modal,
-  TouchableWithoutFeedback,
   Switch,
-  KeyboardAvoidingView,
-  Platform,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -29,6 +25,7 @@ import { api } from "../../lib/api";
 import { formatCurrency, formatDate } from "../../lib/utils";
 import { ITransaction, IUserCategory, PaymentMethod, TransactionType } from "../../lib/types";
 import ConfirmModal from "../../components/ConfirmModal";
+import ResponsiveModal from "../../components/ResponsiveModal";
 import { getTransactionDisplayFields } from "../../lib/transaction-review";
 
 const PAGE_SIZE = 10;
@@ -55,6 +52,7 @@ const INCOME_CATEGORIES = [
 ];
 
 type EditMode = "edit" | "review";
+type ActiveTransactionModal = "none" | "edit" | "delete";
 
 type CategoryOption = {
   id: string;
@@ -126,12 +124,8 @@ export default function TransactionsScreen() {
   const [page, setPage] = useState(1);
   const [deleting, setDeleting] = useState<string | null>(null);
   
-  // Delete confirmation modal
-  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [activeModal, setActiveModal] = useState<ActiveTransactionModal>("none");
   const [transactionToDelete, setTransactionToDelete] = useState<ITransaction | null>(null);
-  
-  // Edit modal
-  const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingTxn, setEditingTxn] = useState<ITransaction | null>(null);
   const [editMode, setEditMode] = useState<EditMode>("edit");
   const [editType, setEditType] = useState<TransactionType>("expense");
@@ -180,7 +174,7 @@ export default function TransactionsScreen() {
 
   const handleDeletePress = (txn: ITransaction) => {
     setTransactionToDelete(txn);
-    setDeleteModalVisible(true);
+    setActiveModal("delete");
   };
 
   const handleConfirmDelete = async () => {
@@ -192,13 +186,14 @@ export default function TransactionsScreen() {
       // Error handled
     } finally {
       setDeleting(null);
-      setDeleteModalVisible(false);
+      setActiveModal("none");
       setTransactionToDelete(null);
     }
   };
 
   const closeEditModal = () => {
-    setEditModalVisible(false);
+    if (saving) return;
+    setActiveModal("none");
     setEditingTxn(null);
     setEditMode("edit");
     setEditCategory("");
@@ -214,7 +209,7 @@ export default function TransactionsScreen() {
     setEditPaymentMethod(txn.paymentMethod);
     setEditSplitAmount((txn.splitAmount || 0).toString());
     setEditIsSplit((txn.splitAmount || 0) > 0);
-    setEditModalVisible(true);
+    setActiveModal("edit");
   };
 
   useEffect(() => {
@@ -270,7 +265,10 @@ export default function TransactionsScreen() {
         paymentMethod: editPaymentMethod,
         splitAmount: editIsSplit ? parseFloat(editSplitAmount || "0") : 0,
       });
-      closeEditModal();
+      setActiveModal("none");
+      setEditingTxn(null);
+      setEditMode("edit");
+      setEditCategory("");
     } catch (error: any) {
       console.error("Failed to update:", error);
       showToast(error?.message || "Failed to update transaction", "error");
@@ -603,9 +601,9 @@ export default function TransactionsScreen() {
 
       {/* Delete Confirmation Modal */}
       <ConfirmModal
-        visible={deleteModalVisible}
+        visible={activeModal === "delete"}
         onClose={() => {
-          setDeleteModalVisible(false);
+          setActiveModal("none");
           setTransactionToDelete(null);
         }}
         onConfirm={handleConfirmDelete}
@@ -623,38 +621,12 @@ export default function TransactionsScreen() {
       />
 
       {/* Edit Transaction Modal */}
-      <Modal
-        visible={editModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeEditModal}
+      <ResponsiveModal
+        visible={activeModal === "edit"}
+        onClose={closeEditModal}
+        loading={saving}
+        contentStyle={{ padding: 20 }}
       >
-        <TouchableWithoutFeedback onPress={closeEditModal}>
-          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 20 }}>
-            {/* Blur overlay */}
-            <View
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(255, 255, 255, 0.7)",
-              }}
-            />
-            <TouchableWithoutFeedback>
-              <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
-                <View
-                  style={{
-                    width: 340,
-                    maxHeight: "90%",
-                    backgroundColor: isDark ? "rgba(30, 30, 40, 0.98)" : "rgba(255, 255, 255, 0.98)",
-                    borderRadius: 20,
-                    padding: 20,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                  }}
-                >
                   {/* Header */}
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                     <View style={{ flex: 1, paddingRight: 12 }}>
@@ -672,7 +644,11 @@ export default function TransactionsScreen() {
                     </TouchableOpacity>
                   </View>
 
-                  <ScrollView showsVerticalScrollIndicator={false}>
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={{ paddingBottom: 4 }}
+                  >
                     {editMode === "review" && (
                       <View
                         style={{
@@ -905,8 +881,11 @@ export default function TransactionsScreen() {
                       style={{ alignItems: "center", padding: 14, marginTop: 8 }}
                       onPress={() => {
                         if (!editingTxn) return;
-                        closeEditModal();
-                        handleDeletePress(editingTxn);
+                        const transaction = editingTxn;
+                        setEditingTxn(null);
+                        setEditMode("edit");
+                        setEditCategory("");
+                        handleDeletePress(transaction);
                       }}
                     >
                       <Text style={{ color: colors.error, fontSize: 15, fontWeight: "600" }}>
@@ -914,12 +893,7 @@ export default function TransactionsScreen() {
                       </Text>
                     </TouchableOpacity>
                   </ScrollView>
-                </View>
-              </KeyboardAvoidingView>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+      </ResponsiveModal>
     </View>
   );
 }

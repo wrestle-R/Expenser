@@ -274,19 +274,20 @@ export async function getStoredBankReviewEvents(): Promise<BankReviewEvent[]> {
   }
 }
 
-export async function addStoredBankReviewEvent(event: BankReviewEvent): Promise<void> {
+export async function addStoredBankReviewEvent(event: BankReviewEvent): Promise<boolean> {
   try {
     const existing = await getStoredBankReviewEvents();
-    if (existing.some((item) => item.importSourceKey === event.importSourceKey)) {
-      return;
-    }
-
     await AsyncStorage.setItem(
       KEYS.BANK_REVIEW_EVENTS,
-      JSON.stringify([event, ...existing].slice(0, 50))
+      JSON.stringify([
+        event,
+        ...existing.filter((item) => item.importSourceKey !== event.importSourceKey),
+      ].slice(0, 50))
     );
+    return true;
   } catch (error) {
     console.error("[Storage] Error adding bank review event:", error);
+    return false;
   }
 }
 
@@ -580,6 +581,7 @@ export async function clearAllData(): Promise<void> {
       KEYS.PENDING_PROFILE,
       KEYS.LAST_SYNC,
       KEYS.LOCAL_BALANCES,
+      KEYS.BANK_REVIEW_EVENTS,
       KEYS.OUTBOX,
       KEYS.OUTBOX_MIGRATED,
     ]);

@@ -15,7 +15,7 @@ object BankNotificationStore {
   private const val RAW_CANDIDATES_KEY = "raw_bank_candidates"
   private const val REVIEW_EVENTS_KEY = "bank_review_events"
   private const val MAX_RECENT_READS = 200
-  private const val MAX_RAW_CANDIDATES = 50
+  private const val MAX_RAW_CANDIDATES = 100
   private const val MAX_REVIEW_EVENTS = 50
 
   fun recordNotificationRead(context: Context, packageName: String) {
@@ -58,13 +58,24 @@ object BankNotificationStore {
     clearBySourceKey(context, QUEUE_KEY, sourceKeys)
   }
 
-  fun enqueueRawCandidate(context: Context, message: String, packageName: String) {
-    val now = System.currentTimeMillis()
-    val sourceKey = "union-bank:raw:${sha256(message)}"
+  fun enqueueRawCandidate(
+    context: Context,
+    sender: String?,
+    message: String,
+    packageName: String,
+    capturedAtMs: Long = System.currentTimeMillis(),
+    stableSourceId: String? = null
+  ) {
+    val safeCapturedAtMs = if (capturedAtMs > 0) capturedAtMs else System.currentTimeMillis()
+    val sourceIdentity = stableSourceId?.takeIf(String::isNotBlank)
+      ?: "${sender.orEmpty()}|$message"
+    val sourceKey = "sms:raw:${sha256("$packageName|$sourceIdentity")}"
     val candidate = JSONObject()
       .put("sourceKey", sourceKey)
+      .put("sender", sender ?: JSONObject.NULL)
       .put("message", message)
-      .put("capturedAt", isoFormat().format(now))
+      .put("capturedAt", isoFormat().format(safeCapturedAtMs))
+      .put("sourcePackage", packageName)
       .put("notificationPackage", packageName)
 
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -96,10 +107,10 @@ object BankNotificationStore {
   ) {
     val now = System.currentTimeMillis()
     val nextSourceKey = sourceKey ?: event.optString("importSourceKey").ifBlank {
-      UnionBankNotificationParser.buildReviewEventKey(event)
+      "sms:event:${sha256(event.toString())}"
     }
     val item = JSONObject(event.toString())
-      .put("importSource", event.optString("importSource", "union_bank_event"))
+      .put("importSource", event.optString("importSource", "sms_notification_review"))
       .put("importSourceKey", nextSourceKey)
       .put("capturedAt", event.optString("capturedAt").ifBlank { isoFormat().format(now) })
       .put("notificationPackage", packageName)
@@ -148,25 +159,19 @@ object BankNotificationStore {
   }
 
   private fun containsSourceKey(queue: JSONArray, sourceKey: String): Boolean {
-    if (sourceKey.isBlank()) {
-      return false
-    }
-
+    val existingSourceKeys = mutableListOf<String>()
     for (index in 0 until queue.length()) {
       val item = queue.optJSONObject(index)
       val itemKey = item?.optString("importSourceKey").takeUnless { it.isNullOrBlank() }
         ?: item?.optString("sourceKey")
-      if (itemKey == sourceKey) {
-        return true
-      }
+      if (!itemKey.isNullOrBlank()) existingSourceKeys.add(itemKey)
     }
-
-    return false
+    return !QueueRetentionPolicy.shouldEnqueue(existingSourceKeys, sourceKey)
   }
 
   private fun trimToLatest(items: JSONArray, maxItems: Int): JSONArray {
     val next = JSONArray()
-    val start = maxOf(0, items.length() - maxItems)
+    val start = QueueRetentionPolicy.firstRetainedIndex(items.length(), maxItems)
     for (index in start until items.length()) {
       next.put(items.opt(index))
     }

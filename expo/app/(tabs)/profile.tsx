@@ -9,7 +9,7 @@ import {
   RefreshControl,
   Switch,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -43,6 +43,10 @@ const EMPTY_ACCESS_HEALTH: NativeNotificationAccessHealth = {
   recentReadCount: 0,
   lastReadAt: null,
   hasRecentReads: false,
+  defaultSmsPackage: null,
+  queuedCandidateCount: 0,
+  queuedReviewEventCount: 0,
+  legacyParsedCount: 0,
 };
 
 function formatLastRead(value: string | null) {
@@ -69,6 +73,8 @@ export default function ProfileScreen() {
     isOnline,
     manualRefresh,
     transactions,
+    bankReviewEvents,
+    bankImportStatus,
     updateProfile,
   } = useUserContext();
   const { slots, updateSlots } = useTabPreferences();
@@ -179,6 +185,10 @@ export default function ProfileScreen() {
     }
 
     router.push("/transactions");
+  };
+
+  const openNotificationReview = () => {
+    router.push("/notification-reviews" as Href);
   };
 
   if (loading) {
@@ -679,13 +689,54 @@ export default function ProfileScreen() {
           Permission: {accessHealth.settingEnabled ? "enabled" : "needs attention"}
         </Text>
         <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Listener health: {accessHealth.hasRecentReads ? "working" : "waiting for a bank notification"}
+          Messages activity: {accessHealth.hasRecentReads ? "detected" : "waiting for a Messages notification"}
         </Text>
         <Text style={{ color: colors.textMuted, marginTop: 6 }}>
           Last notification read: {formatLastRead(accessHealth.lastReadAt)}
         </Text>
         <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Needs a category: {pendingReviewTransactions.length}
+          Default Messages app: {accessHealth.defaultSmsPackage || "not detected"}
+        </Text>
+        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
+          Queue: {bankImportStatus.queuedCandidates} waiting
+          {bankImportStatus.retrying ? " · retrying" : ""}
+          {` · ${bankImportStatus.queuedNativeReviews} native review`}
+        </Text>
+        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
+          Review inbox: {bankReviewEvents.length}
+          {` · ${pendingReviewTransactions.length} need a category`}
+        </Text>
+        <TouchableOpacity
+          style={{
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: colors.border,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 14,
+          }}
+          onPress={openNotificationReview}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", flex: 1, marginRight: 12 }}>
+            <Ionicons name="mail-unread-outline" size={18} color={colors.primary} />
+            <View style={{ marginLeft: 10, flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: "600" }}>
+                Notification review inbox
+              </Text>
+              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
+                {bankReviewEvents.length > 0
+                  ? `${bankReviewEvents.length} ${bankReviewEvents.length === 1 ? "message" : "messages"} need a decision`
+                  : "No uncertain messages"}
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+        <Text style={{ color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: 12 }}>
+          Only notifications from the phone&apos;s default SMS app are inspected. Message bodies stay on this phone unless a transaction-like message needs parsing.
         </Text>
         <TouchableOpacity
           style={{

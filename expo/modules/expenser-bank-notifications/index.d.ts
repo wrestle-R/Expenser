@@ -19,17 +19,25 @@ export type NotificationAccessHealth = {
   recentReadCount: number;
   lastReadAt: string | null;
   hasRecentReads: boolean;
+  defaultSmsPackage: string | null;
+  queuedCandidateCount: number;
+  queuedReviewEventCount: number;
+  legacyParsedCount: number;
 };
 
-export type QueuedRawBankCandidate = {
+export type NotificationEnvelope = {
   sourceKey: string;
+  sender: string | null;
   message: string;
   capturedAt: string;
+  sourcePackage: string;
   notificationPackage: string;
 };
 
+export type QueuedRawBankCandidate = NotificationEnvelope;
+
 export type QueuedBankReviewEvent = {
-  bankName: string;
+  bankName: string | null;
   eventType: string;
   amount: number | null;
   accountSuffix: string | null;

@@ -12,6 +12,7 @@ import {
   IUserCategory,
   BalanceReconciliationAlert,
   ParsedBankNotificationResponse,
+  NotificationEnvelope,
 } from "./types";
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -165,10 +166,12 @@ class ApiService {
     });
   }
 
-  async parseBankNotification(message: string): Promise<ParsedBankNotificationResponse> {
+  async parseBankNotification(
+    envelope: NotificationEnvelope
+  ): Promise<ParsedBankNotificationResponse> {
     return this.request<ParsedBankNotificationResponse>("/api/bank-imports/parse", {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(envelope),
     });
   }
 

@@ -14,7 +14,9 @@ import { supabase } from "../lib/supabase";
 import { syncService } from "../lib/sync";
 import {
   addStoredBankReviewEvent,
+  clearStoredBankReviewEvents,
   enqueueOutbox,
+  getStoredBankReviewEvents,
   getStoredProfile,
   getStoredStealthMode,
   getStoredTransactions,
@@ -24,6 +26,8 @@ import {
   setStoredWorkflows,
 } from "../lib/storage";
 import type {
+  BankImportStatus,
+  BankReviewEvent,
   CreateTransactionPayload,
   CreateWorkflowPayload,
   ITransaction,
@@ -39,11 +43,15 @@ import {
   bankImportToTransactionPayload,
   addBankImportQueuedListener,
   clearQueuedBankImports,
+  clearQueuedNativeBankReviewEvents,
   clearQueuedRawBankImportCandidates,
+  getBankImportQueueSnapshot,
   getQueuedBankImports,
+  getQueuedNativeBankReviewEvents,
   getQueuedRawBankImportCandidates,
 } from "../lib/bank-imports";
 import { getPendingReviewStatus } from "../lib/transaction-review";
+import { processBankImportCandidate } from "../lib/bank-import-processing";
 
 function dedupeTransactions(items: ITransaction[]) {
   const deduped = new Map<string, ITransaction>();
@@ -81,7 +89,7 @@ function parsedResponsePayload(
     date: response.parsed.occurredAt,
     importSource: response.importSource,
     importSourceKey: response.importSourceKey,
-    importedAccountSuffix: response.parsed.accountSuffix,
+    importedAccountSuffix: response.parsed.accountSuffix ?? undefined,
     importedBankBalance: response.parsed.availableBalance ?? undefined,
     importedBankReference: response.parsed.referenceNumber ?? undefined,
     importedBankConfidence: response.parsed.confidence,
@@ -149,6 +157,8 @@ interface UserContextType {
   profile: IUserProfile | null;
   transactions: ITransaction[];
   workflows: IWorkflow[];
+  bankReviewEvents: BankReviewEvent[];
+  bankImportStatus: BankImportStatus;
   loading: boolean;
   syncing: boolean;
   isOnline: boolean;
@@ -163,6 +173,8 @@ interface UserContextType {
   deleteTransaction: (id: string) => Promise<void>;
   addWorkflow: (data: CreateWorkflowPayload) => Promise<void>;
   deleteWorkflow: (id: string) => Promise<void>;
+  dismissBankReviewEvent: (sourceKey: string) => Promise<void>;
+  retryBankReviewEvent: (sourceKey: string) => Promise<void>;
   getBalance: (method: PaymentMethod) => number;
   getTotalBalance: () => number;
 }
@@ -175,23 +187,40 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<IUserProfile | null>(null);
   const [transactions, setTransactions] = useState<ITransaction[]>([]);
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
+  const [bankReviewEvents, setBankReviewEvents] = useState<BankReviewEvent[]>([]);
+  const [bankImportStatus, setBankImportStatus] = useState<BankImportStatus>({
+    queuedCandidates: 0,
+    queuedNativeReviews: 0,
+    localReviews: 0,
+    retrying: false,
+  });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(syncService.isOnlineSync());
   const bankImportDrainRef = useRef<(() => void) | null>(null);
   const rawRetryAttemptRef = useRef(0);
   const rawRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDrainingBankImportsRef = useRef(false);
   const isSignedIn = Boolean(session?.user);
 
   const loadLocalData = useCallback(async () => {
-    const [storedProfile, storedTransactions, storedWorkflows] = await Promise.all([
+    const [storedProfile, storedTransactions, storedWorkflows, storedReviewEvents] = await Promise.all([
       getStoredProfile(),
       getStoredTransactions(),
       getStoredWorkflows(),
+      getStoredBankReviewEvents(),
     ]);
     setProfile(storedProfile);
     setTransactions(dedupeTransactions(storedTransactions));
     setWorkflows(dedupeWorkflows(storedWorkflows));
+    setBankReviewEvents(storedReviewEvents);
+    const queue = getBankImportQueueSnapshot();
+    setBankImportStatus((current) => ({
+      ...current,
+      queuedCandidates: queue.candidates,
+      queuedNativeReviews: queue.reviewEvents,
+      localReviews: storedReviewEvents.length,
+    }));
     return Boolean(storedProfile || storedTransactions.length || storedWorkflows.length);
   }, []);
 
@@ -387,72 +416,170 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [transactions]);
 
   const importQueuedBankNotifications = useCallback(async () => {
-    if (!isSignedIn || !profile) return;
+    if (!isSignedIn || !profile || isDrainingBankImportsRef.current) return;
+    isDrainingBankImportsRef.current = true;
 
-    const importedKeys: string[] = [];
-    for (const item of getQueuedBankImports()) {
-      try {
-        await addTransaction(bankImportToTransactionPayload(item));
-        importedKeys.push(item.importSourceKey);
-      } catch (error) {
-        console.error("[Bank import] Failed parsed candidate:", error);
+    try {
+      const importedKeys: string[] = [];
+      for (const item of getQueuedBankImports()) {
+        try {
+          await addTransaction(bankImportToTransactionPayload(item));
+          importedKeys.push(item.importSourceKey);
+        } catch (error) {
+          console.error("[Bank import] Failed parsed candidate:", error);
+        }
       }
-    }
-    if (importedKeys.length) clearQueuedBankImports(importedKeys);
+      if (importedKeys.length) clearQueuedBankImports(importedKeys);
 
-    const clearedRawKeys: string[] = [];
-    let rawFailure = false;
-    for (const item of getQueuedRawBankImportCandidates()) {
-      try {
-        const response = await api.parseBankNotification(item.message);
-        if (response.kind === "transaction") {
-          await addTransaction(parsedResponsePayload(response));
-        } else if (response.kind === "review_event") {
-          await addStoredBankReviewEvent({
+      let rawFailure = false;
+      const clearedNativeReviewKeys: string[] = [];
+      for (const item of getQueuedNativeBankReviewEvents()) {
+        const saved = await addStoredBankReviewEvent(item);
+        if (saved) {
+          clearedNativeReviewKeys.push(item.importSourceKey);
+        } else {
+          rawFailure = true;
+        }
+      }
+      if (clearedNativeReviewKeys.length) {
+        clearQueuedNativeBankReviewEvents(clearedNativeReviewKeys);
+      }
+
+      const clearedRawKeys: string[] = [];
+      for (const item of getQueuedRawBankImportCandidates()) {
+        try {
+          const envelope = {
+            sourceKey: item.sourceKey,
+            sender: item.sender,
+            message: item.message,
+            capturedAt: item.capturedAt,
+            sourcePackage: item.sourcePackage || item.notificationPackage,
+          };
+          await processBankImportCandidate({
+            candidate: envelope,
+            parse: api.parseBankNotification.bind(api),
+            queueTransaction: async (response) => {
+              await addTransaction(parsedResponsePayload(response));
+            },
+            saveReview: async (response) => {
+              if (response.kind === "review_event") {
+                return addStoredBankReviewEvent({
+                  ...response.event,
+                  importSource: response.importSource,
+                  importSourceKey: response.importSourceKey,
+                  capturedAt: item.capturedAt,
+                  notificationPackage: item.notificationPackage,
+                  parser: response.parser,
+                  rawMessage: item.message,
+                  sender: item.sender,
+                  sourcePackage: item.sourcePackage,
+                  sourceKey: item.sourceKey,
+                });
+              }
+              return addStoredBankReviewEvent({
+                bankName: null,
+                eventType: "unparsed_sms_notification",
+                amount: null,
+                accountSuffix: null,
+                occurredAt: item.capturedAt,
+                summary: "Transaction-like message needs review",
+                confidence: "low",
+                importSource: "sms_notification_review",
+                importSourceKey: `sms:review:${item.sourceKey}`,
+                capturedAt: item.capturedAt,
+                notificationPackage: item.notificationPackage,
+                parser: response.parser,
+                rawMessage: item.message,
+                sender: item.sender,
+                sourcePackage: item.sourcePackage,
+                sourceKey: item.sourceKey,
+                failureReason: response.reason,
+              });
+            },
+          });
+          clearedRawKeys.push(item.sourceKey);
+        } catch (error) {
+          rawFailure = true;
+          console.error("[Bank import] Raw candidate retained for retry:", error);
+        }
+      }
+      if (clearedRawKeys.length) clearQueuedRawBankImportCandidates(clearedRawKeys);
+      if (rawFailure) {
+        rawRetryAttemptRef.current += 1;
+        const delay = Math.min(60_000, 2_000 * 2 ** (rawRetryAttemptRef.current - 1));
+        if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current);
+        rawRetryTimerRef.current = setTimeout(
+          () => bankImportDrainRef.current?.(),
+          delay
+        );
+      } else {
+        rawRetryAttemptRef.current = 0;
+        if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current);
+        rawRetryTimerRef.current = null;
+      }
+      await loadLocalData();
+      const queue = getBankImportQueueSnapshot();
+      setBankImportStatus({
+        queuedCandidates: queue.candidates,
+        queuedNativeReviews: queue.reviewEvents,
+        localReviews: (await getStoredBankReviewEvents()).length,
+        retrying: rawFailure,
+      });
+    } finally {
+      isDrainingBankImportsRef.current = false;
+    }
+  }, [addTransaction, isSignedIn, loadLocalData, profile]);
+
+  const dismissBankReviewEvent = useCallback(async (sourceKey: string) => {
+    await clearStoredBankReviewEvents([sourceKey]);
+    await loadLocalData();
+  }, [loadLocalData]);
+
+  const retryBankReviewEvent = useCallback(async (sourceKey: string) => {
+    const event = (await getStoredBankReviewEvents()).find(
+      (item) => item.importSourceKey === sourceKey
+    );
+    if (!event?.rawMessage || !event.sourceKey) {
+      throw new Error("This review item does not contain a retryable message.");
+    }
+    const response = await api.parseBankNotification({
+      sourceKey: event.sourceKey,
+      sender: event.sender ?? null,
+      message: event.rawMessage,
+      capturedAt: event.capturedAt ?? new Date().toISOString(),
+      sourcePackage: event.sourcePackage ?? event.notificationPackage ?? "",
+    });
+    if (response.kind === "transaction") {
+      await addTransaction(parsedResponsePayload(response));
+      await clearStoredBankReviewEvents([sourceKey]);
+    } else if (response.kind === "non_transaction") {
+      await clearStoredBankReviewEvents([sourceKey]);
+    } else {
+      const nextEvent: BankReviewEvent = response.kind === "review_event"
+        ? {
             ...response.event,
             importSource: response.importSource,
-            importSourceKey: response.importSourceKey,
-            capturedAt: item.capturedAt,
-            notificationPackage: item.notificationPackage,
+            importSourceKey: sourceKey,
             parser: response.parser,
-          });
-        } else {
-          await addStoredBankReviewEvent({
-            bankName: "Union Bank of India",
-            eventType: "unparsed_union_bank_notification",
-            amount: null,
-            accountSuffix: null,
-            occurredAt: item.capturedAt,
-            summary: "Union Bank notification needs review",
-            confidence: "low",
-            importSource: "union_bank_event",
-            importSourceKey: `union-bank:event:raw:${item.sourceKey}`,
-            capturedAt: item.capturedAt,
-            notificationPackage: item.notificationPackage,
+          }
+        : {
+            ...event,
             parser: response.parser,
-          });
-        }
-        clearedRawKeys.push(item.sourceKey);
-      } catch (error) {
-        rawFailure = true;
-        console.error("[Bank import] Raw candidate retained for retry:", error);
-      }
+            failureReason: response.reason,
+          };
+      const saved = await addStoredBankReviewEvent({
+        ...nextEvent,
+        rawMessage: event.rawMessage,
+        sender: event.sender,
+        sourcePackage: event.sourcePackage,
+        sourceKey: event.sourceKey,
+        capturedAt: event.capturedAt,
+        notificationPackage: event.notificationPackage,
+      });
+      if (!saved) throw new Error("Review item could not be updated.");
     }
-    if (clearedRawKeys.length) clearQueuedRawBankImportCandidates(clearedRawKeys);
-    if (rawFailure) {
-      rawRetryAttemptRef.current += 1;
-      const delay = Math.min(60_000, 2_000 * 2 ** (rawRetryAttemptRef.current - 1));
-      if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current);
-      rawRetryTimerRef.current = setTimeout(
-        () => bankImportDrainRef.current?.(),
-        delay
-      );
-    } else {
-      rawRetryAttemptRef.current = 0;
-      if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current);
-      rawRetryTimerRef.current = null;
-    }
-  }, [addTransaction, isSignedIn, profile]);
+    await loadLocalData();
+  }, [addTransaction, loadLocalData]);
 
   useEffect(() => {
     bankImportDrainRef.current = () => void importQueuedBankNotifications();
@@ -524,6 +651,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         profile,
         transactions,
         workflows,
+        bankReviewEvents,
+        bankImportStatus,
         loading,
         syncing,
         isOnline,
@@ -538,6 +667,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         deleteTransaction,
         addWorkflow,
         deleteWorkflow,
+        dismissBankReviewEvent,
+        retryBankReviewEvent,
         getBalance,
         getTotalBalance,
       }}

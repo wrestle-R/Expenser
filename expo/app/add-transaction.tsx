@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -58,24 +58,34 @@ export default function AddTransactionScreen() {
   }, [params]);
 
   // Filter payment methods based on user's profile
-  const availableMethods = paymentMethods.filter(
-    (m) => profile?.paymentMethods?.includes(m.id)
+  const availableMethods = useMemo(
+    () => paymentMethods.filter((method) => profile?.paymentMethods?.includes(method.id)),
+    [profile?.paymentMethods]
   );
 
+  useEffect(() => {
+    if (
+      availableMethods.length > 0 &&
+      !availableMethods.some((method) => method.id === paymentMethod)
+    ) {
+      setPaymentMethod(availableMethods[0].id);
+    }
+  }, [availableMethods, paymentMethod]);
+
   const handleSave = async () => {
-    if (!amount || isNaN(parseFloat(amount))) {
+    const payAmount = Number(amount);
+    if (!Number.isFinite(payAmount) || payAmount <= 0) {
       showToast("Please enter a valid amount", "error");
       return;
     }
 
     // Calculate net expense if split
-    const payAmount = parseFloat(amount || "0");
-    const split = parseFloat(splitAmount || "0");
+    const split = Number(splitAmount || "0");
     const finalSplit = isSplit ? split : 0;
 
     // Validate split amount
-    if (isSplit && finalSplit >= payAmount) {
-      showToast("Split amount must be less than total amount", "error");
+    if (isSplit && (!Number.isFinite(finalSplit) || finalSplit < 0 || finalSplit >= payAmount)) {
+      showToast("Split amount must be zero or more and less than the total", "error");
       return;
     }
 
@@ -111,7 +121,8 @@ export default function AddTransactionScreen() {
     >
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
+        keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
       >
         {/* Type Selector */}

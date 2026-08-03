@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.provider.Settings
-import android.provider.Telephony
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -71,7 +70,7 @@ class ExpenserBankNotificationsModule : Module() {
         "recentReadCount" to recentReadCount,
         "lastReadAt" to lastReadAt,
         "hasRecentReads" to (recentReadCount > 0),
-        "defaultSmsPackage" to Telephony.Sms.getDefaultSmsPackage(context),
+        "defaultSmsPackage" to DefaultSmsPackageResolver.resolve(context),
         "queuedCandidateCount" to BankNotificationStore.getRawCandidates(context).length(),
         "queuedReviewEventCount" to BankNotificationStore.getReviewEvents(context).length(),
         "legacyParsedCount" to BankNotificationStore.getQueued(context).length()

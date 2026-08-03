@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.Person
 import android.content.Intent
 import android.os.Bundle
-import android.provider.Telephony
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
@@ -12,7 +11,7 @@ class ExpenserBankNotificationListenerService : NotificationListenerService() {
   override fun onNotificationPosted(sbn: StatusBarNotification?) {
     if (sbn == null) return
 
-    val defaultSmsPackage = Telephony.Sms.getDefaultSmsPackage(applicationContext)
+    val defaultSmsPackage = DefaultSmsPackageResolver.resolve(applicationContext)
     if (!DefaultSmsSourceFilter.matches(defaultSmsPackage, sbn.packageName)) return
 
     BankNotificationStore.recordNotificationRead(applicationContext, sbn.packageName)

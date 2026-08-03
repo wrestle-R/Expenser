@@ -30,6 +30,19 @@ class FinancialSmsCandidateDetectorTest {
   }
 
   @Test
+  fun fallsBackToTheResolvedSmsHandlerWhenTelephonyIsUnavailable() {
+    assertEquals(
+      "com.google.android.apps.messaging",
+      DefaultSmsPackageResolver.choose(null, "com.google.android.apps.messaging")
+    )
+    assertEquals(
+      "com.android.messaging",
+      DefaultSmsPackageResolver.choose("com.android.messaging", "com.google.android.apps.messaging")
+    )
+    assertEquals(null, DefaultSmsPackageResolver.choose("", null))
+  }
+
+  @Test
   fun ignoresGroupSummaries() {
     val groupSummaryFlag = 0x200
     assertTrue(NotificationCapturePolicy.isGroupSummary(0x210, groupSummaryFlag))

@@ -55,7 +55,12 @@ export default function AddWorkflowScreen() {
 
   // Filter payment methods based on user's profile
   const availableMethods = useMemo(
-    () => paymentMethods.filter((method) => profile?.paymentMethods?.includes(method.id)),
+    () => {
+      const configuredMethods = profile?.paymentMethods;
+      return configuredMethods?.length
+        ? paymentMethods.filter((method) => configuredMethods.includes(method.id))
+        : paymentMethods.filter((method) => method.id === "bank");
+    },
     [profile?.paymentMethods]
   );
 

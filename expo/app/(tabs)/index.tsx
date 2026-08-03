@@ -57,7 +57,7 @@ export default function HomeScreen() {
         description: workflow.description,
         category: workflow.category,
         paymentMethod: workflow.paymentMethod,
-        splitAmount: workflow.splitAmount?.toString() || "0",
+        splitAmount: workflow.splitAmount?.toString() || "",
       },
     });
   };

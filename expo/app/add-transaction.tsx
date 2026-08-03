@@ -51,15 +51,26 @@ export default function AddTransactionScreen() {
     if (params.description) setDescription(params.description as string);
     if (params.paymentMethod)
       setPaymentMethod(params.paymentMethod as PaymentMethod);
-    if (params.splitAmount) {
-      setSplitAmount(params.splitAmount as string);
-      setIsSplit(true);
+    if (typeof params.splitAmount === "string") {
+      const workflowSplitAmount = Number(params.splitAmount);
+      if (Number.isFinite(workflowSplitAmount) && workflowSplitAmount > 0) {
+        setSplitAmount(params.splitAmount);
+        setIsSplit(true);
+      } else {
+        setSplitAmount("");
+        setIsSplit(false);
+      }
     }
   }, [params]);
 
   // Filter payment methods based on user's profile
   const availableMethods = useMemo(
-    () => paymentMethods.filter((method) => profile?.paymentMethods?.includes(method.id)),
+    () => {
+      const configuredMethods = profile?.paymentMethods;
+      return configuredMethods?.length
+        ? paymentMethods.filter((method) => configuredMethods.includes(method.id))
+        : paymentMethods.filter((method) => method.id === "bank");
+    },
     [profile?.paymentMethods]
   );
 
@@ -95,7 +106,12 @@ export default function AddTransactionScreen() {
         type,
         amount: payAmount,
         description: description.trim(),
-        category: type === "income" ? "income" : "expense",
+        category:
+          typeof params.category === "string" && params.category.trim()
+            ? params.category.trim()
+            : type === "income"
+              ? "income"
+              : "expense",
         paymentMethod,
         splitAmount: finalSplit,
       };

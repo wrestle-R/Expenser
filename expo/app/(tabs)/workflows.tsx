@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,12 +17,15 @@ import { useUserContext } from "../../context/UserContext";
 import { Colors, paymentMethodConfig } from "../../constants/theme";
 import { formatCurrency } from "../../lib/utils";
 import { IWorkflow } from "../../lib/types";
+import ConfirmModal from "../../components/ConfirmModal";
+import { useToast } from "../../context/ToastContext";
 
 export default function WorkflowsScreen() {
   const { isDark } = useTheme();
   const { isStealthMode, toggleStealthMode } = useStealthMode();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
+  const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const {
     workflows,
@@ -35,6 +37,7 @@ export default function WorkflowsScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [workflowToDelete, setWorkflowToDelete] = useState<IWorkflow | null>(null);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -52,33 +55,23 @@ export default function WorkflowsScreen() {
         description: workflow.description,
         category: workflow.category,
         paymentMethod: workflow.paymentMethod,
-        splitAmount: workflow.splitAmount?.toString() || "0",
+        splitAmount: workflow.splitAmount?.toString() || "",
       },
     });
   };
 
-  const handleDelete = async (workflow: IWorkflow) => {
-    Alert.alert(
-      "Delete Workflow",
-      `Are you sure you want to delete "${workflow.name}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setDeleting(workflow._id);
-            try {
-              await deleteWorkflow(workflow._id);
-            } catch {
-              Alert.alert("Error", "Failed to delete workflow");
-            } finally {
-              setDeleting(null);
-            }
-          },
-        },
-      ]
-    );
+  const handleConfirmDelete = async () => {
+    if (!workflowToDelete) return;
+
+    setDeleting(workflowToDelete._id);
+    try {
+      await deleteWorkflow(workflowToDelete._id);
+      setWorkflowToDelete(null);
+    } catch {
+      showToast("Failed to delete workflow", "error");
+    } finally {
+      setDeleting(null);
+    }
   };
 
   if (loading) {
@@ -359,7 +352,7 @@ export default function WorkflowsScreen() {
                           </Text>
                         </View>
 
-                        {workflow.splitAmount && workflow.splitAmount > 0 && (
+                        {(workflow.splitAmount ?? 0) > 0 && (
                           <View
                             style={{
                               backgroundColor: colors.splitwiseBg,
@@ -374,7 +367,7 @@ export default function WorkflowsScreen() {
                                 color: colors.splitwise,
                               }}
                             >
-                              Split: ₹{isStealthMode ? "••••••" : formatCurrency(workflow.splitAmount)}
+                              Split: ₹{isStealthMode ? "••••••" : formatCurrency(workflow.splitAmount ?? 0)}
                             </Text>
                           </View>
                         )}
@@ -401,7 +394,7 @@ export default function WorkflowsScreen() {
                       )}
                       <TouchableOpacity
                         style={{ padding: 8 }}
-                        onPress={() => handleDelete(workflow)}
+                        onPress={() => setWorkflowToDelete(workflow)}
                         disabled={deleting === workflow._id}
                       >
                         {deleting === workflow._id ? (
@@ -451,6 +444,19 @@ export default function WorkflowsScreen() {
         {/* Bottom spacing */}
         <View style={{ height: 32 }} />
       </ScrollView>
+
+      <ConfirmModal
+        visible={workflowToDelete !== null}
+        onClose={() => setWorkflowToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title="Delete Workflow"
+        message={`Are you sure you want to delete "${workflowToDelete?.name || "this workflow"}"?`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        confirmColor="destructive"
+        icon="trash-outline"
+        loading={deleting !== null}
+      />
     </View>
   );
 }

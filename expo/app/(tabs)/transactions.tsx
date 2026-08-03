@@ -278,7 +278,8 @@ export default function TransactionsScreen() {
   };
 
   const availableMethods = paymentMethods.filter(
-    (m) => profile?.paymentMethods?.includes(m.id)
+    (method) =>
+      profile?.paymentMethods?.includes(method.id) || method.id === editPaymentMethod
   );
   const needsCategoryCount = transactions.filter(
     (transaction) => transaction.reviewStatus === "needs_category"
@@ -556,7 +557,7 @@ export default function TransactionsScreen() {
                     {txn.type === "income" ? "+" : "-"}₹
                     {isStealthMode ? "••••••" : formatCurrency(txn.amount)}
                   </Text>
-                  {txn.splitAmount && txn.splitAmount > 0 && (
+                  {(txn.splitAmount ?? 0) > 0 && (
                     <Text
                       style={{
                         fontSize: 11,
@@ -564,7 +565,7 @@ export default function TransactionsScreen() {
                         marginTop: 2,
                       }}
                     >
-                      Split: ₹{isStealthMode ? "••••••" : formatCurrency(txn.splitAmount)}
+                      Split: ₹{isStealthMode ? "••••••" : formatCurrency(txn.splitAmount ?? 0)}
                     </Text>
                   )}
                 </View>

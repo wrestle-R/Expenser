@@ -13,6 +13,8 @@ class FinancialSmsCandidateDetectorTest {
     assertTrue(FinancialSmsCandidateDetector.isCandidate("Payment request for Rs 800 received via UPI"))
     assertTrue(FinancialSmsCandidateDetector.isCandidate("Your card payment of INR 99 failed"))
     assertTrue(FinancialSmsCandidateDetector.isCandidate("A/c XX4455 debited Rs 10. Never share OTP or PIN"))
+    assertTrue(FinancialSmsCandidateDetector.isCandidate("Union Bank of India A/c *4280 Debited Rs:30.00 on 06-08-2026 16:57:37 by Mob Bk ref no 621803008608, Fvg: Paresh R Avl Bal Rs:96.23. Not you?Call 18002333/SMS BLOCK 4280 to 8879365472"))
+    assertTrue(FinancialSmsCandidateDetector.isCandidate("Union Bank of India A/c *4280 Debited Rs:4.85 on 13-07-2026 17:31:48 by Mob Bk ref no 173147514539, Fvg: Indian R Avl Bal Rs:54.73. Not you?Call 18002333/SMS BLOCK 4280 to 8879365472z"))
   }
 
   @Test

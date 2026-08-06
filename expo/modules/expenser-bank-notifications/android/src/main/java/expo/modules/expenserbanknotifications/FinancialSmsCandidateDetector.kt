@@ -29,7 +29,7 @@ internal object NotificationAccessHealthPolicy {
 }
 
 internal object FinancialSmsCandidateDetector {
-  private val amount = Regex("(?:₹|rs\\.?|inr)\\s*[0-9][0-9,]*(?:\\.[0-9]{1,2})?", RegexOption.IGNORE_CASE)
+  private val amount = Regex("(?:₹|rs\\.?|inr)\\s*:?\\s*[0-9][0-9,]*(?:\\.[0-9]{1,2})?", RegexOption.IGNORE_CASE)
   private val action = Regex(
     "\\b(debit(?:ed)?|credit(?:ed)?|spent|paid|received|withdrawn|deposited|transferred|purchase|txn|transaction|neft|imps|upi|autopay|reversal|refund|lien|cheque|card|a/?c|account|balance|failed|declined|request)\\b",
     RegexOption.IGNORE_CASE

@@ -1,5 +1,6 @@
 import postgres from "postgres";
 import { withDefaultPaymentMethod } from "./payment-methods.js";
+import { toIsoString, toRequiredIsoString } from "./iso-date.js";
 
 const connectionString =
   process.env.SUPABASE_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -154,7 +155,7 @@ export function mapUserRow(row: UserRow, balanceRows: BalanceRow[] = []): UserPr
       const openingAt =
         !openingAtText || openingAtText.toLowerCase().includes("infinity")
           ? null
-          : new Date(rawOpeningAt as string | Date).toISOString();
+          : toIsoString(rawOpeningAt);
 
       return {
         paymentMethod,
@@ -183,8 +184,8 @@ export function mapUserRow(row: UserRow, balanceRows: BalanceRow[] = []): UserPr
     balanceAccounts,
     onboarded: row.onboarded,
     dashboardTutorialCompleted: Boolean(row.dashboard_tutorial_completed),
-    createdAt: new Date(row.created_at).toISOString(),
-    updatedAt: new Date(row.updated_at).toISOString(),
+    createdAt: toRequiredIsoString(row.created_at),
+    updatedAt: toRequiredIsoString(row.updated_at),
   };
 }
 

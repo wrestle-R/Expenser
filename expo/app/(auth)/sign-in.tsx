@@ -15,6 +15,11 @@ import { Link, useRouter } from "expo-router";
 import { useTheme } from "../../context/ThemeContext";
 import { Colors } from "../../constants/theme";
 import { supabase } from "../../lib/supabase";
+import {
+  AUTH_RATE_LIMIT_COOLDOWN_MS,
+  formatCooldown,
+  isAuthRateLimitError,
+} from "../../lib/auth-rate-limit";
 
 export default function SignInScreen() {
   const { isDark } = useTheme();
@@ -25,6 +30,11 @@ export default function SignInScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [now, setNow] = useState(0);
+
+  const cooldownRemainingMs = Math.max(0, cooldownUntil - now);
+  const cooldownActive = cooldownRemainingMs > 0;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -36,7 +46,22 @@ export default function SignInScreen() {
     });
   }, [router]);
 
+  useEffect(() => {
+    if (!cooldownActive) return;
+
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [cooldownActive]);
+
   const handleSignIn = async () => {
+    if (cooldownActive) {
+      Alert.alert(
+        "Please wait",
+        `Too many attempts. Try again in ${formatCooldown(cooldownRemainingMs)}.`
+      );
+      return;
+    }
+
     if (!email.trim() || !password) {
       Alert.alert("Error", "Please enter your email and password");
       return;
@@ -50,6 +75,10 @@ export default function SignInScreen() {
     setSubmitting(false);
 
     if (error) {
+      if (isAuthRateLimitError(error.message)) {
+        setNow(Date.now());
+        setCooldownUntil(Date.now() + AUTH_RATE_LIMIT_COOLDOWN_MS);
+      }
       Alert.alert("Sign In Failed", error.message);
       return;
     }
@@ -150,15 +179,17 @@ export default function SignInScreen() {
               paddingVertical: 16,
               alignItems: "center",
               marginTop: 8,
-              opacity: submitting ? 0.75 : 1,
+              opacity: submitting || cooldownActive ? 0.75 : 1,
             }}
             onPress={handleSignIn}
-            disabled={submitting}
+            disabled={submitting || cooldownActive}
           >
             {submitting ? (
               <ActivityIndicator color={colors.primaryForeground} />
             ) : (
-              <Text style={{ color: colors.primaryForeground, fontSize: 16, fontWeight: "600" }}>Sign In</Text>
+              <Text style={{ color: colors.primaryForeground, fontSize: 16, fontWeight: "600" }}>
+                {cooldownActive ? `Try again in ${formatCooldown(cooldownRemainingMs)}` : "Sign In"}
+              </Text>
             )}
           </TouchableOpacity>
         </View>

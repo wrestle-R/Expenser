@@ -5,12 +5,21 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Wallet } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { getAuthErrorMessage } from "@/lib/auth-form";
+import { getAuthErrorMessage, isAuthRateLimitError } from "@/lib/auth-form";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+
+const AUTH_RATE_LIMIT_COOLDOWN_MS = 3 * 60 * 1000;
+
+function formatCooldown(ms: number) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
 
 export default function SignInPage() {
   const router = useRouter();
@@ -20,6 +29,11 @@ export default function SignInPage() {
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [now, setNow] = useState(0);
+
+  const cooldownRemainingMs = Math.max(0, cooldownUntil - now);
+  const cooldownActive = cooldownRemainingMs > 0;
 
   useEffect(() => {
     const supabase = createClient();
@@ -32,8 +46,17 @@ export default function SignInPage() {
     });
   }, [router]);
 
+  useEffect(() => {
+    if (!cooldownActive) return;
+
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [cooldownActive]);
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (cooldownActive) return;
+
     setSubmitting(true);
     setError("");
 
@@ -44,6 +67,10 @@ export default function SignInPage() {
 
     setSubmitting(false);
     if (signInError) {
+      if (isAuthRateLimitError(signInError.message)) {
+        setNow(Date.now());
+        setCooldownUntil(Date.now() + AUTH_RATE_LIMIT_COOLDOWN_MS);
+      }
       setError(getAuthErrorMessage(signInError.message));
       return;
     }
@@ -122,8 +149,12 @@ export default function SignInPage() {
             </div>
           </div>
 
-          <Button className="w-full" type="submit" disabled={submitting}>
-            {submitting ? "Signing in..." : "Sign in"}
+          <Button className="w-full" type="submit" disabled={submitting || cooldownActive}>
+            {submitting
+              ? "Signing in..."
+              : cooldownActive
+                ? `Try again in ${formatCooldown(cooldownRemainingMs)}`
+                : "Sign in"}
           </Button>
 
           <p className="text-center text-sm text-muted-foreground">

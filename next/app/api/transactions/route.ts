@@ -474,7 +474,6 @@ export async function POST(req: Request) {
           select *
           from transactions
           where user_id = ${userId}
-            and import_source = ${payload.importSource}
             and import_source_key = ${payload.importSourceKey}
           limit 1
         `) as TransactionRow[];
@@ -562,7 +561,6 @@ export async function POST(req: Request) {
               select *
               from transactions
               where user_id = ${userId}
-                and import_source = ${payload.importSource}
                 and import_source_key = ${payload.importSourceKey}
               limit 1
             `) as TransactionRow[];

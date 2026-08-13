@@ -96,7 +96,6 @@ export async function GET(req: Request) {
       }
     }
 
-    await sql`select recalculate_user_balances(${authUser.userId})`;
     const balances = await loadBalanceRows(authUser.userId);
     return NextResponse.json({ profile: mapUserRow(users[0], balances) });
   } catch (error) {

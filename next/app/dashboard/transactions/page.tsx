@@ -156,7 +156,7 @@ function getCategoriesForType(
 }
 
 export default function TransactionsPage() {
-  const { profile, refreshProfile } = useUserContext();
+  const { profile } = useUserContext();
   const { isStealthMode } = useStealthMode();
   const searchParams = useSearchParams();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -290,13 +290,8 @@ export default function TransactionsPage() {
 
   const refreshTransactionPage = useCallback(async () => {
     setLoading(true);
-    await Promise.all([
-      fetchTransactions(),
-      fetchWorkflows(),
-      fetchCategories(),
-      refreshProfile(),
-    ]);
-  }, [fetchCategories, fetchTransactions, fetchWorkflows, refreshProfile]);
+    await fetchTransactions();
+  }, [fetchTransactions]);
 
   useEffect(() => {
     fetchTransactions();
@@ -499,8 +494,16 @@ export default function TransactionsPage() {
     }
 
     setEditSaving(true);
-
-    console.log("[Transactions] Updating transaction:", payload);
+    const snapshot = transactions;
+    setTransactions((current) =>
+      current.map((transaction) =>
+        transaction._id === editingTransaction._id
+          ? { ...transaction, ...payload } as Transaction
+          : transaction
+      )
+    );
+    setEditDialogOpen(false);
+    setEditingTransaction(null);
 
     try {
       const res = await fetch(`/api/transactions?id=${editingTransaction._id}`, {
@@ -510,16 +513,20 @@ export default function TransactionsPage() {
       });
 
       if (res.ok) {
-        console.log("[Transactions] Transaction updated successfully");
-        setEditDialogOpen(false);
-        setEditingTransaction(null);
-        await fetchTransactions();
-        await refreshProfile();
+        const data = await res.json();
+        setTransactions((current) =>
+          current.map((transaction) =>
+            transaction._id === data.transaction._id
+              ? data.transaction
+              : transaction
+          )
+        );
       } else {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || "Failed to update transaction");
       }
     } catch (err) {
+      setTransactions(snapshot);
       console.error("[Transactions] Error updating:", err);
       alert(err instanceof Error ? err.message : "Failed to update transaction");
     } finally {
@@ -573,7 +580,17 @@ export default function TransactionsPage() {
           : undefined,
     };
 
-    console.log("[Transactions] Adding transaction:", payload);
+    const snapshot = transactions;
+    const optimisticId = `optimistic-${crypto.randomUUID()}`;
+    const optimisticTransaction: Transaction = {
+      _id: optimisticId,
+      ...payload,
+      reviewStatus: "active",
+      date: new Date().toISOString(),
+    } as Transaction;
+    setTransactions((current) => [optimisticTransaction, ...current]);
+    resetForm();
+    setDialogOpen(false);
 
     try {
       const res = await fetch("/api/transactions", {
@@ -583,16 +600,17 @@ export default function TransactionsPage() {
       });
 
       if (res.ok) {
-        console.log("[Transactions] Transaction added successfully");
-        resetForm();
-        setDialogOpen(false);
-        await fetchTransactions();
-        await refreshProfile();
+        const data = await res.json();
+        setTransactions((current) => [
+          data.transaction,
+          ...current.filter((transaction) => transaction._id !== optimisticId),
+        ]);
       } else {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || "Failed to add transaction");
       }
     } catch (err) {
+      setTransactions(snapshot);
       console.error("[Transactions] Error adding:", err);
       alert(err instanceof Error ? err.message : "Failed to add transaction");
     } finally {
@@ -603,21 +621,26 @@ export default function TransactionsPage() {
   const handleConfirmDelete = async () => {
     if (!deleteId) return;
     setDeleting(true);
+    const snapshot = transactions;
+    const targetId = deleteId;
+    setTransactions((current) =>
+      current.filter((transaction) => transaction._id !== targetId)
+    );
+    setDeleteId(null);
     try {
-      console.log("[Transactions] Deleting transaction:", deleteId);
-      const res = await fetch(`/api/transactions?id=${deleteId}`, {
+      const res = await fetch(`/api/transactions?id=${targetId}`, {
         method: "DELETE",
       });
-      if (res.ok) {
-        console.log("[Transactions] Deleted successfully");
-        await fetchTransactions();
-        await refreshProfile();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Failed to delete transaction");
       }
     } catch (err) {
+      setTransactions(snapshot);
       console.error("[Transactions] Error deleting:", err);
+      alert(err instanceof Error ? err.message : "Failed to delete transaction");
     } finally {
       setDeleting(false);
-      setDeleteId(null);
     }
   };
 

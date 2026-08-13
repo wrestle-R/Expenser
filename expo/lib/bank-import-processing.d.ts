@@ -14,3 +14,7 @@ export function processBankImportCandidate(input: {
     candidate: NotificationEnvelope
   ) => Promise<boolean>;
 }): Promise<ParsedBankNotificationResponse["kind"]>;
+
+export function createCoalescingDrain(
+  drain: () => Promise<void>
+): () => Promise<void>;

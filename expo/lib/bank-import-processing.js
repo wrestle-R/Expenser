@@ -15,3 +15,26 @@ export async function processBankImportCandidate({
   }
   return response.kind;
 }
+
+export function createCoalescingDrain(drain) {
+  let running = null;
+  let pending = false;
+
+  return function requestDrain() {
+    if (running) {
+      pending = true;
+      return running;
+    }
+
+    running = (async () => {
+      do {
+        pending = false;
+        await drain();
+      } while (pending);
+    })().finally(() => {
+      running = null;
+    });
+
+    return running;
+  };
+}

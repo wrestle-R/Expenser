@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { processBankImportCandidate } from "./bank-import-processing.js";
+import {
+  createCoalescingDrain,
+  processBankImportCandidate,
+} from "./bank-import-processing.js";
 
 const candidate = {
   sourceKey: "sms:raw:fixture",
@@ -96,4 +99,25 @@ test("clears confirmed non-transactions without writing local data", async () =>
   });
   assert.equal(kind, "non_transaction");
   assert.equal(wrote, false);
+});
+
+test("runs one follow-up drain when notifications overlap an active drain", async () => {
+  let calls = 0;
+  let releaseFirst;
+  const firstBlocked = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const requestDrain = createCoalescingDrain(async () => {
+    calls += 1;
+    if (calls === 1) await firstBlocked;
+  });
+
+  const first = requestDrain();
+  const second = requestDrain();
+  const third = requestDrain();
+  assert.equal(calls, 1);
+
+  releaseFirst();
+  await Promise.all([first, second, third]);
+  assert.equal(calls, 2);
 });

@@ -29,6 +29,25 @@ const KEYS = {
   OUTBOX_MIGRATED: "@expenser_outbox_v2_migrated",
 };
 
+let transactionStorageQueue: Promise<unknown> = Promise.resolve();
+let outboxStorageQueue: Promise<unknown> = Promise.resolve();
+
+function enqueueStorageMutation<T>(
+  queue: "transactions" | "outbox",
+  mutation: () => Promise<T>
+) {
+  const previous =
+    queue === "transactions" ? transactionStorageQueue : outboxStorageQueue;
+  const result = previous.then(mutation, mutation);
+  const settled = result.then(
+    () => undefined,
+    () => undefined
+  );
+  if (queue === "transactions") transactionStorageQueue = settled;
+  else outboxStorageQueue = settled;
+  return result;
+}
+
 export type OutboxEntity = "transaction" | "workflow" | "profile";
 export type OutboxAction = "create" | "update" | "delete";
 
@@ -47,27 +66,38 @@ function outboxId() {
   return `outbox_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export async function getOutbox(): Promise<OutboxOperation[]> {
+async function readOutbox(): Promise<OutboxOperation[]> {
   const data = await AsyncStorage.getItem(KEYS.OUTBOX);
   return data ? JSON.parse(data) : [];
 }
 
-export async function setOutbox(operations: OutboxOperation[]) {
+async function writeOutbox(operations: OutboxOperation[]) {
   await AsyncStorage.setItem(KEYS.OUTBOX, JSON.stringify(operations));
 }
 
+export async function getOutbox(): Promise<OutboxOperation[]> {
+  await outboxStorageQueue;
+  return readOutbox();
+}
+
+export async function setOutbox(operations: OutboxOperation[]) {
+  await enqueueStorageMutation("outbox", () => writeOutbox(operations));
+}
+
 export async function removeOutboxOperation(id: string) {
-  await setOutbox((await getOutbox()).filter((operation) => operation.id !== id));
+  await enqueueStorageMutation("outbox", async () => {
+    await writeOutbox((await readOutbox()).filter((operation) => operation.id !== id));
+  });
 }
 
 export async function incrementOutboxAttempt(id: string) {
-  await setOutbox(
-    (await getOutbox()).map((operation) =>
+  await enqueueStorageMutation("outbox", async () => {
+    await writeOutbox((await readOutbox()).map((operation) =>
       operation.id === id
         ? { ...operation, attempts: operation.attempts + 1 }
         : operation
-    )
-  );
+    ));
+  });
 }
 
 export async function enqueueOutbox(input: {
@@ -76,8 +106,9 @@ export async function enqueueOutbox(input: {
   action: OutboxAction;
   payload?: Record<string, unknown>;
 }) {
-  const operations = await getOutbox();
-  const next = coalesceOutboxOperation(operations, input, () => ({
+  await enqueueStorageMutation("outbox", async () => {
+    const operations = await readOutbox();
+    const next = coalesceOutboxOperation(operations, input, () => ({
       version: 2,
       id: outboxId(),
       entity: input.entity,
@@ -87,7 +118,8 @@ export async function enqueueOutbox(input: {
       createdAt: new Date().toISOString(),
       attempts: 0,
     }));
-  await setOutbox(next);
+    await writeOutbox(next);
+  });
 }
 
 export async function migrateLegacyPendingData() {
@@ -200,6 +232,7 @@ function normalizeBottomTabSlots(value: unknown): BottomTabSlot[] {
 // === Transactions ===
 export async function getStoredTransactions(): Promise<ITransaction[]> {
   try {
+    await transactionStorageQueue;
     const data = await AsyncStorage.getItem(KEYS.TRANSACTIONS);
     return data ? JSON.parse(data) : [];
   } catch (error) {
@@ -212,9 +245,29 @@ export async function setStoredTransactions(
   transactions: ITransaction[]
 ): Promise<void> {
   try {
-    await AsyncStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(transactions));
+    await enqueueStorageMutation("transactions", () =>
+      AsyncStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(transactions))
+    );
   } catch (error) {
     console.error("[Storage] Error setting transactions:", error);
+    throw error;
+  }
+}
+
+export async function updateStoredTransactions(
+  update: (transactions: ITransaction[]) => ITransaction[] | Promise<ITransaction[]>
+): Promise<ITransaction[]> {
+  try {
+    return await enqueueStorageMutation("transactions", async () => {
+      const data = await AsyncStorage.getItem(KEYS.TRANSACTIONS);
+      const current: ITransaction[] = data ? JSON.parse(data) : [];
+      const next = await update(current);
+      await AsyncStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(next));
+      return next;
+    });
+  } catch (error) {
+    console.error("[Storage] Error updating transactions:", error);
+    throw error;
   }
 }
 

@@ -22,8 +22,8 @@ import {
   getStoredTransactions,
   getStoredWorkflows,
   setStoredProfile,
-  setStoredTransactions,
   setStoredWorkflows,
+  updateStoredTransactions,
 } from "../lib/storage";
 import type {
   BankImportStatus,
@@ -52,22 +52,16 @@ import {
 } from "../lib/bank-imports";
 import { getPendingReviewStatus } from "../lib/transaction-review";
 import { withDefaultPaymentMethod } from "../lib/payment-methods.js";
-import { processBankImportCandidate } from "../lib/bank-import-processing";
-
-function dedupeTransactions(items: ITransaction[]) {
-  const deduped = new Map<string, ITransaction>();
-  for (const item of items) {
-    if (item.deletedAt) continue;
-    const key =
-      item.importSource && item.importSourceKey
-        ? `${item.importSource}:${item.importSourceKey}`
-        : item.clientRequestId || item._id;
-    deduped.set(key, item);
-  }
-  return [...deduped.values()].sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-  );
-}
+import {
+  createCoalescingDrain,
+  processBankImportCandidate,
+} from "../lib/bank-import-processing";
+import {
+  dedupeTransactions,
+  optimisticAddTransaction,
+  optimisticDeleteTransaction,
+  optimisticUpdateTransaction,
+} from "../lib/transaction-state.js";
 
 function dedupeWorkflows(items: IWorkflow[]) {
   return [...new Map(items.map((item) => [item._id, item])).values()].sort(
@@ -118,28 +112,7 @@ function deriveBalances(profile: IUserProfile | null, transactions: ITransaction
       .filter((item) => item.paymentMethod === method && afterOpening(item, method))
       .reduce((sum, item) => sum + signedAmount(item), 0);
 
-  const bankOpening = account("bank")?.openingBalance ?? 0;
-  const bankAnchors = active
-    .filter(
-      (item) =>
-        item.paymentMethod === "bank" &&
-        item.importSource &&
-        item.importedBankBalance != null &&
-        afterOpening(item, "bank")
-    )
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  const latestAnchor = bankAnchors[0];
-  const bank = latestAnchor
-    ? Number(latestAnchor.importedBankBalance) +
-      active
-        .filter(
-          (item) =>
-            item.paymentMethod === "bank" &&
-            !item.importSource &&
-            new Date(item.date) > new Date(latestAnchor.date)
-        )
-        .reduce((sum, item) => sum + signedAmount(item), 0)
-    : bankOpening + total("bank");
+  const bank = (account("bank")?.openingBalance ?? 0) + total("bank");
   const splitReceivables = active
     .filter((item) => item.type === "expense" && afterOpening(item, "splitwise"))
     .reduce((sum, item) => sum + Math.max(0, Number(item.splitAmount || 0)), 0);
@@ -198,11 +171,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(syncService.isOnlineSync());
+  const transactionsRef = useRef<ITransaction[]>([]);
   const bankImportDrainRef = useRef<(() => void) | null>(null);
   const rawRetryAttemptRef = useRef(0);
   const rawRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isDrainingBankImportsRef = useRef(false);
   const isSignedIn = Boolean(session?.user);
+
+  const setTransactionSnapshot = useCallback((next: ITransaction[]) => {
+    transactionsRef.current = next;
+    setTransactions(next);
+  }, []);
 
   const loadLocalData = useCallback(async () => {
     const [storedProfile, storedTransactions, storedWorkflows, storedReviewEvents] = await Promise.all([
@@ -212,7 +190,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       getStoredBankReviewEvents(),
     ]);
     setProfile(storedProfile);
-    setTransactions(dedupeTransactions(storedTransactions));
+    setTransactionSnapshot(dedupeTransactions(storedTransactions));
     setWorkflows(dedupeWorkflows(storedWorkflows));
     setBankReviewEvents(storedReviewEvents);
     const queue = getBankImportQueueSnapshot();
@@ -223,7 +201,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       localReviews: storedReviewEvents.length,
     }));
     return Boolean(storedProfile || storedTransactions.length || storedWorkflows.length);
-  }, []);
+  }, [setTransactionSnapshot]);
 
   useEffect(() => {
     let mounted = true;
@@ -348,7 +326,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [profile]);
 
   const addTransaction = useCallback(async (payload: CreateTransactionPayload) => {
-    const storedTransactions = await getStoredTransactions();
+    const storedTransactions = transactionsRef.current;
     if (
       payload.importSource &&
       payload.importSourceKey &&
@@ -378,9 +356,23 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       createdAt: now,
       updatedAt: now,
     };
-    const next = dedupeTransactions([transaction, ...storedTransactions]);
-    setTransactions(next);
-    await setStoredTransactions(next);
+    const next = optimisticAddTransaction(storedTransactions, transaction);
+    setTransactionSnapshot(next);
+    let inserted = true;
+    const persisted = await updateStoredTransactions((current) => {
+      if (
+        transaction.importSourceKey &&
+        current.some(
+          (item) => item.importSourceKey === transaction.importSourceKey
+        )
+      ) {
+        inserted = false;
+        return current;
+      }
+      return optimisticAddTransaction(current, transaction);
+    });
+    setTransactionSnapshot(persisted);
+    if (!inserted) return;
     await enqueueOutbox({
       entity: "transaction",
       entityId: transaction._id,
@@ -397,10 +389,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       });
     }
     void syncService.syncAll();
-  }, [profile?.userId]);
+  }, [profile?.userId, setTransactionSnapshot]);
 
   const updateTransaction = useCallback(async (id: string, payload: UpdateTransactionPayload) => {
-    const existing = transactions.find((item) => item._id === id);
+    const existing = transactionsRef.current.find((item) => item._id === id);
     if (!existing) throw new Error("Transaction not found");
     const updated: ITransaction = {
       ...existing,
@@ -410,9 +402,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       reviewStatus: getPendingReviewStatus({ ...existing, ...payload }),
       updatedAt: new Date().toISOString(),
     };
-    const next = dedupeTransactions(transactions.map((item) => item._id === id ? updated : item));
-    setTransactions(next);
-    await setStoredTransactions(next);
+    setTransactionSnapshot(
+      optimisticUpdateTransaction(transactionsRef.current, id, updated)
+    );
+    const persisted = await updateStoredTransactions((current) =>
+      optimisticUpdateTransaction(current, id, updated)
+    );
+    setTransactionSnapshot(persisted);
     await enqueueOutbox({
       entity: "transaction",
       entityId: id,
@@ -420,21 +416,23 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       payload: payload as Record<string, unknown>,
     });
     void syncService.syncAll();
-  }, [transactions]);
+  }, [setTransactionSnapshot]);
 
   const deleteTransaction = useCallback(async (id: string) => {
-    const next = transactions.filter((item) => item._id !== id);
-    setTransactions(next);
-    await setStoredTransactions(next);
+    setTransactionSnapshot(
+      optimisticDeleteTransaction(transactionsRef.current, id)
+    );
+    const persisted = await updateStoredTransactions((current) =>
+      optimisticDeleteTransaction(current, id)
+    );
+    setTransactionSnapshot(persisted);
     await enqueueOutbox({ entity: "transaction", entityId: id, action: "delete" });
     void syncService.syncAll();
-  }, [transactions]);
+  }, [setTransactionSnapshot]);
 
   const importQueuedBankNotifications = useCallback(async () => {
-    if (!isSignedIn || !profile || isDrainingBankImportsRef.current) return;
-    isDrainingBankImportsRef.current = true;
+    if (!isSignedIn || !profile) return;
 
-    try {
       const importedKeys: string[] = [];
       for (const item of getQueuedBankImports()) {
         try {
@@ -540,10 +538,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         localReviews: (await getStoredBankReviewEvents()).length,
         retrying: rawFailure,
       });
-    } finally {
-      isDrainingBankImportsRef.current = false;
-    }
   }, [addTransaction, isSignedIn, loadLocalData, profile]);
+
+  const requestBankImportDrain = useMemo(
+    () => createCoalescingDrain(importQueuedBankNotifications),
+    [importQueuedBankNotifications]
+  );
 
   const dismissBankReviewEvent = useCallback(async (sourceKey: string) => {
     await clearStoredBankReviewEvents([sourceKey]);
@@ -597,17 +597,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [addTransaction, loadLocalData]);
 
   useEffect(() => {
-    bankImportDrainRef.current = () => void importQueuedBankNotifications();
-    if (isSignedIn && profile) void importQueuedBankNotifications();
+    bankImportDrainRef.current = () => void requestBankImportDrain();
+    if (isSignedIn && profile) void requestBankImportDrain();
     const subscription = addBankImportQueuedListener(() => {
-      if (isSignedIn && profile) void importQueuedBankNotifications();
+      if (isSignedIn && profile) void requestBankImportDrain();
     });
     return () => {
       subscription.remove();
       bankImportDrainRef.current = null;
       if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current);
     };
-  }, [importQueuedBankNotifications, isSignedIn, profile]);
+  }, [isSignedIn, profile, requestBankImportDrain]);
 
   const addWorkflow = useCallback(async (payload: CreateWorkflowPayload) => {
     const id = generateTempId();

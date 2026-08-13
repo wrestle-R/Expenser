@@ -11,8 +11,8 @@ import {
   removeOutboxOperation,
   setLastSyncTime,
   setStoredProfile,
-  setStoredTransactions,
   setStoredWorkflows,
+  updateStoredTransactions,
   type OutboxOperation,
 } from "./storage";
 import type {
@@ -23,6 +23,7 @@ import type {
   IWorkflow,
   UpdateTransactionPayload,
 } from "./types";
+import { mergeServerTransactions } from "./transaction-state.js";
 
 export interface SyncStatus {
   isOnline: boolean;
@@ -115,8 +116,7 @@ class SyncService {
   }
 
   private async replaceTransaction(localId: string, transaction: ITransaction) {
-    const stored = await getStoredTransactions();
-    await setStoredTransactions([
+    await updateStoredTransactions((stored) => [
       transaction,
       ...stored.filter(
         (item) =>
@@ -180,31 +180,36 @@ class SyncService {
     await setStoredProfile(updated);
   }
 
+  private async replayOutbox() {
+    for (const operation of await getOutbox()) {
+      try {
+        await this.replay(operation);
+        await removeOutboxOperation(operation.id);
+      } catch (error) {
+        if (isPermanent(error)) {
+          console.error("[Outbox] Change rejected permanently:", error);
+          this.lastError =
+            error instanceof Error
+              ? error.message
+              : "The server rejected an offline change. Local data was restored.";
+          await removeOutboxOperation(operation.id);
+          continue;
+        }
+        await incrementOutboxAttempt(operation.id);
+        break;
+      }
+    }
+  }
+
   async syncAll() {
-    if (this.syncing || !(await this.isOnline())) return;
+    if (this.syncing || !(await this.isOnline())) return null;
     this.syncing = true;
     this.emit();
     try {
-      for (const operation of await getOutbox()) {
-        try {
-          await this.replay(operation);
-          await removeOutboxOperation(operation.id);
-        } catch (error) {
-          if (isPermanent(error)) {
-            console.error("[Outbox] Change rejected permanently:", error);
-            this.lastError =
-              error instanceof Error
-                ? error.message
-                : "The server rejected an offline change. Local data was restored.";
-            await removeOutboxOperation(operation.id);
-            continue;
-          }
-          await incrementOutboxAttempt(operation.id);
-          break;
-        }
-      }
-      await this.fetchAllFromServer();
+      await this.replayOutbox();
+      const result = await this.fetchAllFromServer();
       await setLastSyncTime(Date.now());
+      return result;
     } finally {
       this.syncing = false;
       this.emit();
@@ -212,17 +217,8 @@ class SyncService {
   }
 
   async fetchAllFromServer() {
-    const operations = await getOutbox();
-    const localTransactions = await getStoredTransactions();
     const localWorkflows = await getStoredWorkflows();
-    const transactionOps = new Set(
-      operations.filter((item) => item.entity === "transaction").map((item) => item.entityId)
-    );
-    const transactionDeletes = new Set(
-      operations
-        .filter((item) => item.entity === "transaction" && item.action === "delete")
-        .map((item) => item.entityId)
-    );
+    const operations = await getOutbox();
     const workflowOps = new Set(
       operations.filter((item) => item.entity === "workflow").map((item) => item.entityId)
     );
@@ -242,13 +238,14 @@ class SyncService {
     const serverProfile = results[2].status === "fulfilled" ? results[2].value : null;
 
     const transactions = serverTransactions
-      ? [
-          ...localTransactions.filter((item) => transactionOps.has(item._id)),
-          ...serverTransactions.filter(
-            (item) => !transactionOps.has(item._id) && !transactionDeletes.has(item._id)
-          ),
-        ]
-      : localTransactions;
+      ? await updateStoredTransactions(async (localTransactions) =>
+          mergeServerTransactions({
+            localTransactions,
+            serverTransactions,
+            operations: await getOutbox(),
+          })
+        )
+      : await getStoredTransactions();
     const workflows = serverWorkflows
       ? [
           ...localWorkflows.filter((item) => workflowOps.has(item._id)),
@@ -259,7 +256,6 @@ class SyncService {
       : localWorkflows;
 
     await Promise.all([
-      setStoredTransactions(transactions),
       setStoredWorkflows(workflows),
       serverProfile ? setStoredProfile(serverProfile) : Promise.resolve(),
     ]);
@@ -272,12 +268,29 @@ class SyncService {
 
   async forceRefresh() {
     if (!(await this.isOnline())) return null;
-    await this.syncAll();
-    return this.fetchAllFromServer();
+    return this.syncAll();
   }
 
   async fetchTransactions() {
-    if (await this.isOnline()) await this.syncAll();
+    if ((await this.isOnline()) && !this.syncing) {
+      this.syncing = true;
+      this.emit();
+      try {
+        await this.replayOutbox();
+        const serverTransactions = await api.getTransactions();
+        await updateStoredTransactions(async (localTransactions) =>
+          mergeServerTransactions({
+            localTransactions,
+            serverTransactions,
+            operations: await getOutbox(),
+          })
+        );
+        await setLastSyncTime(Date.now());
+      } finally {
+        this.syncing = false;
+        this.emit();
+      }
+    }
     return getStoredTransactions();
   }
 

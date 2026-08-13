@@ -1,54 +1,51 @@
 # Expenser
 
-A minimal expense tracking app that works offline-first across mobile and web.
+Personal transaction tracking on Android and the web.
 
-## What is Expenser?
+Expenser records income and expenses against Bank, Cash, and Splitwise balances. The Android app can turn supported bank SMS notifications into transactions, keeps edits usable offline, and syncs queued changes when connectivity returns.
 
-Expenser helps you track your income and expenses across multiple payment methods (Bank, Cash, Splitwise). It works seamlessly offline and syncs your data when you're back online.
-
-## Features
-
-- **Offline-First**: Add transactions anytime, sync when online
-- **Multiple Payment Methods**: Track Bank (UPI), Cash, and Splitwise balances separately
-- **Split Tracking**: Record shared expenses with automatic splitwise balance updates
-- **Workflows**: Create quick templates for recurring transactions
-- **Edit & Delete**: Modify or remove transactions anytime
-- **Delete Confirmation**: Confirmation modals with glassmorphic design
-- **Profile Settings**: Manage your personal information and payment methods
-- **Real-time Sync**: Automatic synchronization when connection is restored
-- **Smart Notifications**: Get reminded about unsynced data
-- **Dark Mode**: Built-in dark mode support
-
-## App Components
-
-### Mobile (Expo)
-- **Authentication**: Supabase email/password sign in/up
-- **Home Dashboard**: Overview of balances and recent transactions
-- **Transactions**: View, add, edit, and delete transactions
-- **Workflows**: Manage templates for quick transaction creation
-- **Profile**: Personal settings and payment method configuration
-
-### Web (Next.js)
-- **Dashboard**: Financial overview and recent activity
-- **Transactions**: Full transaction management with edit/delete
-- **Workflows**: Create and manage transaction templates
-- **Profile**: User settings and configuration
-- **Analytics**: Some insight into where your money is going
-
-## Where It's Hosted
-
-### Web
-- Hosted at: **https://expenser-rdp.vercel.app**
+## Screenshots
 
 ### Mobile
-- Built from the Expo app in `expo/`.
 
-## Tech Stack
+<table>
+  <tr>
+    <th>Light</th>
+    <th>Dark</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/mobile-light.png" alt="Expenser Android settings in light mode" width="360" /></td>
+    <td><img src="docs/screenshots/mobile-dark.png" alt="Expenser Android settings in dark mode" width="360" /></td>
+  </tr>
+</table>
 
-- **Frontend**: Expo (Mobile), Next.js (Web)
-- **Authentication**: Supabase Auth
-- **Database**: Supabase Postgres
+### Web
 
----
+<table>
+  <tr>
+    <th>Light</th>
+    <th>Dark</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/web-light.png" alt="Expenser web sign-in in light mode" width="620" /></td>
+    <td><img src="docs/screenshots/web-dark.png" alt="Expenser web sign-in in dark mode" width="620" /></td>
+  </tr>
+</table>
 
-**Simple. Minimal. Effective.**
+Screenshots contain no account identifiers, transaction values, or credentials.
+
+## Run locally
+
+```bash
+cd next
+npm install
+npm run dev
+```
+
+```bash
+cd expo
+npm install
+npm start
+```
+
+The web app is available at [expenser-rdp.vercel.app](https://expenser-rdp.vercel.app).

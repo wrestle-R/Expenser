@@ -68,8 +68,9 @@ export function getTransactionDisplayFields(value) {
     };
   }
 
+  const category = trimText(value.category);
   return {
-    description: trimText(value.description) || "No description",
-    category: trimText(value.category) || "General",
+    description: trimText(value.description) || category || "Transaction",
+    category: category || "General",
   };
 }

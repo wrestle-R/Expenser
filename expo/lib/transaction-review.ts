@@ -33,9 +33,10 @@ export function getTransactionDisplayFields(
     };
   }
 
+  const category = transaction.category.trim();
   return {
-    description: transaction.description.trim() || "No description",
-    category: transaction.category.trim() || "General",
+    description: transaction.description.trim() || category || "Transaction",
+    category: category || "General",
   };
 }
 

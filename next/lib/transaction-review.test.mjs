@@ -108,6 +108,25 @@ test("hides the internal bank import placeholder in pending display labels", () 
   });
 });
 
+test("uses category when an active transaction has no description", () => {
+  assert.deepEqual(
+    getTransactionDisplayFields({
+      description: "",
+      category: "Salary",
+      reviewStatus: "active",
+    }),
+    { description: "Salary", category: "Salary" }
+  );
+  assert.deepEqual(
+    getTransactionDisplayFields({
+      description: "",
+      category: "",
+      reviewStatus: "active",
+    }),
+    { description: "Transaction", category: "General" }
+  );
+});
+
 test("treats the legacy bank import category as missing", () => {
   const result = deriveTransactionReviewState({
     description: "",

@@ -4,7 +4,6 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   ActivityIndicator,
   RefreshControl,
   Switch,
@@ -86,8 +85,6 @@ export default function ProfileScreen() {
   const { showToast } = useToast();
   const hydratedProfileRef = useRef(false);
 
-  const [name, setName] = useState("");
-  const [occupation, setOccupation] = useState("");
   const [selectedMethods, setSelectedMethods] = useState<string[]>([]);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
@@ -100,8 +97,6 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     if (profile) {
-      setName(profile.name || "");
-      setOccupation(profile.occupation || "");
       setSelectedMethods(withDefaultPaymentMethod(profile.paymentMethods));
       hydratedProfileRef.current = true;
     }
@@ -128,11 +123,7 @@ export default function ProfileScreen() {
       return;
     }
 
-    const nextName = name.trim();
-    const nextOccupation = occupation.trim();
     const sameProfile =
-      nextName === (profile.name || "") &&
-      nextOccupation === (profile.occupation || "") &&
       selectedMethods.join("|") === (profile.paymentMethods || []).join("|");
 
     if (sameProfile) {
@@ -142,8 +133,6 @@ export default function ProfileScreen() {
     const timeout = setTimeout(() => {
       setSaveStatus("saving");
       updateProfile({
-        name: nextName,
-        occupation: nextOccupation,
         paymentMethods: selectedMethods,
         onboarded: true,
       })
@@ -158,7 +147,7 @@ export default function ProfileScreen() {
     }, 650);
 
     return () => clearTimeout(timeout);
-  }, [name, occupation, profile, selectedMethods, updateProfile]);
+  }, [profile, selectedMethods, updateProfile]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -259,28 +248,29 @@ export default function ProfileScreen() {
         <View
           style={{
             backgroundColor: colors.card,
-            borderRadius: 16,
-            padding: 20,
-            marginBottom: 16,
+            borderRadius: 14,
+            padding: 14,
+            marginBottom: 12,
             borderWidth: 1,
             borderColor: colors.border,
             alignItems: "center",
+            flexDirection: "row",
           }}
         >
           <View
             style={{
-              width: 80,
-              height: 80,
-              borderRadius: 40,
+              width: 48,
+              height: 48,
+              borderRadius: 16,
               backgroundColor: colors.primary,
               justifyContent: "center",
               alignItems: "center",
-              marginBottom: 12,
+              marginRight: 12,
           }}
         >
           <Text
             style={{
-              fontSize: 32,
+              fontSize: 20,
               fontWeight: "bold",
               color: colors.primaryForeground,
               textTransform: "uppercase",
@@ -289,167 +279,41 @@ export default function ProfileScreen() {
             {profile?.name?.[0] || "U"}
           </Text>
         </View>
-        <Text style={{ fontSize: 20, fontWeight: "600", color: colors.text }}>
-          {profile?.name || "User"}
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 4 }}>
-          {profile?.email || ""}
-        </Text>
-
-        {/* Status */}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            marginTop: 12,
-            backgroundColor: colors.successBg,
-            paddingHorizontal: 12,
-            paddingVertical: 6,
-            borderRadius: 20,
-          }}
-        >
-          <View
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              backgroundColor: colors.success,
-              marginRight: 6,
-            }}
-          />
-          <Text
-            style={{
-              fontSize: 12,
-              fontWeight: "600",
-              color: colors.success,
-              textTransform: "uppercase",
-            }}
-          >
-            Active
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 17, fontWeight: "700", color: colors.text }}>
+            {profile?.name || "User"}
+          </Text>
+          <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+            {profile?.email || ""}
+          </Text>
+          <Text style={{ color: isOnline ? colors.success : colors.warning, fontSize: 11, marginTop: 4 }}>
+            {isOnline ? "Synced" : "Offline · uploads automatically"}
           </Text>
         </View>
-
-        {/* Sync Status */}
-        {!isOnline && (
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginTop: 12,
-              backgroundColor: colors.warningBg,
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 20,
-            }}
-          >
-            <Ionicons name="cloud-offline" size={14} color={colors.warning} />
-            <Text
-              style={{
-                fontSize: 12,
-                color: colors.warning,
-                marginLeft: 6,
-              }}
-            >
-              Offline — changes upload automatically
-            </Text>
-          </View>
-        )}
       </View>
 
-      {/* Form */}
+      {/* Payment methods */}
       <View
         style={{
           backgroundColor: colors.card,
-          borderRadius: 16,
-          padding: 20,
-          marginBottom: 16,
+          borderRadius: 14,
+          padding: 14,
+          marginBottom: 12,
           borderWidth: 1,
           borderColor: colors.border,
         }}
       >
         <Text
           style={{
-            fontSize: 18,
+            fontSize: 16,
             fontWeight: "600",
             color: colors.text,
-            marginBottom: 16,
+            marginBottom: 10,
           }}
         >
-          Personal Information
+          Payment methods
         </Text>
-
-        {/* Name */}
-        <View style={{ marginBottom: 16 }}>
-          <Text
-            style={{
-              fontSize: 14,
-              fontWeight: "500",
-              color: colors.text,
-              marginBottom: 8,
-            }}
-          >
-            Name
-          </Text>
-          <TextInput
-            style={{
-              backgroundColor: colors.backgroundSecondary,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: colors.border,
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              fontSize: 16,
-              color: colors.text,
-            }}
-            placeholder="Enter your name"
-            placeholderTextColor={colors.textMuted}
-            value={name}
-            onChangeText={setName}
-          />
-        </View>
-
-        {/* Occupation */}
-        <View style={{ marginBottom: 16 }}>
-          <Text
-            style={{
-              fontSize: 14,
-              fontWeight: "500",
-              color: colors.text,
-              marginBottom: 8,
-            }}
-          >
-            Occupation
-          </Text>
-          <TextInput
-            style={{
-              backgroundColor: colors.backgroundSecondary,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: colors.border,
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              fontSize: 16,
-              color: colors.text,
-            }}
-            placeholder="Enter your occupation"
-            placeholderTextColor={colors.textMuted}
-            value={occupation}
-            onChangeText={setOccupation}
-          />
-        </View>
-
-        {/* Payment Methods */}
         <View>
-          <Text
-            style={{
-              fontSize: 14,
-              fontWeight: "500",
-              color: colors.text,
-              marginBottom: 8,
-            }}
-          >
-            Payment Methods
-          </Text>
           <View style={{ gap: 8 }}>
             {paymentOptions.map((option) => {
               const isSelected = selectedMethods.includes(option.id);
@@ -464,9 +328,9 @@ export default function ProfileScreen() {
                   style={{
                     flexDirection: "row",
                     alignItems: "center",
-                    padding: 12,
-                    borderRadius: 12,
-                    borderWidth: 2,
+                    padding: 10,
+                    borderRadius: 10,
+                    borderWidth: 1,
                     borderColor: isSelected ? methodColor : colors.border,
                     backgroundColor: isSelected ? methodBg : "transparent",
                   }}
@@ -476,7 +340,7 @@ export default function ProfileScreen() {
                     style={{
                       backgroundColor: methodBg,
                       borderRadius: 8,
-                      padding: 8,
+                      padding: 6,
                     }}
                   >
                     <Ionicons name={option.icon} size={18} color={methodColor} />
@@ -494,7 +358,7 @@ export default function ProfileScreen() {
                   {isSelected && (
                     <Ionicons
                       name="checkmark-circle"
-                      size={24}
+                      size={20}
                       color={methodColor}
                     />
                   )}

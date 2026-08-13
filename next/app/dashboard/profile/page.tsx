@@ -4,8 +4,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { useUserContext } from "@/context/UserContext";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Check, CreditCard, PiggyBank, ArrowRightLeft, CirclePlay, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -27,8 +25,6 @@ const paymentOptions = [
 export default function ProfilePage() {
   const { profile, updateProfile, loading } = useUserContext();
   const setupSectionRef = useRef<HTMLDivElement | null>(null);
-  const [name, setName] = useState("");
-  const [occupation, setOccupation] = useState("");
   const [selectedMethods, setSelectedMethods] = useState<string[]>([]);
   const [paymentMethodNotice, setPaymentMethodNotice] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -37,8 +33,6 @@ export default function ProfilePage() {
   useEffect(() => {
     if (profile) {
       setTimeout(() => {
-        setName(profile.name);
-        setOccupation(profile.occupation);
         setSelectedMethods(withDefaultPaymentMethod(profile.paymentMethods));
         hydratedProfileRef.current = true;
       }, 0);
@@ -79,11 +73,7 @@ export default function ProfilePage() {
       return;
     }
 
-    const nextName = name.trim();
-    const nextOccupation = occupation.trim();
     const sameProfile =
-      nextName === (profile.name || "") &&
-      nextOccupation === (profile.occupation || "") &&
       selectedMethods.join("|") === (profile.paymentMethods || []).join("|");
 
     if (sameProfile) {
@@ -93,8 +83,6 @@ export default function ProfilePage() {
     const timeout = window.setTimeout(() => {
       setSaveStatus("saving");
       updateProfile({
-        name: nextName,
-        occupation: nextOccupation,
         paymentMethods: selectedMethods,
       })
         .then(() => {
@@ -108,7 +96,7 @@ export default function ProfilePage() {
     }, 650);
 
     return () => window.clearTimeout(timeout);
-  }, [name, occupation, profile, selectedMethods, updateProfile]);
+  }, [profile, selectedMethods, updateProfile]);
 
   if (loading || !profile) {
     return (
@@ -120,30 +108,29 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 max-w-5xl mx-auto pb-12">
+    <div className="mx-auto max-w-4xl space-y-5 pb-10 animate-in fade-in duration-500">
       <div className="flex flex-col gap-2">
-        <h1 className="text-4xl font-extrabold tracking-tight">Profile Settings</h1>
-        <p className="text-muted-foreground text-lg">Manage your personal information and preferences.</p>
+        <h1 className="text-3xl font-bold tracking-tight">Profile</h1>
+        <p className="text-sm text-muted-foreground">Account and payment preferences.</p>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-8">
-        {/* Left Column - User Info & Preview */}
-        <Card className="lg:col-span-1 rounded-[1.6rem] p-8 h-fit flex flex-col items-center text-center gap-6 bg-card/50 backdrop-blur-sm border-primary/10 shadow-xl shadow-primary/5">
+      <div className="grid gap-5 lg:grid-cols-[0.85fr_1.65fr]">
+        <Card className="flex h-fit flex-col items-center gap-4 rounded-2xl border-primary/10 bg-card/60 p-5 text-center">
           <div className="relative group">
             <div className="absolute -inset-1 bg-gradient-to-tr from-primary to-primary-foreground rounded-full blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
-            <Avatar className="size-32 border-4 border-background relative">
+            <Avatar className="relative size-20 border-4 border-background">
               <AvatarFallback className="bg-primary/10 text-primary uppercase">
-                <UserRound className="size-14" />
+                <UserRound className="size-9" />
               </AvatarFallback>
             </Avatar>
           </div>
           <div className="space-y-1">
-            <h2 className="text-2xl font-bold tracking-tight">{profile.name}</h2>
-            <p className="text-muted-foreground font-medium">{profile.email}</p>
+            <h2 className="text-xl font-bold tracking-tight">{profile.name}</h2>
+            <p className="max-w-56 truncate text-sm font-medium text-muted-foreground">{profile.email}</p>
           </div>
           
-          <div className="w-full pt-4 border-t border-border/50 grid grid-cols-1 gap-3">
-             <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-muted/50">
+          <div className="grid w-full grid-cols-1 gap-2 border-t border-border/50 pt-3">
+             <div className="flex items-center justify-between rounded-xl bg-muted/50 px-3 py-2">
                 <span className="text-sm font-medium text-muted-foreground">Status</span>
                 <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Active</span>
              </div>
@@ -151,7 +138,7 @@ export default function ProfilePage() {
                type="button"
                variant="outline"
                data-tutorial-target="tutorial-profile-replay"
-               className="h-11 w-full justify-center gap-2 rounded-2xl border-primary/15 bg-background/70"
+               className="h-9 w-full justify-center gap-2 rounded-xl border-primary/15 bg-background/70"
                onClick={replayDashboardTutorial}
              >
                <CirclePlay className="size-4" />
@@ -160,59 +147,29 @@ export default function ProfilePage() {
           </div>
         </Card>
 
-        {/* Right Column - Forms */}
-        <Card className="lg:col-span-2 rounded-[1.6rem] p-8 shadow-xl shadow-black/5 bg-card/30 backdrop-blur-sm border-primary/5">
-          <div className="space-y-8">
-            <div className="space-y-6">
+        <Card className="rounded-2xl border-primary/5 bg-card/40 p-5">
+          <div className="space-y-5">
+            <div className="space-y-4">
               <h3 className="text-lg font-semibold flex items-center gap-2">
                 <span className="size-2 rounded-full bg-primary" />
-                Personal Information
+                Payment methods
               </h3>
-              <div className="grid md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label htmlFor="name" className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Full Name</Label>
-                  <Input
-                    id="name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="h-12 bg-background/50 border-border focus:ring-primary/20"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="occupation" className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Occupation</Label>
-                  <Input
-                    id="occupation"
-                    value={occupation}
-                    onChange={(e) => setOccupation(e.target.value)}
-                    className="h-12 bg-background/50 border-border focus:ring-primary/20"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <Separator className="opacity-50" />
-
-            <div className="space-y-6">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <span className="size-2 rounded-full bg-primary" />
-                Active Accounts
-              </h3>
-              <p className="text-sm text-muted-foreground">Select the payment methods you want to Track on your Dashboard.</p>
-              <div data-tutorial-target="tutorial-profile-accounts" className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <p className="text-sm text-muted-foreground">Choose the balances shown across Expenser.</p>
+              <div data-tutorial-target="tutorial-profile-accounts" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {paymentOptions.map((option) => (
                   <button
                     key={option.id}
                     type="button"
                     onClick={() => toggleMethod(option.id)}
                     className={cn(
-                      "relative flex flex-col items-center gap-4 rounded-[1.5rem] border-2 p-6 transition-all duration-300 group ring-offset-background",
+                      "group relative flex flex-col items-center gap-2 rounded-xl border p-4 transition-colors ring-offset-background",
                       selectedMethods.includes(option.id)
                         ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
                         : "border-border bg-muted/20 hover:border-primary/50 hover:bg-muted/40"
                     )}
                   >
-                      <div className={cn("rounded-[1.2rem] p-4 transition-transform duration-300 group-hover:scale-110", option.bg, option.color)}>
-                      <option.icon className="size-7" />
+                      <div className={cn("rounded-lg p-2.5", option.bg, option.color)}>
+                      <option.icon className="size-5" />
                     </div>
                     <span className="font-bold text-sm tracking-tight">{option.label}</span>
                     {selectedMethods.includes(option.id) && (

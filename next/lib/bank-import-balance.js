@@ -3,6 +3,32 @@ function toTime(value) {
   return Number.isFinite(time) ? time : 0;
 }
 
+function roundMoney(value) {
+  return Number(Number(value).toFixed(2));
+}
+
+export function calculateImportedBalanceMismatch({
+  currentBalance,
+  type,
+  amount,
+  reportedBalance,
+}) {
+  const signedAmount = type === "income" ? Number(amount) : -Number(amount);
+  const expectedBalance = roundMoney(Number(currentBalance) + signedAmount);
+  const difference = roundMoney(Number(reportedBalance) - expectedBalance);
+  return {
+    expectedBalance,
+    difference,
+    shouldAlert: Math.abs(difference) > 0.01,
+  };
+}
+
+export function getReconciliationOpeningBalance(alert, action) {
+  return roundMoney(
+    action === "apply" ? alert.bankBalance : alert.expectedBalance
+  );
+}
+
 export function getLatestImportedBankBalance(transactions) {
   const latest = transactions
     .filter(

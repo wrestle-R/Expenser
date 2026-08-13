@@ -4,6 +4,7 @@ import {
   sortBalanceReconciliationHistory,
 } from "@/lib/balance-reconciliation";
 import { getAuthenticatedUser } from "@/lib/auth";
+import { getReconciliationOpeningBalance } from "@/lib/bank-import-balance.js";
 import {
   mapBalanceReconciliationAlertRow,
   mapUserRow,
@@ -23,13 +24,22 @@ export async function GET(req: Request) {
     const includeHistory =
       new URL(req.url).searchParams.get("includeHistory") === "true";
 
-    const alerts = await sql<BalanceReconciliationAlertRow[]>`
-      select *
-      from balance_reconciliation_alerts
-      where user_id = ${userId}
-        and status = 'pending'
-      order by created_at desc
-    `;
+    const alerts = includeHistory
+      ? await sql<BalanceReconciliationAlertRow[]>`
+          select *
+          from balance_reconciliation_alerts
+          where user_id = ${userId}
+            and status = 'pending'
+          order by created_at desc
+        `
+      : await sql<BalanceReconciliationAlertRow[]>`
+          select *
+          from balance_reconciliation_alerts
+          where user_id = ${userId}
+            and status = 'pending'
+          order by created_at desc
+          limit 1
+        `;
 
     const mappedAlerts = alerts.map(mapBalanceReconciliationAlertRow);
     if (!includeHistory) {
@@ -79,44 +89,49 @@ export async function POST(req: Request) {
     const result = await sql.begin(async (tx) => {
       const trx = tx as unknown as typeof sql;
       const alerts = (await trx`
-        select *
-        from balance_reconciliation_alerts
-        where id = ${id}
-          and user_id = ${userId}
-          and status = 'pending'
+        select alerts.*, transactions.date as transaction_date
+        from balance_reconciliation_alerts alerts
+        join transactions on transactions.id = alerts.transaction_id
+        where alerts.id = ${id}
+          and alerts.user_id = ${userId}
+          and alerts.status = 'pending'
         limit 1
-        for update
-      `) as BalanceReconciliationAlertRow[];
+        for update of alerts
+      `) as (BalanceReconciliationAlertRow & { transaction_date: string | Date })[];
 
       const alert = alerts[0];
       if (!alert) {
         return null;
       }
 
-      let profile = null;
-      if (action === "apply") {
-        await trx`
-          insert into balances (
-            user_id, payment_method, opening_balance, opening_at, current_balance
-          ) values (
-            ${userId}, 'bank', ${Number(alert.bank_balance)},
-            timezone('utc', now()), ${Number(alert.bank_balance)}
-          )
-          on conflict (user_id, payment_method) do update set
-            opening_balance = excluded.opening_balance,
-            opening_at = excluded.opening_at,
-            current_balance = excluded.current_balance
-        `;
-        await trx`select recalculate_user_balances(${userId})`;
-        const users = (await trx`
-          select * from users where user_id = ${userId} limit 1
-        `) as UserRow[];
-        const balances = (await trx`
-          select * from balances where user_id = ${userId}
-          order by payment_method
-        `) as BalanceRow[];
-        profile = users[0] ? mapUserRow(users[0], balances) : null;
-      }
+      const openingBalance = getReconciliationOpeningBalance(
+        {
+          expectedBalance: Number(alert.expected_balance),
+          bankBalance: Number(alert.bank_balance),
+        },
+        action
+      );
+      await trx`
+        insert into balances (
+          user_id, payment_method, opening_balance, opening_at, current_balance
+        ) values (
+          ${userId}, 'bank', ${openingBalance},
+          ${alert.transaction_date}, ${openingBalance}
+        )
+        on conflict (user_id, payment_method) do update set
+          opening_balance = excluded.opening_balance,
+          opening_at = excluded.opening_at,
+          current_balance = excluded.current_balance
+      `;
+      await trx`select recalculate_user_balances(${userId})`;
+      const users = (await trx`
+        select * from users where user_id = ${userId} limit 1
+      `) as UserRow[];
+      const balances = (await trx`
+        select * from balances where user_id = ${userId}
+        order by payment_method
+      `) as BalanceRow[];
+      const profile = users[0] ? mapUserRow(users[0], balances) : null;
 
       const updatedAlerts = (await trx`
         update balance_reconciliation_alerts

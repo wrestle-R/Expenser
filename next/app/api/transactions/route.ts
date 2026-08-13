@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { getApiErrorResponse } from "@/lib/api-errors";
+import { calculateImportedBalanceMismatch } from "@/lib/bank-import-balance.js";
 import {
   assertPendingReviewUpdateFields,
   deriveTransactionReviewState,
@@ -453,6 +454,22 @@ export async function POST(req: Request) {
       }
 
       if (payload.importSource && payload.importSourceKey) {
+        if (payload.importedAccountSuffix && payload.importedBankReference) {
+          const matchingBankImports = (await trx`
+            select *
+            from transactions
+            where user_id = ${userId}
+              and import_source is not null
+              and imported_account_suffix = ${payload.importedAccountSuffix}
+              and imported_bank_reference = ${payload.importedBankReference}
+            limit 1
+          `) as TransactionRow[];
+
+          if (matchingBankImports[0]) {
+            return { transaction: matchingBankImports[0], insertedNew: false };
+          }
+        }
+
         const existingImports = (await trx`
           select *
           from transactions
@@ -470,6 +487,28 @@ export async function POST(req: Request) {
 
       let transaction: TransactionRow;
       await validateExchangeExpenseLink(trx, userId, payload);
+      let balanceMismatch: ReturnType<typeof calculateImportedBalanceMismatch> | null = null;
+      if (
+        payload.paymentMethod === "bank" &&
+        payload.importSource &&
+        payload.importedBankBalance != null
+      ) {
+        await trx`select ensure_user_balances(${userId})`;
+        const bankBalances = (await trx`
+          select current_balance
+          from balances
+          where user_id = ${userId}
+            and payment_method = 'bank'
+          limit 1
+          for update
+        `) as { current_balance: number | string }[];
+        balanceMismatch = calculateImportedBalanceMismatch({
+          currentBalance: Number(bankBalances[0]?.current_balance ?? 0),
+          type: payload.type,
+          amount: payload.amount,
+          reportedBalance: payload.importedBankBalance,
+        });
+      }
 
       try {
         const insertedTransactions = (await trx`
@@ -552,6 +591,30 @@ export async function POST(req: Request) {
         }
 
         throw error;
+      }
+
+      if (balanceMismatch?.shouldAlert) {
+        await trx`
+          insert into balance_reconciliation_alerts (
+            user_id,
+            transaction_id,
+            payment_method,
+            expected_balance,
+            bank_balance,
+            difference,
+            status,
+            source
+          ) values (
+            ${userId},
+            ${transaction.id},
+            'bank',
+            ${balanceMismatch.expectedBalance},
+            ${payload.importedBankBalance},
+            ${balanceMismatch.difference},
+            'pending',
+            'bank_notification'
+          )
+        `;
       }
 
       return { transaction, insertedNew: true };

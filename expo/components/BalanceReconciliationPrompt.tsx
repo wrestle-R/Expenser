@@ -1,23 +1,20 @@
-import { useEffect, useRef } from "react";
-import { Alert } from "react-native";
+import { useCallback, useEffect, useRef } from "react";
+import { Alert, AppState, type AppStateStatus } from "react-native";
 import { api } from "../lib/api";
 import { useUserContext } from "../context/UserContext";
 
 export default function BalanceReconciliationPrompt() {
-  const { profile, refreshProfile } = useUserContext();
+  const { profile, refreshProfile, syncing } = useUserContext();
   const activeAlertId = useRef<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function checkAlerts() {
+  const checkAlerts = useCallback(async () => {
       if (!profile) {
         return;
       }
 
       try {
         const alerts = await api.getBalanceAlerts();
-        if (cancelled || alerts.length === 0) {
+        if (alerts.length === 0) {
           return;
         }
 
@@ -37,16 +34,23 @@ export default function BalanceReconciliationPrompt() {
               text: "Keep App Balance",
               style: "cancel",
               onPress: async () => {
-                await api.resolveBalanceAlert(alert._id, "keep");
-                activeAlertId.current = null;
+                try {
+                  await api.resolveBalanceAlert(alert._id, "keep");
+                  await refreshProfile();
+                } finally {
+                  activeAlertId.current = null;
+                }
               },
             },
             {
               text: "Use Bank Balance",
               onPress: async () => {
-                await api.resolveBalanceAlert(alert._id, "apply");
-                await refreshProfile();
-                activeAlertId.current = null;
+                try {
+                  await api.resolveBalanceAlert(alert._id, "apply");
+                  await refreshProfile();
+                } finally {
+                  activeAlertId.current = null;
+                }
               },
             },
           ]
@@ -54,14 +58,24 @@ export default function BalanceReconciliationPrompt() {
       } catch (error) {
         console.error("[BalanceReconciliationPrompt] Error:", error);
       }
-    }
+  }, [profile, refreshProfile]);
 
-    checkAlerts();
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!syncing) void checkAlerts();
+    const subscription = AppState.addEventListener(
+      "change",
+      (state: AppStateStatus) => {
+        if (!cancelled && state === "active") void checkAlerts();
+      }
+    );
 
     return () => {
       cancelled = true;
+      subscription.remove();
     };
-  }, [profile, refreshProfile]);
+  }, [checkAlerts, syncing]);
 
   return null;
 }

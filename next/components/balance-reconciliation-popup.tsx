@@ -27,7 +27,10 @@ export function BalanceReconciliationPopup() {
   }, []);
 
   useEffect(() => {
-    loadAlert();
+    void loadAlert();
+    const onFocus = () => void loadAlert();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [loadAlert]);
 
   const resolve = async (action: "apply" | "keep") => {

@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
@@ -64,6 +65,95 @@ type CategoryOption = {
   color: string;
 };
 
+const TransactionListRow = React.memo(function TransactionListRow({
+  transaction,
+  colors,
+  stealth,
+  onPress,
+}: {
+  transaction: ITransaction;
+  colors: typeof Colors.light;
+  stealth: boolean;
+  onPress: (transaction: ITransaction) => void;
+}) {
+  const display = getTransactionDisplayFields(transaction);
+  return (
+    <TouchableOpacity
+      onPress={() => onPress(transaction)}
+      activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={`Edit ${display.description}, ${transaction.type}, ${formatCurrency(transaction.amount)}`}
+      style={{
+        alignItems: "center",
+        backgroundColor: colors.card,
+        borderColor: colors.border,
+        borderRadius: 14,
+        borderWidth: 1,
+        flexDirection: "row",
+        justifyContent: "space-between",
+        marginBottom: 8,
+        padding: 14,
+      }}
+    >
+      <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
+        <View
+          style={{
+            backgroundColor:
+              transaction.type === "income" ? colors.successBg : colors.errorBg,
+            borderRadius: 10,
+            padding: 10,
+          }}
+        >
+          <Ionicons
+            name={transaction.type === "income" ? "trending-up" : "trending-down"}
+            size={20}
+            color={transaction.type === "income" ? colors.success : colors.error}
+          />
+        </View>
+        <View style={{ marginLeft: 12, flex: 1 }}>
+          <Text
+            style={{ fontWeight: "600", color: colors.text, fontSize: 15 }}
+            numberOfLines={1}
+          >
+            {display.description}
+          </Text>
+          <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+            {paymentMethodConfig[transaction.paymentMethod]?.label} · {formatDate(transaction.date)}
+          </Text>
+          {transaction.reviewStatus === "needs_category" && (
+            <Text style={{ fontSize: 11, color: colors.warning, marginTop: 2, fontWeight: "600" }}>
+              Choose category
+            </Text>
+          )}
+          {transaction.exchangeExpenseId && (
+            <Text style={{ fontSize: 11, color: colors.info, marginTop: 2 }}>
+              Offsets linked expense
+            </Text>
+          )}
+        </View>
+      </View>
+      <View style={{ alignItems: "flex-end" }}>
+        <Text
+          style={{
+            fontWeight: "700",
+            fontSize: 16,
+            color: transaction.type === "income" ? colors.success : colors.error,
+          }}
+        >
+          {transaction.type === "income" ? "+" : "-"}₹
+          {stealth ? "••••••" : formatCurrency(transaction.amount)}
+        </Text>
+        {(transaction.splitAmount ?? 0) > 0 && (
+          <Text style={{ fontSize: 11, color: colors.splitwise, marginTop: 2 }}>
+            Split: ₹{stealth ? "••••••" : formatCurrency(transaction.splitAmount ?? 0)}
+          </Text>
+        )}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 8 }} />
+    </TouchableOpacity>
+  );
+});
+
 function normalizeEditableCategory(category: string) {
   const trimmed = category.trim();
   if (!trimmed || trimmed.toLowerCase() === IMPORTED_FALLBACK_CATEGORY) {
@@ -119,7 +209,7 @@ export default function TransactionsScreen() {
     deleteTransaction,
     updateTransaction,
     isOnline,
-    manualRefresh,
+    refreshTransactions,
   } = useUserContext();
   const { showToast } = useToast();
 
@@ -169,13 +259,19 @@ export default function TransactionsScreen() {
     };
   }, []);
 
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await manualRefresh();
-    setRefreshing(false);
-  };
+    try {
+      await refreshTransactions();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshTransactions]);
 
-  const paginatedTransactions = transactions.slice(0, page * PAGE_SIZE);
+  const paginatedTransactions = useMemo(
+    () => transactions.slice(0, page * PAGE_SIZE),
+    [page, transactions]
+  );
   const hasMore = transactions.length > page * PAGE_SIZE;
 
   const handleDeletePress = (txn: ITransaction) => {
@@ -205,7 +301,7 @@ export default function TransactionsScreen() {
     setEditCategory("");
   };
 
-  const handleEditPress = (txn: ITransaction, mode?: EditMode) => {
+  const handleEditPress = useCallback((txn: ITransaction, mode?: EditMode) => {
     setEditingTxn(txn);
     setEditMode(mode ?? (txn.reviewStatus === "needs_category" ? "review" : "edit"));
     setEditType(txn.type);
@@ -216,7 +312,7 @@ export default function TransactionsScreen() {
     setEditSplitAmount((txn.splitAmount || 0).toString());
     setEditIsSplit((txn.splitAmount || 0) > 0);
     setActiveModal("edit");
-  };
+  }, []);
 
   useEffect(() => {
     if (!reviewId) {
@@ -238,7 +334,7 @@ export default function TransactionsScreen() {
 
     handleEditPress(targetTransaction, "review");
     router.setParams({ reviewId: undefined });
-  }, [loading, reviewId, router, showToast, transactions]);
+  }, [handleEditPress, loading, reviewId, router, showToast, transactions]);
 
   const handleSaveEdit = async () => {
     if (!editingTxn) return;
@@ -300,6 +396,10 @@ export default function TransactionsScreen() {
   const needsCategoryCount = transactions.filter(
     (transaction) => transaction.reviewStatus === "needs_category"
   ).length;
+  const saveDisabled =
+    saving ||
+    (editMode !== "review" && !editAmount) ||
+    !editCategory.trim();
 
   if (loading) {
     return (
@@ -375,9 +475,31 @@ export default function TransactionsScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <FlatList
+        data={paginatedTransactions}
+        keyExtractor={(transaction) => transaction._id}
+        renderItem={({ item }) => (
+          <TransactionListRow
+            transaction={item}
+            colors={colors}
+            stealth={isStealthMode}
+            onPress={handleEditPress}
+          />
+        )}
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, paddingTop: 0 }}
+        contentContainerStyle={{
+          flexGrow: transactions.length === 0 ? 1 : undefined,
+          padding: 16,
+          paddingTop: 0,
+        }}
+        initialNumToRender={PAGE_SIZE}
+        maxToRenderPerBatch={PAGE_SIZE}
+        windowSize={7}
+        removeClippedSubviews
+        onEndReachedThreshold={0.35}
+        onEndReached={() => {
+          if (hasMore) setPage((current) => current + 1);
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -385,8 +507,9 @@ export default function TransactionsScreen() {
             tintColor={colors.primary}
           />
         }
-      >
-        {!isOnline && (
+        ListHeaderComponent={
+          <>
+          {!isOnline && (
           <View
             style={{
               alignItems: "center",
@@ -431,7 +554,9 @@ export default function TransactionsScreen() {
             <Ionicons name="chevron-forward" size={18} color={colors.warning} />
           </TouchableOpacity>
         )}
-        {transactions.length === 0 ? (
+          </>
+        }
+        ListEmptyComponent={
           <View
             style={{
               backgroundColor: colors.card,
@@ -467,133 +592,8 @@ export default function TransactionsScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        ) : (
-          <View
-            style={{
-              backgroundColor: colors.card,
-              borderRadius: 16,
-              borderWidth: 1,
-              borderColor: colors.border,
-              overflow: "hidden",
-            }}
-          >
-            {paginatedTransactions.map((txn, index) => {
-              const display = getTransactionDisplayFields(txn);
-              return (
-              <TouchableOpacity
-                key={txn._id}
-                onPress={() => handleEditPress(txn)}
-                activeOpacity={0.75}
-                accessibilityRole="button"
-                accessibilityLabel={`Edit ${display.description}, ${txn.type}, ${formatCurrency(txn.amount)}`}
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: 16,
-                  borderBottomWidth:
-                    index < paginatedTransactions.length - 1 ? 1 : 0,
-                  borderBottomColor: colors.border,
-                }}
-              >
-                <View
-                  style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
-                >
-                  <View
-                    style={{
-                      backgroundColor:
-                        txn.type === "income" ? colors.successBg : colors.errorBg,
-                      borderRadius: 10,
-                      padding: 10,
-                    }}
-                  >
-                    <Ionicons
-                      name={
-                        txn.type === "income" ? "trending-up" : "trending-down"
-                      }
-                      size={20}
-                      color={txn.type === "income" ? colors.success : colors.error}
-                    />
-                  </View>
-                  <View style={{ marginLeft: 12, flex: 1 }}>
-                    <Text
-                      style={{
-                        fontWeight: "600",
-                        color: colors.text,
-                        fontSize: 15,
-                      }}
-                      numberOfLines={1}
-                    >
-                      {display.description}
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        color: colors.textMuted,
-                        marginTop: 2,
-                      }}
-                    >
-                      {paymentMethodConfig[txn.paymentMethod]?.label} · {formatDate(txn.date)}
-                    </Text>
-                    {txn.reviewStatus === "needs_category" && (
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          color: colors.warning,
-                          marginTop: 2,
-                          fontWeight: "600",
-                        }}
-                      >
-                        Choose category
-                      </Text>
-                    )}
-                    {txn.exchangeExpenseId && (
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          color: colors.info,
-                          marginTop: 2,
-                        }}
-                      >
-                        Offsets linked expense
-                      </Text>
-                    )}
-                  </View>
-                </View>
-
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text
-                    style={{
-                      fontWeight: "700",
-                      fontSize: 16,
-                      color:
-                        txn.type === "income" ? colors.success : colors.error,
-                    }}
-                  >
-                    {txn.type === "income" ? "+" : "-"}₹
-                    {isStealthMode ? "••••••" : formatCurrency(txn.amount)}
-                  </Text>
-                  {(txn.splitAmount ?? 0) > 0 && (
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        color: colors.splitwise,
-                        marginTop: 2,
-                      }}
-                    >
-                      Split: ₹{isStealthMode ? "••••••" : formatCurrency(txn.splitAmount ?? 0)}
-                    </Text>
-                  )}
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 8 }} />
-              </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
-
-        {/* Load More */}
-        {hasMore && (
+        }
+        ListFooterComponent={hasMore ? (
           <TouchableOpacity
             style={{
               backgroundColor: colors.card,
@@ -610,11 +610,8 @@ export default function TransactionsScreen() {
               Load More ({transactions.length - page * PAGE_SIZE} remaining)
             </Text>
           </TouchableOpacity>
-        )}
-
-        {/* Bottom spacing */}
-        <View style={{ height: 32 }} />
-      </ScrollView>
+        ) : <View style={{ height: 24 }} />}
+      />
 
       {/* Delete Confirmation Modal */}
       <ConfirmModal
@@ -885,18 +882,15 @@ export default function TransactionsScreen() {
                         padding: 14,
                         alignItems: "center",
                         marginTop: 8,
+                        opacity: saveDisabled ? 0.55 : 1,
                       }}
                       onPress={handleSaveEdit}
-                      disabled={
-                        saving ||
-                        (editMode !== "review" && !editAmount) ||
-                        !editCategory.trim()
-                      }
+                      disabled={saveDisabled}
                     >
                       {saving ? (
-                        <ActivityIndicator color="#fff" />
+                        <ActivityIndicator color={colors.primaryForeground} />
                       ) : (
-                        <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
+                        <Text style={{ color: colors.primaryForeground, fontSize: 16, fontWeight: "600" }}>
                           {editMode === "review" ? "Save Review" : "Save Changes"}
                         </Text>
                       )}

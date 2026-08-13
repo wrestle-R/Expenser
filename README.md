@@ -14,8 +14,8 @@ Expenser records income and expenses against Bank, Cash, and Splitwise balances.
     <th>Dark</th>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/mobile-light.png" alt="Privacy-redacted Expenser Android dashboard in light mode" width="360" /></td>
-    <td><img src="docs/screenshots/mobile-dark.png" alt="Privacy-redacted Expenser Android dashboard in dark mode" width="360" /></td>
+    <td><img src="docs/screenshots/mobile-dashboard-light.png" alt="Privacy-redacted Expenser Android dashboard in light mode" width="360" /></td>
+    <td><img src="docs/screenshots/mobile-dashboard-dark.png" alt="Privacy-redacted Expenser Android dashboard in dark mode" width="360" /></td>
   </tr>
 </table>
 
@@ -27,8 +27,8 @@ Expenser records income and expenses against Bank, Cash, and Splitwise balances.
     <th>Dark</th>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/web-light.png" alt="Privacy-redacted Expenser web dashboard in light mode" width="620" /></td>
-    <td><img src="docs/screenshots/web-dark.png" alt="Privacy-redacted Expenser web dashboard in dark mode" width="620" /></td>
+    <td><img src="docs/screenshots/web-dashboard-light.png" alt="Privacy-redacted Expenser web dashboard in light mode" width="620" /></td>
+    <td><img src="docs/screenshots/web-dashboard-dark.png" alt="Privacy-redacted Expenser web dashboard in dark mode" width="620" /></td>
   </tr>
 </table>
 

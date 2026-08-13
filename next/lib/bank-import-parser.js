@@ -278,13 +278,41 @@ function hashNormalizedBankMessage(message) {
   return createHash("sha256").update(normalizeBankMessage(message)).digest("hex");
 }
 
-function buildBankImportKey(parsed, message) {
+function canonicalBankSlug(value) {
+  const slug = normalizeBankMessage(value ?? "bank")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "bank";
+}
+
+function canonicalReference(value) {
+  const reference = normalizeBankMessage(value).replace(/[^A-Za-z0-9_-]+/g, "");
+  return reference || null;
+}
+
+function buildCanonicalImportKey(parsed, message) {
   if (!parsed) return null;
-  if (parsed.referenceNumber && /^\d{6,}$/.test(parsed.referenceNumber)) {
-    return `union-bank:ref:${parsed.referenceNumber}`;
+  const bank = canonicalBankSlug(parsed.bankName);
+  const account = normalizeAccountSuffix(parsed.accountSuffix) ?? "unknown";
+  const reference = canonicalReference(parsed.referenceNumber);
+  if (reference) return `bank:${bank}:${account}:ref:${reference}`;
+  if (message) {
+    return `bank:${bank}:${account}:message:${hashNormalizedBankMessage(message)}`;
   }
-  if (message) return `union-bank:message:${hashNormalizedBankMessage(message)}`;
-  return ["union-bank:fallback", parsed.accountSuffix ?? "unknown", parsed.type, Number(parsed.amount).toFixed(2), parsed.occurredAt].join(":");
+  return [
+    "bank",
+    bank,
+    account,
+    "fallback",
+    parsed.type,
+    Number(parsed.amount).toFixed(2),
+    parsed.occurredAt,
+  ].join(":");
+}
+
+function buildBankImportKey(parsed, message) {
+  return buildCanonicalImportKey(parsed, message);
 }
 
 function buildBankReviewEventKey(event, message) {
@@ -294,12 +322,7 @@ function buildBankReviewEventKey(event, message) {
 }
 
 function buildNotificationImportKey(parsed, envelope) {
-  if (!parsed) return null;
-  const sender = normalizeBankMessage(envelope?.sender ?? parsed.bankName ?? "sms").toLowerCase();
-  if (parsed.referenceNumber) {
-    return `sms:ref:${hashNormalizedBankMessage(sender).slice(0, 12)}:${hashNormalizedBankMessage(parsed.referenceNumber).slice(0, 32)}`;
-  }
-  return `sms:message:${hashNormalizedBankMessage(`${sender}|${envelope?.message ?? ""}`)}`;
+  return buildCanonicalImportKey(parsed, envelope?.message);
 }
 
 function buildNotificationReviewKey(event, envelope) {

@@ -128,16 +128,16 @@ object UnionBankNotificationParser {
 
   fun buildTransactionKey(parsed: JSONObject, message: String? = null): String {
     val referenceNumber = parsed.nullableString("referenceNumber")
+    val accountSuffix = parsed.optString("accountSuffix", "unknown").ifBlank { "unknown" }
     if (!referenceNumber.isNullOrBlank()) {
-      return "union-bank:ref:$referenceNumber"
+      return "bank:union-bank-of-india:$accountSuffix:ref:${referenceNumber.replace(Regex("[^A-Za-z0-9_-]"), "")}"
     }
 
     if (!message.isNullOrBlank()) {
-      return "union-bank:message:${hashNormalizedMessage(message)}"
+      return "bank:union-bank-of-india:$accountSuffix:message:${hashNormalizedMessage(message)}"
     }
     return listOf(
-      "union-bank:fallback",
-      parsed.optString("accountSuffix"),
+      "bank:union-bank-of-india:$accountSuffix:fallback",
       parsed.optString("type"),
       "%.2f".format(Locale.US, parsed.optDouble("amount")),
       parsed.optString("occurredAt")

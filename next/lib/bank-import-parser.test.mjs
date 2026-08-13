@@ -48,6 +48,8 @@ const rechargeCredit =
   "Hi, recharge of Rs.299 successfully credited to your Airtel number 9876543210, also the validity has been extended.";
 const promotion =
   "Dear Customer, Rs.500 FREE CASH deposited in your wallet. Plus, FREE delivery! Avail the offers now.";
+const salaryCredit =
+  "A/c *4280 Credited for Rs:10000.00 on 12-08-2026 21:12:41 by Mob Bk ref no 127818473031 Avl Bal Rs:10029.18.Never Share OTP/PIN/CVV-Union Bank of India";
 
 test("parses Union Bank debit notification with payee and reference", () => {
   const parsed = parseUnionBankNotification(debitSmall);
@@ -93,6 +95,29 @@ test("parses Union Bank credit notification with a numeric reference", () => {
   assert.equal(result.parsed.referenceNumber, "652848858787");
   assert.equal(result.parsed.availableBalance, 514.04);
   assert.equal(result.parsed.occurredAt, "2026-06-11T16:33:02.000Z");
+});
+
+test("parses the exact August salary credit", () => {
+  const result = parseBankNotification(salaryCredit, {
+    sender: "VM-UNIONB",
+    capturedAt: "2026-08-12T15:42:45.000Z",
+  });
+
+  assert.deepEqual(result, {
+    kind: "transaction",
+    parsed: {
+      bankName: "Union Bank of India",
+      accountSuffix: "4280",
+      type: "income",
+      amount: 10000,
+      currency: "INR",
+      occurredAt: "2026-08-12T15:42:41.000Z",
+      referenceNumber: "127818473031",
+      payee: null,
+      availableBalance: 10029.18,
+      confidence: "high",
+    },
+  });
 });
 
 test("parses Union Bank debit notification with payee containing extra spaces", () => {
@@ -227,11 +252,14 @@ test("recognizes financial candidates without accepting ordinary messages", () =
 
 test("builds stable legacy and generic import keys", () => {
   const parsed = parseUnionBankNotification(debitSmall);
-  assert.equal(buildBankImportKey(parsed), "union-bank:ref:617163923155");
+  assert.equal(
+    buildBankImportKey(parsed),
+    "bank:union-bank-of-india:4280:ref:617163923155"
+  );
   const noRef = parseUnionBankNotification(creditMissingRef);
   assert.equal(
     buildBankImportKey(noRef, creditMissingRef),
-    `union-bank:message:${hashNormalizedBankMessage(creditMissingRef)}`
+    `bank:union-bank-of-india:4280:message:${hashNormalizedBankMessage(creditMissingRef)}`
   );
   const yes = parseBankNotification(yesBankPrepaid, {
     sender: "VM-YESBNK",
@@ -243,8 +271,29 @@ test("builds stable legacy and generic import keys", () => {
       sender: "VM-YESBNK",
       message: yesBankPrepaid,
     }),
-    /^sms:message:[a-f0-9]{64}$/
+    /^bank:yes-bank:unknown:message:[a-f0-9]{64}$/
   );
+});
+
+test("uses one canonical import key across sender variants", () => {
+  const parsed = parseUnionBankNotification(salaryCredit);
+  const expected = "bank:union-bank-of-india:4280:ref:127818473031";
+
+  assert.equal(
+    buildNotificationImportKey(parsed, {
+      sender: "VM-UNIONB",
+      message: salaryCredit,
+    }),
+    expected
+  );
+  assert.equal(
+    buildNotificationImportKey(parsed, {
+      sender: "Union Bank of India",
+      message: salaryCredit,
+    }),
+    expected
+  );
+  assert.equal(buildBankImportKey(parsed, salaryCredit), expected);
 });
 
 test("returns null for unrelated or malformed notification text", () => {

@@ -14,8 +14,8 @@ Expenser records income and expenses against Bank, Cash, and Splitwise balances.
     <th>Dark</th>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/mobile-light.png" alt="Expenser Android settings in light mode" width="360" /></td>
-    <td><img src="docs/screenshots/mobile-dark.png" alt="Expenser Android settings in dark mode" width="360" /></td>
+    <td><img src="docs/screenshots/mobile-light.png" alt="Privacy-redacted Expenser Android dashboard in light mode" width="360" /></td>
+    <td><img src="docs/screenshots/mobile-dark.png" alt="Privacy-redacted Expenser Android dashboard in dark mode" width="360" /></td>
   </tr>
 </table>
 
@@ -27,12 +27,12 @@ Expenser records income and expenses against Bank, Cash, and Splitwise balances.
     <th>Dark</th>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/web-light.png" alt="Expenser web sign-in in light mode" width="620" /></td>
-    <td><img src="docs/screenshots/web-dark.png" alt="Expenser web sign-in in dark mode" width="620" /></td>
+    <td><img src="docs/screenshots/web-light.png" alt="Privacy-redacted Expenser web dashboard in light mode" width="620" /></td>
+    <td><img src="docs/screenshots/web-dark.png" alt="Privacy-redacted Expenser web dashboard in dark mode" width="620" /></td>
   </tr>
 </table>
 
-Screenshots contain no account identifiers, transaction values, or credentials.
+Personal names, balances, transaction descriptions, and transaction amounts are blurred in every screenshot. No account identifiers or credentials are shown.
 
 ## Run locally
 

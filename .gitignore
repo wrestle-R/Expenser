@@ -78,3 +78,6 @@ yarn-error.log*
 next-env.d.ts
 
 /.clerk/
+
+# Private project memory
+/local-docs/

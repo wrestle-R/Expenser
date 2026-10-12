@@ -510,7 +510,7 @@ export async function POST(req: Request) {
       }
 
       try {
-        const insertedTransactions = (await trx`
+        const insertedTransactions = (await tx.savepoint((insertTx) => (insertTx as unknown as typeof sql)`
           insert into transactions (
             user_id,
             client_request_id,
@@ -550,7 +550,7 @@ export async function POST(req: Request) {
             ${payload.date}
           )
           returning *
-        `) as TransactionRow[];
+        `)) as TransactionRow[];
 
         transaction = insertedTransactions[0];
       } catch (error: unknown) {

@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        const insertedWorkflows = (await trx`
+        const insertedWorkflows = (await tx.savepoint((insertTx) => (insertTx as unknown as typeof sql)`
           insert into workflows (
             user_id,
             client_request_id,
@@ -203,7 +203,7 @@ export async function POST(req: NextRequest) {
             ${payload.splitAmount}
           )
           returning *
-        `) as WorkflowRow[];
+        `)) as WorkflowRow[];
 
         return insertedWorkflows[0];
       } catch (error: unknown) {

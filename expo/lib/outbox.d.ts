@@ -10,3 +10,9 @@ export function coalesceOutboxOperation(
   },
   createOperation: () => OutboxOperation
 ): OutboxOperation[];
+
+export function acknowledgeOutboxOperation(
+  operations: OutboxOperation[],
+  completed: OutboxOperation,
+  serverId?: string
+): OutboxOperation[];

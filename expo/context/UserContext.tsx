@@ -239,8 +239,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       setSyncing(status.isSyncing);
       if (status.error) {
         Alert.alert(
-          "Change could not be uploaded",
-          `${status.error}\n\nThe server version has been restored.`,
+          status.errorKind === "rejected" ? "Change could not be uploaded" : "Sync could not finish",
+          status.error,
         );
       }
       if (!status.isSyncing) void loadLocalData();

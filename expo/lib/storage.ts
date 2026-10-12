@@ -8,7 +8,7 @@ import {
   ILocalBalance,
   BottomTabSlot,
 } from "./types";
-import { coalesceOutboxOperation } from "./outbox";
+import { acknowledgeOutboxOperation, coalesceOutboxOperation } from "./outbox";
 import { withDefaultPaymentMethod } from "./payment-methods.js";
 
 const KEYS = {
@@ -27,6 +27,7 @@ const KEYS = {
   BOTTOM_TAB_SLOTS: "@expenser_bottom_tab_slots",
   OUTBOX: "@expenser_outbox_v2",
   OUTBOX_MIGRATED: "@expenser_outbox_v2_migrated",
+  OUTBOX_ALIASES: "@expenser_outbox_aliases",
 };
 
 let transactionStorageQueue: Promise<unknown> = Promise.resolve();
@@ -60,6 +61,8 @@ export interface OutboxOperation {
   payload: Record<string, unknown>;
   createdAt: string;
   attempts: number;
+  // Persisted before sending: a timeout or app restart cannot prove it was not applied.
+  inFlight?: boolean;
 }
 
 function outboxId() {
@@ -90,6 +93,27 @@ export async function removeOutboxOperation(id: string) {
   });
 }
 
+export async function claimNextOutboxOperation(): Promise<OutboxOperation | null> {
+  return enqueueStorageMutation("outbox", async () => {
+    const operations = await readOutbox();
+    if (!operations.length) return null;
+    const claimed = { ...operations[0], inFlight: true };
+    await writeOutbox([claimed, ...operations.slice(1)]);
+    return claimed;
+  });
+}
+
+export async function completeOutboxOperation(operation: OutboxOperation, serverId?: string) {
+  await enqueueStorageMutation("outbox", async () => {
+    if (serverId && serverId !== operation.entityId) {
+      const aliases = JSON.parse(await AsyncStorage.getItem(KEYS.OUTBOX_ALIASES) ?? "{}");
+      aliases[`${operation.entity}:${operation.entityId}`] = serverId;
+      await AsyncStorage.setItem(KEYS.OUTBOX_ALIASES, JSON.stringify(aliases));
+    }
+    await writeOutbox(acknowledgeOutboxOperation(await readOutbox(), operation, serverId));
+  });
+}
+
 export async function incrementOutboxAttempt(id: string) {
   await enqueueStorageMutation("outbox", async () => {
     await writeOutbox((await readOutbox()).map((operation) =>
@@ -107,14 +131,24 @@ export async function enqueueOutbox(input: {
   payload?: Record<string, unknown>;
 }) {
   await enqueueStorageMutation("outbox", async () => {
+    const aliases = JSON.parse(await AsyncStorage.getItem(KEYS.OUTBOX_ALIASES) ?? "{}") as Record<string, string>;
+    const normalizedInput = {
+      ...input,
+      entityId: aliases[`${input.entity}:${input.entityId}`] ?? input.entityId,
+      payload: { ...input.payload },
+    };
+    const expenseId = normalizedInput.payload.exchangeExpenseId;
+    if (typeof expenseId === "string" && aliases[`transaction:${expenseId}`]) {
+      normalizedInput.payload.exchangeExpenseId = aliases[`transaction:${expenseId}`];
+    }
     const operations = await readOutbox();
-    const next = coalesceOutboxOperation(operations, input, () => ({
+    const next = coalesceOutboxOperation(operations, normalizedInput, () => ({
       version: 2,
       id: outboxId(),
-      entity: input.entity,
-      entityId: input.entityId,
-      action: input.action,
-      payload: input.payload ?? {},
+      entity: normalizedInput.entity,
+      entityId: normalizedInput.entityId,
+      action: normalizedInput.action,
+      payload: normalizedInput.payload,
       createdAt: new Date().toISOString(),
       attempts: 0,
     }));
@@ -649,6 +683,7 @@ export async function clearAllData(): Promise<void> {
       KEYS.BANK_REVIEW_EVENTS,
       KEYS.OUTBOX,
       KEYS.OUTBOX_MIGRATED,
+      KEYS.OUTBOX_ALIASES,
     ]);
   } catch (error) {
     console.error("[Storage] Error clearing all data:", error);

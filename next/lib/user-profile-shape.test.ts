@@ -12,6 +12,7 @@ const contextProfile: ContextUserProfile = {
     cash: 0,
     splitwise: 0,
   },
+  balanceAccounts: [],
   onboarded: true,
   dashboardTutorialCompleted: false,
 };
@@ -28,6 +29,7 @@ const dbProfile: DbUserProfile = {
     cash: 0,
     splitwise: 0,
   },
+  balanceAccounts: [],
   onboarded: true,
   dashboardTutorialCompleted: false,
   createdAt: new Date().toISOString(),

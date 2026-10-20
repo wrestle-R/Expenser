@@ -1,19 +1,16 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
   TextInput,
-  Modal,
-  TouchableWithoutFeedback,
   Switch,
-  KeyboardAvoidingView,
-  Platform,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -24,17 +21,19 @@ import { useToast } from "../../context/ToastContext";
 import {
   Colors,
   paymentMethodConfig,
-  EXPENSE_CATEGORIES,
-  INCOME_CATEGORIES,
 } from "../../constants/theme";
-import { formatCurrency, formatDate } from "../../lib/utils";
-import { ITransaction, PaymentMethod, TransactionType } from "../../lib/types";
-import ConfirmModal from "../../components/ConfirmModal";
-import { getExpenseOffsetSummary } from "../../lib/exchange";
 import { api } from "../../lib/api";
-import { getTransactionDisplayFields } from "../../lib/transaction-review";
+import { formatCurrency, formatDate } from "../../lib/utils";
+import { ITransaction, IUserCategory, PaymentMethod, TransactionType, UpdateTransactionPayload } from "../../lib/types";
+import ConfirmModal from "../../components/ConfirmModal";
+import ResponsiveModal from "../../components/ResponsiveModal";
+import {
+  getPendingReviewUpdate,
+  getTransactionDisplayFields,
+} from "../../lib/transaction-review";
 
 const PAGE_SIZE = 10;
+const IMPORTED_FALLBACK_CATEGORY = "bank import";
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { id: "bank", label: "Bank (UPI)", icon: "card" },
@@ -42,21 +41,175 @@ const paymentMethods: { id: PaymentMethod; label: string; icon: keyof typeof Ion
   { id: "splitwise", label: "Splitwise", icon: "swap-horizontal" },
 ];
 
+const EXPENSE_CATEGORIES = [
+  { id: "food", label: "Food", icon: "restaurant-outline" as const, color: "#f97316" },
+  { id: "transport", label: "Transport", icon: "car-outline" as const, color: "#3b82f6" },
+  { id: "shopping", label: "Shopping", icon: "bag-handle-outline" as const, color: "#ec4899" },
+  { id: "other", label: "Other", icon: "ellipsis-horizontal-circle-outline" as const, color: "#6b7280" },
+];
+
+const INCOME_CATEGORIES = [
+  { id: "salary", label: "Salary", icon: "briefcase-outline" as const, color: "#10b981" },
+  { id: "gift", label: "Gift", icon: "gift-outline" as const, color: "#a855f7" },
+  { id: "exchange", label: "Exchange", icon: "swap-horizontal-outline" as const, color: "#0ea5e9" },
+  { id: "other", label: "Other", icon: "ellipsis-horizontal-circle-outline" as const, color: "#6b7280" },
+];
+
+type EditMode = "edit" | "review";
+type ActiveTransactionModal = "none" | "edit" | "delete";
+
+type CategoryOption = {
+  id: string;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+};
+
+const TransactionListRow = React.memo(function TransactionListRow({
+  transaction,
+  colors,
+  stealth,
+  onPress,
+}: {
+  transaction: ITransaction;
+  colors: typeof Colors.light;
+  stealth: boolean;
+  onPress: (transaction: ITransaction) => void;
+}) {
+  const display = getTransactionDisplayFields(transaction);
+  return (
+    <TouchableOpacity
+      onPress={() => onPress(transaction)}
+      activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={`Edit ${display.description}, ${transaction.type}, ${formatCurrency(transaction.amount)}`}
+      style={{
+        alignItems: "center",
+        backgroundColor: colors.card,
+        borderColor: colors.border,
+        borderRadius: 14,
+        borderWidth: 1,
+        flexDirection: "row",
+        justifyContent: "space-between",
+        marginBottom: 8,
+        padding: 14,
+      }}
+    >
+      <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
+        <View
+          style={{
+            backgroundColor:
+              transaction.type === "income" ? colors.successBg : colors.errorBg,
+            borderRadius: 10,
+            padding: 10,
+          }}
+        >
+          <Ionicons
+            name={transaction.type === "income" ? "trending-up" : "trending-down"}
+            size={20}
+            color={transaction.type === "income" ? colors.success : colors.error}
+          />
+        </View>
+        <View style={{ marginLeft: 12, flex: 1 }}>
+          <Text
+            style={{ fontWeight: "600", color: colors.text, fontSize: 15 }}
+            numberOfLines={1}
+          >
+            {display.description}
+          </Text>
+          <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+            {paymentMethodConfig[transaction.paymentMethod]?.label} · {formatDate(transaction.date)}
+          </Text>
+          {transaction.reviewStatus === "needs_category" && (
+            <Text style={{ fontSize: 11, color: colors.warning, marginTop: 2, fontWeight: "600" }}>
+              Choose category
+            </Text>
+          )}
+          {transaction.exchangeExpenseId && (
+            <Text style={{ fontSize: 11, color: colors.info, marginTop: 2 }}>
+              Offsets linked expense
+            </Text>
+          )}
+        </View>
+      </View>
+      <View style={{ alignItems: "flex-end" }}>
+        <Text
+          style={{
+            fontWeight: "700",
+            fontSize: 16,
+            color: transaction.type === "income" ? colors.success : colors.error,
+          }}
+        >
+          {transaction.type === "income" ? "+" : "-"}₹
+          {stealth ? "••••••" : formatCurrency(transaction.amount)}
+        </Text>
+        {(transaction.splitAmount ?? 0) > 0 && (
+          <Text style={{ fontSize: 11, color: colors.splitwise, marginTop: 2 }}>
+            Split: ₹{stealth ? "••••••" : formatCurrency(transaction.splitAmount ?? 0)}
+          </Text>
+        )}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 8 }} />
+    </TouchableOpacity>
+  );
+});
+
+function normalizeEditableCategory(category: string) {
+  const trimmed = category.trim();
+  if (!trimmed || trimmed.toLowerCase() === IMPORTED_FALLBACK_CATEGORY) {
+    return "";
+  }
+
+  return trimmed;
+}
+
+function getCategoriesForType(
+  type: TransactionType,
+  userCategories: IUserCategory[],
+  selectedCategory: string
+): CategoryOption[] {
+  const builtIns = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const builtInIds = new Set(builtIns.map((category) => category.id.toLowerCase()));
+  const customCategories = userCategories
+    .filter((category) => category.type === type && !builtInIds.has(category.name.toLowerCase()))
+    .map((category) => ({
+      id: category.name,
+      label: category.name,
+      icon: "pricetag-outline" as const,
+      color: category.color,
+    }));
+  const options = [...builtIns, ...customCategories];
+
+  if (
+    selectedCategory.trim() &&
+    !options.some((category) => category.id.toLowerCase() === selectedCategory.toLowerCase())
+  ) {
+    options.push({
+      id: selectedCategory,
+      label: selectedCategory,
+      icon: "pricetag-outline",
+      color: "#6b7280",
+    });
+  }
+
+  return options;
+}
+
 export default function TransactionsScreen() {
   const { isDark } = useTheme();
   const { isStealthMode, toggleStealthMode } = useStealthMode();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
+  const params = useLocalSearchParams<{ reviewId?: string }>();
   const insets = useSafeAreaInsets();
   const {
     profile,
     transactions,
     loading,
     deleteTransaction,
-    retryFailedTransaction,
     updateTransaction,
     isOnline,
-    manualRefresh,
+    refreshTransactions,
   } = useUserContext();
   const { showToast } = useToast();
 
@@ -64,13 +217,10 @@ export default function TransactionsScreen() {
   const [page, setPage] = useState(1);
   const [deleting, setDeleting] = useState<string | null>(null);
   
-  // Delete confirmation modal
-  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [activeModal, setActiveModal] = useState<ActiveTransactionModal>("none");
   const [transactionToDelete, setTransactionToDelete] = useState<ITransaction | null>(null);
-  
-  // Edit modal
-  const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingTxn, setEditingTxn] = useState<ITransaction | null>(null);
+  const [editMode, setEditMode] = useState<EditMode>("edit");
   const [editType, setEditType] = useState<TransactionType>("expense");
   const [editAmount, setEditAmount] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -78,89 +228,55 @@ export default function TransactionsScreen() {
   const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>("bank");
   const [editSplitAmount, setEditSplitAmount] = useState("");
   const [editIsSplit, setEditIsSplit] = useState(false);
-  const [editExchangeExpenseId, setEditExchangeExpenseId] = useState("");
+  const [userCategories, setUserCategories] = useState<IUserCategory[]>([]);
   const [saving, setSaving] = useState(false);
-  const [syncedCategories, setSyncedCategories] = useState<
-    { id: string; label: string; color: string; type: TransactionType }[]
-  >([]);
+  const handledReviewIdRef = useRef<string | null>(null);
+  const reviewId = typeof params.reviewId === "string" ? params.reviewId : undefined;
 
-  const editCategories = useMemo(() => {
-    const baseCategories =
-      editType === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-    return [
-      ...baseCategories,
-      ...syncedCategories.filter(
-        (cat) =>
-          cat.type === editType &&
-          !baseCategories.some((baseCategory) => baseCategory.id === cat.id)
+  const categoryOptions = useMemo(
+    () =>
+      getCategoriesForType(editType, userCategories, editCategory).filter(
+        (category) => editMode !== "review" || category.id !== "exchange"
       ),
-    ];
-  }, [editType, syncedCategories]);
-  const editExchangeExpenseOptions = transactions
-    .filter((transaction) => transaction.type === "expense" && !transaction.isLocal)
-    .map((transaction) => {
-      const summary = getExpenseOffsetSummary(
-        transactions,
-        transaction._id,
-        editingTxn?._id
-      );
-
-      return {
-        transaction,
-        remainingAmount: summary?.remainingAmount ?? 0,
-      };
-    })
-    .filter(
-      (item) =>
-        item.transaction._id === editExchangeExpenseId || item.remainingAmount > 0
-    )
-    .sort(
-      (left, right) =>
-        new Date(right.transaction.date).getTime() -
-        new Date(left.transaction.date).getTime()
-    );
+    [editCategory, editMode, editType, userCategories]
+  );
 
   useEffect(() => {
-    api
-      .getCategories()
-      .then((items) =>
-        setSyncedCategories(
-          items.map((item) => ({
-            id: item.name,
-            label: item.name,
-            color: item.color,
-            type: item.type,
-          }))
-        )
-      )
-      .catch((error) => console.error("[Transactions] Categories:", error));
+    let active = true;
+
+    api.getCategories()
+      .then((categories) => {
+        if (active) {
+          setUserCategories(categories);
+        }
+      })
+      .catch((error) => {
+        console.error("[Transactions] Failed to load categories:", error);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  useEffect(() => {
-    const validIds = editCategories.map((cat) => cat.id);
-    if (editCategory && !validIds.includes(editCategory)) {
-      setEditCategory("other");
-    }
-  }, [editType, editCategory, editCategories]);
-
-  useEffect(() => {
-    if (!(editType === "income" && editCategory === "exchange")) {
-      setEditExchangeExpenseId("");
-    }
-  }, [editType, editCategory]);
-
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await manualRefresh();
-    setRefreshing(false);
-  };
+    try {
+      await refreshTransactions();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshTransactions]);
 
-  const paginatedTransactions = transactions.slice(0, page * PAGE_SIZE);
+  const paginatedTransactions = useMemo(
+    () => transactions.slice(0, page * PAGE_SIZE),
+    [page, transactions]
+  );
   const hasMore = transactions.length > page * PAGE_SIZE;
 
   const handleDeletePress = (txn: ITransaction) => {
     setTransactionToDelete(txn);
-    setDeleteModalVisible(true);
+    setActiveModal("delete");
   };
 
   const handleConfirmDelete = async () => {
@@ -172,84 +288,99 @@ export default function TransactionsScreen() {
       // Error handled
     } finally {
       setDeleting(null);
-      setDeleteModalVisible(false);
+      setActiveModal("none");
       setTransactionToDelete(null);
     }
   };
 
-  const handleEditPress = (txn: ITransaction) => {
-    // Cannot edit pending (local) transactions
-    if (txn.isLocal || txn._id.startsWith("temp_")) {
-      return;
-    }
+  const closeEditModal = () => {
+    if (saving) return;
+    setActiveModal("none");
+    setEditingTxn(null);
+    setEditMode("edit");
+    setEditCategory("");
+  };
+
+  const handleEditPress = useCallback((txn: ITransaction, mode?: EditMode) => {
     setEditingTxn(txn);
+    setEditMode(mode ?? (txn.reviewStatus === "needs_category" ? "review" : "edit"));
     setEditType(txn.type);
     setEditAmount(txn.amount.toString());
     setEditDescription(txn.description);
-    setEditCategory(txn.reviewStatus === "pending" ? txn.category : txn.category);
+    setEditCategory(normalizeEditableCategory(txn.category));
     setEditPaymentMethod(txn.paymentMethod);
-    setEditExchangeExpenseId(txn.exchangeExpenseId || "");
     setEditSplitAmount((txn.splitAmount || 0).toString());
     setEditIsSplit((txn.splitAmount || 0) > 0);
-    setEditModalVisible(true);
-  };
+    setActiveModal("edit");
+  }, []);
 
-  const handleSaveEdit = async () => {
-    if (!editingTxn || !editAmount) return;
-
-    if (editIsSplit && Number(editSplitAmount || "0") >= Number(editAmount || "0")) {
-      showToast("Split amount must be less than total amount", "error");
+  useEffect(() => {
+    if (!reviewId) {
+      handledReviewIdRef.current = null;
       return;
     }
 
-    if (editType === "income" && editCategory === "exchange") {
-      if (!editExchangeExpenseId) {
-        showToast("Select the expense this exchange should offset", "error");
-        return;
-      }
-
-      const summary = getExpenseOffsetSummary(
-        transactions,
-        editExchangeExpenseId,
-        editingTxn._id
-      );
-      if (!summary) {
-        showToast("Selected expense is no longer available", "error");
-        return;
-      }
-
-      if (parseFloat(editAmount) > summary.remainingAmount) {
-        showToast(
-          `Exchange amount cannot exceed ₹${summary.remainingAmount.toFixed(2)}`,
-          "error"
-        );
-        return;
-      }
+    if (loading || handledReviewIdRef.current === reviewId) {
+      return;
     }
-    
-    setSaving(true);
-    try {
-      const allowsPendingReview = Boolean(
-        editingTxn.importSource || editingTxn.reviewStatus === "pending"
-      );
-      await updateTransaction(editingTxn._id, {
+
+    const targetTransaction = transactions.find((transaction) => transaction._id === reviewId);
+    handledReviewIdRef.current = reviewId;
+
+    if (!targetTransaction) {
+      router.setParams({ reviewId: undefined });
+      return;
+    }
+
+    handleEditPress(targetTransaction, "review");
+    router.setParams({ reviewId: undefined });
+  }, [handleEditPress, loading, reviewId, router, showToast, transactions]);
+
+  const handleSaveEdit = async () => {
+    if (!editingTxn) return;
+    const trimmedDescription = editDescription.trim();
+    const trimmedCategory = editCategory.trim();
+
+    if (!trimmedCategory) {
+      showToast("Please choose a category", "error");
+      return;
+    }
+
+    let payload: UpdateTransactionPayload;
+    if (editMode === "review") {
+      payload = getPendingReviewUpdate({
+        description: trimmedDescription,
+        category: trimmedCategory,
+      });
+    } else {
+      const parsedAmount = parseFloat(editAmount);
+      if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+        showToast("Please enter a valid amount", "error");
+        return;
+      }
+
+      if (editIsSplit && Number(editSplitAmount || "0") >= parsedAmount) {
+        showToast("Split amount must be less than total amount", "error");
+        return;
+      }
+
+      payload = {
         type: editType,
-        amount: parseFloat(editAmount),
-        description: allowsPendingReview
-          ? editDescription.trim()
-          : editDescription.trim() || "No description",
-        category: allowsPendingReview
-          ? editCategory.trim()
-          : editCategory || "General",
+        amount: parsedAmount,
+        description: trimmedDescription,
+        category: trimmedCategory,
         paymentMethod: editPaymentMethod,
         splitAmount: editIsSplit ? parseFloat(editSplitAmount || "0") : 0,
-        exchangeExpenseId:
-          editType === "income" && editCategory === "exchange"
-            ? editExchangeExpenseId
-            : undefined,
-      });
-      setEditModalVisible(false);
+      };
+    }
+
+    setSaving(true);
+    try {
+      await updateTransaction(editingTxn._id, payload);
+      setActiveModal("none");
       setEditingTxn(null);
+      setEditMode("edit");
+      setEditCategory("");
     } catch (error: any) {
       console.error("Failed to update:", error);
       showToast(error?.message || "Failed to update transaction", "error");
@@ -258,21 +389,17 @@ export default function TransactionsScreen() {
     }
   };
 
-  const handleRetryPress = async (txn: ITransaction) => {
-    try {
-      await retryFailedTransaction(txn._id);
-      showToast(
-        isOnline ? "Retry started" : "Queued to retry when you are back online",
-        "success"
-      );
-    } catch (error: any) {
-      showToast(error?.message || "Failed to retry transaction", "error");
-    }
-  };
-
   const availableMethods = paymentMethods.filter(
-    (m) => profile?.paymentMethods?.includes(m.id)
+    (method) =>
+      profile?.paymentMethods?.includes(method.id) || method.id === editPaymentMethod
   );
+  const needsCategoryCount = transactions.filter(
+    (transaction) => transaction.reviewStatus === "needs_category"
+  ).length;
+  const saveDisabled =
+    saving ||
+    (editMode !== "review" && !editAmount) ||
+    !editCategory.trim();
 
   if (loading) {
     return (
@@ -291,7 +418,7 @@ export default function TransactionsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
-      {/* Top Bar with Internet Status */}
+      {/* Top Bar */}
       <View
         style={{
           flexDirection: "row",
@@ -323,14 +450,6 @@ export default function TransactionsScreen() {
               color={colors.text}
             />
           </TouchableOpacity>
-          <View
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: 5,
-              backgroundColor: isOnline ? colors.success : colors.error,
-            }}
-          />
           <TouchableOpacity
             style={{
               backgroundColor: colors.primary,
@@ -356,9 +475,31 @@ export default function TransactionsScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <FlatList
+        data={paginatedTransactions}
+        keyExtractor={(transaction) => transaction._id}
+        renderItem={({ item }) => (
+          <TransactionListRow
+            transaction={item}
+            colors={colors}
+            stealth={isStealthMode}
+            onPress={handleEditPress}
+          />
+        )}
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, paddingTop: 0 }}
+        contentContainerStyle={{
+          flexGrow: transactions.length === 0 ? 1 : undefined,
+          padding: 16,
+          paddingTop: 0,
+        }}
+        initialNumToRender={PAGE_SIZE}
+        maxToRenderPerBatch={PAGE_SIZE}
+        windowSize={7}
+        removeClippedSubviews
+        onEndReachedThreshold={0.35}
+        onEndReached={() => {
+          if (hasMore) setPage((current) => current + 1);
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -366,8 +507,56 @@ export default function TransactionsScreen() {
             tintColor={colors.primary}
           />
         }
-      >
-        {transactions.length === 0 ? (
+        ListHeaderComponent={
+          <>
+          {!isOnline && (
+          <View
+            style={{
+              alignItems: "center",
+              backgroundColor: colors.warningBg,
+              borderRadius: 12,
+              flexDirection: "row",
+              marginBottom: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+            }}
+          >
+            <Ionicons name="cloud-offline-outline" size={16} color={colors.warning} />
+            <Text style={{ color: colors.warning, fontSize: 12, marginLeft: 8, flex: 1 }}>
+              Offline — changes stay on this phone and upload automatically.
+            </Text>
+          </View>
+        )}
+
+        {needsCategoryCount > 0 && (
+          <TouchableOpacity
+            onPress={() => {
+              const next = transactions.find((item) => item.reviewStatus === "needs_category");
+              if (next) handleEditPress(next, "review");
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={`Review ${needsCategoryCount} bank ${needsCategoryCount === 1 ? "import" : "imports"} needing a category`}
+            style={{
+              alignItems: "center",
+              backgroundColor: colors.warningBg,
+              borderColor: colors.warning + "44",
+              borderRadius: 12,
+              borderWidth: 1,
+              flexDirection: "row",
+              marginBottom: 12,
+              padding: 12,
+            }}
+          >
+            <Ionicons name="pricetag-outline" size={18} color={colors.warning} />
+            <Text style={{ color: colors.text, flex: 1, fontWeight: "600", marginLeft: 9 }}>
+              {needsCategoryCount} bank {needsCategoryCount === 1 ? "import needs" : "imports need"} a category
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.warning} />
+          </TouchableOpacity>
+        )}
+          </>
+        }
+        ListEmptyComponent={
           <View
             style={{
               backgroundColor: colors.card,
@@ -403,201 +592,8 @@ export default function TransactionsScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        ) : (
-          <View
-            style={{
-              backgroundColor: colors.card,
-              borderRadius: 16,
-              borderWidth: 1,
-              borderColor: colors.border,
-              overflow: "hidden",
-            }}
-          >
-            {paginatedTransactions.map((txn, index) => {
-              const display = getTransactionDisplayFields(txn);
-
-              return (
-              <View
-                key={txn._id}
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: 16,
-                  borderBottomWidth:
-                    index < paginatedTransactions.length - 1 ? 1 : 0,
-                  borderBottomColor: colors.border,
-                }}
-              >
-                <View
-                  style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
-                >
-                  <View
-                    style={{
-                      backgroundColor:
-                        txn.type === "income" ? colors.successBg : colors.errorBg,
-                      borderRadius: 10,
-                      padding: 10,
-                    }}
-                  >
-                    <Ionicons
-                      name={
-                        txn.type === "income" ? "trending-up" : "trending-down"
-                      }
-                      size={20}
-                      color={txn.type === "income" ? colors.success : colors.error}
-                    />
-                  </View>
-                  <View style={{ marginLeft: 12, flex: 1 }}>
-                    <Text
-                      style={{
-                        fontWeight: "600",
-                        color: colors.text,
-                        fontSize: 15,
-                      }}
-                      numberOfLines={1}
-                    >
-                      {display.description}
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        color: colors.textMuted,
-                        marginTop: 2,
-                      }}
-                    >
-                      {paymentMethodConfig[txn.paymentMethod]?.label} ·{" "}
-                      {display.category} · {formatDate(txn.date)}
-                    </Text>
-                    {txn.reviewStatus === "pending" && (
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          color: colors.warning,
-                          marginTop: 2,
-                          fontWeight: "600",
-                        }}
-                      >
-                        Pending review
-                      </Text>
-                    )}
-                    {txn.exchangeExpenseId && (
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          color: colors.info,
-                          marginTop: 2,
-                        }}
-                      >
-                        Offsets linked expense
-                      </Text>
-                    )}
-                    {txn.isLocal && (
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          marginTop: 4,
-                        }}
-                      >
-                        <Ionicons
-                          name={
-                            txn.syncStatus === "failed"
-                              ? "alert-circle-outline"
-                              : "cloud-upload-outline"
-                          }
-                          size={12}
-                          color={
-                            txn.syncStatus === "failed"
-                              ? colors.error
-                              : colors.warning
-                          }
-                        />
-                        <Text
-                          style={{
-                            fontSize: 10,
-                            color:
-                              txn.syncStatus === "failed"
-                                ? colors.error
-                                : colors.warning,
-                            marginLeft: 4,
-                          }}
-                        >
-                          {txn.syncStatus === "failed"
-                            ? "Sync failed. Tap retry."
-                            : "Pending sync"}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text
-                    style={{
-                      fontWeight: "700",
-                      fontSize: 16,
-                      color:
-                        txn.type === "income" ? colors.success : colors.error,
-                    }}
-                  >
-                    {txn.type === "income" ? "+" : "-"}₹
-                    {isStealthMode ? "••••••" : formatCurrency(txn.amount)}
-                  </Text>
-                  {txn.splitAmount && txn.splitAmount > 0 && (
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        color: colors.splitwise,
-                        marginTop: 2,
-                      }}
-                    >
-                      Split: ₹{isStealthMode ? "••••••" : formatCurrency(txn.splitAmount)}
-                    </Text>
-                  )}
-                </View>
-
-                {/* Action buttons */}
-                <View style={{ flexDirection: "row", marginLeft: 8 }}>
-                  {txn.syncStatus === "failed" && (
-                    <TouchableOpacity
-                      style={{ padding: 8 }}
-                      onPress={() => handleRetryPress(txn)}
-                    >
-                      <Ionicons name="refresh-outline" size={18} color={colors.info} />
-                    </TouchableOpacity>
-                  )}
-                  {/* Edit button - only show if not pending */}
-                  {!txn.isLocal && !txn._id.startsWith("temp_") && (
-                    <TouchableOpacity
-                      style={{ padding: 8 }}
-                      onPress={() => handleEditPress(txn)}
-                    >
-                      <Ionicons name="pencil-outline" size={18} color={colors.primary} />
-                    </TouchableOpacity>
-                  )}
-                  
-                  {/* Delete button */}
-                  <TouchableOpacity
-                    style={{ padding: 8 }}
-                    onPress={() => handleDeletePress(txn)}
-                    disabled={deleting === txn._id}
-                  >
-                    {deleting === txn._id ? (
-                      <ActivityIndicator size="small" color={colors.error} />
-                    ) : (
-                      <Ionicons name="trash-outline" size={18} color={colors.error} />
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-              );
-            })}
-          </View>
-        )}
-
-        {/* Load More */}
-        {hasMore && (
+        }
+        ListFooterComponent={hasMore ? (
           <TouchableOpacity
             style={{
               backgroundColor: colors.card,
@@ -614,17 +610,14 @@ export default function TransactionsScreen() {
               Load More ({transactions.length - page * PAGE_SIZE} remaining)
             </Text>
           </TouchableOpacity>
-        )}
-
-        {/* Bottom spacing */}
-        <View style={{ height: 32 }} />
-      </ScrollView>
+        ) : <View style={{ height: 24 }} />}
+      />
 
       {/* Delete Confirmation Modal */}
       <ConfirmModal
-        visible={deleteModalVisible}
+        visible={activeModal === "delete"}
         onClose={() => {
-          setDeleteModalVisible(false);
+          setActiveModal("none");
           setTransactionToDelete(null);
         }}
         onConfirm={handleConfirmDelete}
@@ -642,51 +635,58 @@ export default function TransactionsScreen() {
       />
 
       {/* Edit Transaction Modal */}
-      <Modal
-        visible={editModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setEditModalVisible(false)}
+      <ResponsiveModal
+        visible={activeModal === "edit"}
+        onClose={closeEditModal}
+        loading={saving}
+        contentStyle={{ padding: 20 }}
       >
-        <TouchableWithoutFeedback onPress={() => setEditModalVisible(false)}>
-          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 20 }}>
-            {/* Blur overlay */}
-            <View
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(255, 255, 255, 0.7)",
-              }}
-            />
-            <TouchableWithoutFeedback>
-              <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
-                <View
-                  style={{
-                    width: 340,
-                    maxHeight: "90%",
-                    backgroundColor: isDark ? "rgba(30, 30, 40, 0.98)" : "rgba(255, 255, 255, 0.98)",
-                    borderRadius: 20,
-                    padding: 20,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                  }}
-                >
                   {/* Header */}
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                    <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-                      Edit Transaction
-                    </Text>
-                    <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                    <View style={{ flex: 1, paddingRight: 12 }}>
+                      <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
+                        {editMode === "review" ? "Choose a Category" : "Edit Transaction"}
+                      </Text>
+                      <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 4 }}>
+                        {editMode === "review"
+                          ? "Categorize this bank import. The description is optional."
+                          : "Update the transaction details."}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={closeEditModal}>
                       <Ionicons name="close" size={24} color={colors.textMuted} />
                     </TouchableOpacity>
                   </View>
 
-                  <ScrollView showsVerticalScrollIndicator={false}>
-                    {/* Type Selector */}
-                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={{ paddingBottom: 4 }}
+                  >
+                    {editMode === "review" && (
+                      <View
+                        style={{
+                          backgroundColor: colors.warningBg,
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          borderColor: colors.warning + "33",
+                          padding: 12,
+                          marginBottom: 16,
+                        }}
+                      >
+                        <Text style={{ color: colors.warning, fontWeight: "700", fontSize: 13 }}>
+                          Category needed
+                        </Text>
+                        <Text style={{ color: colors.text, fontSize: 12, marginTop: 4, lineHeight: 18 }}>
+                          Choose a category to make this transaction active.
+                        </Text>
+                      </View>
+                    )}
+
+                    {editMode !== "review" && (
+                      <>
+                        {/* Type Selector */}
+                        <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
                       <TouchableOpacity
                         style={{
                           flex: 1,
@@ -714,18 +714,22 @@ export default function TransactionsScreen() {
                           borderColor: editType === "income" ? colors.success : colors.border,
                           alignItems: "center",
                         }}
-                        onPress={() => setEditType("income")}
+                        onPress={() => {
+                          setEditType("income");
+                          setEditIsSplit(false);
+                          setEditSplitAmount("");
+                        }}
                       >
                         <Ionicons name="arrow-up" size={20} color={editType === "income" ? colors.success : colors.textMuted} />
                         <Text style={{ marginTop: 4, fontWeight: "600", color: editType === "income" ? colors.success : colors.textMuted, fontSize: 12 }}>
                           Income
                         </Text>
                       </TouchableOpacity>
-                    </View>
+                        </View>
 
-                    {/* Amount */}
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Amount</Text>
-                    <TextInput
+                        {/* Amount */}
+                        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Amount</Text>
+                        <TextInput
                       style={{
                         backgroundColor: colors.backgroundSecondary,
                         borderRadius: 10,
@@ -741,10 +745,12 @@ export default function TransactionsScreen() {
                       keyboardType="numeric"
                       placeholder="0.00"
                       placeholderTextColor={colors.textMuted}
-                    />
+                        />
+                      </>
+                    )}
 
                     {/* Description */}
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Description</Text>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Description (optional)</Text>
                     <TextInput
                       style={{
                         backgroundColor: colors.backgroundSecondary,
@@ -763,89 +769,46 @@ export default function TransactionsScreen() {
                     />
 
                     {/* Category */}
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Category</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                      <View style={{ flexDirection: "row", gap: 8 }}>
-                        {editCategories.map((cat) => (
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>
+                      Category
+                    </Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                      {categoryOptions.map((category) => {
+                        const isSelected = editCategory === category.id;
+
+                        return (
                           <TouchableOpacity
-                            key={cat.id}
+                            key={category.id}
                             style={{
-                              paddingHorizontal: 14,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              paddingHorizontal: 12,
                               paddingVertical: 8,
                               borderRadius: 8,
-                              backgroundColor: editCategory === cat.id ? colors.primary + "20" : colors.card,
+                              backgroundColor: isSelected ? `${category.color}18` : colors.card,
                               borderWidth: 1,
-                              borderColor: editCategory === cat.id ? colors.primary : colors.border,
+                              borderColor: isSelected ? category.color : colors.border,
                             }}
-                            onPress={() => setEditCategory(cat.id)}
+                            onPress={() => setEditCategory(category.id)}
                           >
-                            <Text style={{ color: editCategory === cat.id ? colors.primary : colors.text, fontSize: 13 }}>
-                              {cat.label}
+                            <Ionicons
+                              name={category.icon}
+                              size={16}
+                              color={category.color}
+                            />
+                            <Text style={{ marginLeft: 6, color: colors.text, fontSize: 13 }}>
+                              {category.label}
                             </Text>
                           </TouchableOpacity>
-                        ))}
-                      </View>
-                    </ScrollView>
+                        );
+                      })}
+                    </View>
 
-                    {editType === "income" && editCategory === "exchange" && (
+                    {editMode !== "review" && (
                       <>
-                        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>
-                          Offsets Expense
-                        </Text>
-                        {editExchangeExpenseOptions.length === 0 ? (
-                          <View
-                            style={{
-                              backgroundColor: colors.backgroundSecondary,
-                              borderRadius: 10,
-                              padding: 12,
-                              borderWidth: 1,
-                              borderColor: colors.border,
-                              marginBottom: 12,
-                            }}
-                          >
-                            <Text style={{ color: colors.textMuted }}>
-                              No synced expense transactions are available yet.
-                            </Text>
-                          </View>
-                        ) : (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                            <View style={{ flexDirection: "row", gap: 8 }}>
-                              {editExchangeExpenseOptions.map(({ transaction, remainingAmount }) => (
-                                <TouchableOpacity
-                                  key={transaction._id}
-                                  style={{
-                                    paddingHorizontal: 12,
-                                    paddingVertical: 8,
-                                    borderRadius: 8,
-                                    backgroundColor:
-                                      editExchangeExpenseId === transaction._id
-                                        ? colors.infoBg
-                                        : colors.card,
-                                    borderWidth: 1,
-                                    borderColor:
-                                      editExchangeExpenseId === transaction._id
-                                        ? colors.info
-                                        : colors.border,
-                                  }}
-                                  onPress={() => setEditExchangeExpenseId(transaction._id)}
-                                >
-                                  <Text style={{ color: colors.text, fontSize: 13, fontWeight: "600" }}>
-                                    {transaction.description}
-                                  </Text>
-                                  <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>
-                                    ₹{remainingAmount.toFixed(2)} left
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </ScrollView>
-                        )}
-                      </>
-                    )}
-
-                    {/* Payment Method */}
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Payment Method</Text>
-                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                        {/* Payment Method */}
+                        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>Payment Method</Text>
+                        <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                       {availableMethods.map((method) => {
                         const config = paymentMethodConfig[method.id];
                         const isSelected = editPaymentMethod === method.id;
@@ -875,11 +838,11 @@ export default function TransactionsScreen() {
                           </TouchableOpacity>
                         );
                       })}
-                    </View>
+                        </View>
 
-                    {/* Split Option (for expenses only) */}
-                    {editType === "expense" && (
-                      <View style={{ marginBottom: 16 }}>
+                        {/* Split Option (for expenses only) */}
+                        {editType === "expense" && (
+                          <View style={{ marginBottom: 16 }}>
                         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                           <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted }}>Split transaction?</Text>
                           <Switch
@@ -906,7 +869,9 @@ export default function TransactionsScreen() {
                             placeholderTextColor={colors.textMuted}
                           />
                         )}
-                      </View>
+                          </View>
+                        )}
+                      </>
                     )}
 
                     {/* Save Button */}
@@ -917,25 +882,39 @@ export default function TransactionsScreen() {
                         padding: 14,
                         alignItems: "center",
                         marginTop: 8,
+                        opacity: saveDisabled ? 0.55 : 1,
                       }}
                       onPress={handleSaveEdit}
-                      disabled={saving || !editAmount}
+                      disabled={saveDisabled}
                     >
                       {saving ? (
-                        <ActivityIndicator color="#fff" />
+                        <ActivityIndicator color={colors.primaryForeground} />
                       ) : (
-                        <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
-                          Save Changes
+                        <Text style={{ color: colors.primaryForeground, fontSize: 16, fontWeight: "600" }}>
+                          {editMode === "review" ? "Save Review" : "Save Changes"}
                         </Text>
                       )}
                     </TouchableOpacity>
+
+                    {editMode !== "review" && (
+                      <TouchableOpacity
+                        style={{ alignItems: "center", padding: 14, marginTop: 8 }}
+                        onPress={() => {
+                          if (!editingTxn) return;
+                          const transaction = editingTxn;
+                          setEditingTxn(null);
+                          setEditMode("edit");
+                          setEditCategory("");
+                          handleDeletePress(transaction);
+                        }}
+                      >
+                        <Text style={{ color: colors.error, fontSize: 15, fontWeight: "600" }}>
+                          Delete transaction
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </ScrollView>
-                </View>
-              </KeyboardAvoidingView>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+      </ResponsiveModal>
     </View>
   );
 }

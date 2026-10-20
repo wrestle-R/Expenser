@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { getApiErrorResponse } from "@/lib/api-errors";
-import { deriveTransactionReviewState } from "@/lib/transaction-review.js";
+import { calculateImportedBalanceMismatch } from "@/lib/bank-import-balance.js";
+import {
+  assertPendingReviewUpdateFields,
+  deriveTransactionReviewState,
+  getPendingReviewUpdate,
+} from "@/lib/transaction-review.js";
 import {
   mapTransactionRow,
-  mapUserRow,
   normalizeDate,
   normalizeNumber,
   sql,
-  updateBalancesForTransaction,
   type PaymentMethod,
   type TransactionRow,
   type TransactionType,
-  type UserRow,
 } from "@/lib/db";
 
 const PAYMENT_METHODS: PaymentMethod[] = ["bank", "cash", "splitwise"];
@@ -232,7 +234,7 @@ function parseTransactionInput(data: Record<string, unknown>) {
 
   const importMetadata = parseImportMetadata(data);
   const reviewState = deriveTransactionReviewState({
-    description: data.description,
+    description: data.description ?? "",
     category: data.category,
     importSource: importMetadata.importSource,
     importSourceKey: importMetadata.importSourceKey,
@@ -259,45 +261,6 @@ function parseTransactionInput(data: Record<string, unknown>) {
     date: normalizeDate(data.date),
     clientRequestId: parseClientRequestId(data.clientRequestId),
   };
-}
-
-async function createBalanceReconciliationAlertIfNeeded(
-  trx: typeof sql,
-  userId: string,
-  transaction: TransactionRow,
-  expectedBankBalance: number
-) {
-  if (
-    transaction.payment_method !== "bank" ||
-    transaction.imported_bank_balance == null
-  ) {
-    return;
-  }
-
-  const bankBalance = Number(transaction.imported_bank_balance);
-  const difference = Number((bankBalance - expectedBankBalance).toFixed(2));
-  if (Math.abs(difference) <= 0.01) {
-    return;
-  }
-
-  await trx`
-    insert into balance_reconciliation_alerts (
-      user_id,
-      transaction_id,
-      payment_method,
-      expected_balance,
-      bank_balance,
-      difference
-    )
-    values (
-      ${userId},
-      ${transaction.id},
-      'bank',
-      ${expectedBankBalance},
-      ${bankBalance},
-      ${difference}
-    )
-  `;
 }
 
 async function validateExchangeExpenseLink(
@@ -330,6 +293,7 @@ async function validateExchangeExpenseLink(
     where id = ${exchangeExpenseId}
       and user_id = ${userId}
       and type = 'expense'
+      and deleted_at is null
     limit 1
   `) as TransactionRow[];
 
@@ -346,6 +310,7 @@ async function validateExchangeExpenseLink(
           and type = 'income'
           and lower(category) = 'exchange'
           and exchange_expense_id = ${exchangeExpenseId}
+          and deleted_at is null
           and id <> ${currentTransactionId}
       `
     : await trx`
@@ -355,6 +320,7 @@ async function validateExchangeExpenseLink(
           and type = 'income'
           and lower(category) = 'exchange'
           and exchange_expense_id = ${exchangeExpenseId}
+          and deleted_at is null
       `) as { total: number | string | null }[];
 
   const alreadyApplied = Number(linkedExchanges[0]?.total ?? 0);
@@ -389,6 +355,7 @@ async function assertExpenseCanSupportLinkedExchanges(
       and type = 'income'
       and lower(category) = 'exchange'
       and exchange_expense_id = ${transactionId}
+      and deleted_at is null
   `) as { total: number | string | null }[];
 
   const linkedAmount = Number(linkedExchanges[0]?.total ?? 0);
@@ -421,6 +388,7 @@ async function assertExpenseCanBeDeleted(
       and type = 'income'
       and lower(category) = 'exchange'
       and exchange_expense_id = ${transactionId}
+      and deleted_at is null
     limit 1
   `) as { id: string }[];
 
@@ -442,6 +410,7 @@ export async function GET(req: Request) {
       select *
       from transactions
       where user_id = ${userId}
+        and deleted_at is null
       order by date desc, created_at desc
     `;
 
@@ -474,6 +443,7 @@ export async function POST(req: Request) {
           from transactions
           where user_id = ${userId}
             and client_request_id = ${payload.clientRequestId}
+            and deleted_at is null
           limit 1
         `) as TransactionRow[];
 
@@ -484,11 +454,26 @@ export async function POST(req: Request) {
       }
 
       if (payload.importSource && payload.importSourceKey) {
+        if (payload.importedAccountSuffix && payload.importedBankReference) {
+          const matchingBankImports = (await trx`
+            select *
+            from transactions
+            where user_id = ${userId}
+              and import_source is not null
+              and imported_account_suffix = ${payload.importedAccountSuffix}
+              and imported_bank_reference = ${payload.importedBankReference}
+            limit 1
+          `) as TransactionRow[];
+
+          if (matchingBankImports[0]) {
+            return { transaction: matchingBankImports[0], insertedNew: false };
+          }
+        }
+
         const existingImports = (await trx`
           select *
           from transactions
           where user_id = ${userId}
-            and import_source = ${payload.importSource}
             and import_source_key = ${payload.importSourceKey}
           limit 1
         `) as TransactionRow[];
@@ -501,9 +486,31 @@ export async function POST(req: Request) {
 
       let transaction: TransactionRow;
       await validateExchangeExpenseLink(trx, userId, payload);
+      let balanceMismatch: ReturnType<typeof calculateImportedBalanceMismatch> | null = null;
+      if (
+        payload.paymentMethod === "bank" &&
+        payload.importSource &&
+        payload.importedBankBalance != null
+      ) {
+        await trx`select ensure_user_balances(${userId})`;
+        const bankBalances = (await trx`
+          select current_balance
+          from balances
+          where user_id = ${userId}
+            and payment_method = 'bank'
+          limit 1
+          for update
+        `) as { current_balance: number | string }[];
+        balanceMismatch = calculateImportedBalanceMismatch({
+          currentBalance: Number(bankBalances[0]?.current_balance ?? 0),
+          type: payload.type,
+          amount: payload.amount,
+          reportedBalance: payload.importedBankBalance,
+        });
+      }
 
       try {
-        const insertedTransactions = (await trx`
+        const insertedTransactions = (await tx.savepoint((insertTx) => (insertTx as unknown as typeof sql)`
           insert into transactions (
             user_id,
             client_request_id,
@@ -543,7 +550,7 @@ export async function POST(req: Request) {
             ${payload.date}
           )
           returning *
-        `) as TransactionRow[];
+        `)) as TransactionRow[];
 
         transaction = insertedTransactions[0];
       } catch (error: unknown) {
@@ -554,7 +561,6 @@ export async function POST(req: Request) {
               select *
               from transactions
               where user_id = ${userId}
-                and import_source = ${payload.importSource}
                 and import_source_key = ${payload.importSourceKey}
               limit 1
             `) as TransactionRow[];
@@ -571,6 +577,7 @@ export async function POST(req: Request) {
               from transactions
               where user_id = ${userId}
                 and client_request_id = ${payload.clientRequestId}
+                and deleted_at is null
               limit 1
             `) as TransactionRow[];
 
@@ -584,42 +591,28 @@ export async function POST(req: Request) {
         throw error;
       }
 
-      const users = (await trx`
-        select *
-        from users
-        where user_id = ${userId}
-        limit 1
-        for update
-      `) as UserRow[];
-
-      const user = users[0];
-      if (user) {
-        const balances = updateBalancesForTransaction(
-          mapUserRow(user).balances,
-          {
-            type: transaction.type,
-            amount: Number(transaction.amount),
-            paymentMethod: transaction.payment_method,
-            splitAmount: Number(transaction.split_amount ?? 0),
-          },
-          1
-        );
-
+      if (balanceMismatch?.shouldAlert) {
         await trx`
-          update users
-          set
-            balance_bank = ${balances.bank},
-            balance_cash = ${balances.cash},
-            balance_splitwise = ${balances.splitwise}
-          where user_id = ${userId}
+          insert into balance_reconciliation_alerts (
+            user_id,
+            transaction_id,
+            payment_method,
+            expected_balance,
+            bank_balance,
+            difference,
+            status,
+            source
+          ) values (
+            ${userId},
+            ${transaction.id},
+            'bank',
+            ${balanceMismatch.expectedBalance},
+            ${payload.importedBankBalance},
+            ${balanceMismatch.difference},
+            'pending',
+            'bank_notification'
+          )
         `;
-
-        await createBalanceReconciliationAlertIfNeeded(
-          trx,
-          userId,
-          transaction,
-          balances.bank
-        );
       }
 
       return { transaction, insertedNew: true };
@@ -654,7 +647,9 @@ export async function DELETE(req: Request) {
       const transactions = (await trx`
         select *
         from transactions
-        where id = ${id} and user_id = ${userId}
+        where id = ${id}
+          and user_id = ${userId}
+          and deleted_at is null
         limit 1
       `) as TransactionRow[];
 
@@ -667,44 +662,21 @@ export async function DELETE(req: Request) {
         await assertExpenseCanBeDeleted(trx, userId, id);
       }
 
-      const users = (await trx`
-        select *
-        from users
-        where user_id = ${userId}
-        limit 1
-        for update
-      `) as UserRow[];
+      const deletedTransactions = (await trx`
+        update transactions
+        set deleted_at = timezone('utc', now())
+        where id = ${id}
+          and user_id = ${userId}
+          and deleted_at is null
+        returning *
+      `) as TransactionRow[];
 
-      const user = users[0];
-      if (user) {
-        const balances = updateBalancesForTransaction(
-          mapUserRow(user).balances,
-          {
-            type: transaction.type,
-            amount: Number(transaction.amount),
-            paymentMethod: transaction.payment_method,
-            splitAmount: Number(transaction.split_amount ?? 0),
-          },
-          -1
-        );
-
-        await trx`
-          update users
-          set
-            balance_bank = ${balances.bank},
-            balance_cash = ${balances.cash},
-            balance_splitwise = ${balances.splitwise}
-          where user_id = ${userId}
-        `;
-        console.log("[API /transactions DELETE] Reversed balances");
+      const deletedTransaction = deletedTransactions[0];
+      if (!deletedTransaction) {
+        return null;
       }
 
-      await trx`
-        delete from transactions
-        where id = ${id} and user_id = ${userId}
-      `;
-
-      return transaction;
+      return deletedTransaction;
     });
 
     if (!deleted) {
@@ -741,7 +713,9 @@ export async function PUT(req: Request) {
       const existingTransactions = (await trx`
         select *
         from transactions
-        where id = ${id} and user_id = ${userId}
+        where id = ${id}
+          and user_id = ${userId}
+          and deleted_at is null
         limit 1
       `) as TransactionRow[];
 
@@ -750,11 +724,30 @@ export async function PUT(req: Request) {
         return null;
       }
 
+      const pendingReviewUpdate =
+        oldTransaction.review_status === "needs_category"
+          ? (() => {
+              assertPendingReviewUpdateFields(data);
+              const update = getPendingReviewUpdate({
+                description: data.description ?? oldTransaction.description,
+                category: data.category,
+              });
+              if (!update.category) {
+                throw new Error("Choose a category to complete this review");
+              }
+              return update;
+            })()
+          : null;
+
       const nextTransaction = parseTransactionInput({
         type: data.type ?? oldTransaction.type,
         amount: data.amount ?? oldTransaction.amount,
-        description: data.description ?? oldTransaction.description,
-        category: data.category ?? oldTransaction.category,
+        description:
+          pendingReviewUpdate?.description ??
+          data.description ??
+          oldTransaction.description,
+        category:
+          pendingReviewUpdate?.category ?? data.category ?? oldTransaction.category,
         importSource: oldTransaction.import_source,
         importSourceKey: oldTransaction.import_source_key,
         paymentMethod: data.paymentMethod ?? oldTransaction.payment_method,
@@ -763,43 +756,14 @@ export async function PUT(req: Request) {
           data.exchangeExpenseId ?? oldTransaction.exchange_expense_id,
         date: data.date ?? oldTransaction.date,
         clientRequestId: oldTransaction.client_request_id,
+        importedAccountSuffix: oldTransaction.imported_account_suffix,
+        importedBankBalance: oldTransaction.imported_bank_balance,
+        importedBankReference: oldTransaction.imported_bank_reference,
+        importedBankConfidence: oldTransaction.imported_bank_confidence,
       });
 
       await validateExchangeExpenseLink(trx, userId, nextTransaction, id);
       await assertExpenseCanSupportLinkedExchanges(trx, userId, id, nextTransaction);
-
-      const users = (await trx`
-        select *
-        from users
-        where user_id = ${userId}
-        limit 1
-        for update
-      `) as UserRow[];
-
-      const user = users[0];
-      if (user) {
-        let balances = updateBalancesForTransaction(
-          mapUserRow(user).balances,
-          {
-            type: oldTransaction.type,
-            amount: Number(oldTransaction.amount),
-            paymentMethod: oldTransaction.payment_method,
-            splitAmount: Number(oldTransaction.split_amount ?? 0),
-          },
-          -1
-        );
-
-        balances = updateBalancesForTransaction(balances, nextTransaction, 1);
-
-        await trx`
-          update users
-          set
-            balance_bank = ${balances.bank},
-            balance_cash = ${balances.cash},
-            balance_splitwise = ${balances.splitwise}
-          where user_id = ${userId}
-        `;
-      }
 
       const updatedTransactions = (await trx`
         update transactions
@@ -813,7 +777,9 @@ export async function PUT(req: Request) {
           split_amount = ${nextTransaction.splitAmount},
           exchange_expense_id = ${nextTransaction.exchangeExpenseId},
           date = ${nextTransaction.date}
-        where id = ${id} and user_id = ${userId}
+        where id = ${id}
+          and user_id = ${userId}
+          and deleted_at is null
         returning *
       `) as TransactionRow[];
 

@@ -49,7 +49,10 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getTransactionDisplayFields } from "@/lib/transaction-review.js";
+import {
+  getPendingReviewUpdate,
+  getTransactionDisplayFields,
+} from "@/lib/transaction-review.js";
 import {
   type ExchangeAwareTransaction,
   getExpenseOffsetSummary,
@@ -65,7 +68,7 @@ interface Transaction {
   amount: number;
   description: string;
   category: string;
-  reviewStatus: "pending" | "complete";
+  reviewStatus: "needs_category" | "active";
   paymentMethod: "bank" | "cash" | "splitwise";
   splitAmount?: number;
   date: string;
@@ -153,7 +156,7 @@ function getCategoriesForType(
 }
 
 export default function TransactionsPage() {
-  const { profile, refreshProfile } = useUserContext();
+  const { profile } = useUserContext();
   const { isStealthMode } = useStealthMode();
   const searchParams = useSearchParams();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -197,6 +200,14 @@ export default function TransactionsPage() {
   const numberClassName = cn(
     "transition-all duration-200",
     isStealthMode && "blur-sm select-none"
+  );
+  const isPendingReviewEdit =
+    editingTransaction?.reviewStatus === "needs_category";
+  const editCategoryOptions = getCategoriesForType(
+    editType,
+    userCategories
+  ).filter(
+    (category) => !isPendingReviewEdit || category.id !== "exchange"
   );
   const transactionMap = new Map(transactions.map((transaction) => [transaction._id, transaction]));
   const exchangeExpenseOptions = getOffsettableExpenses(transactions);
@@ -279,13 +290,8 @@ export default function TransactionsPage() {
 
   const refreshTransactionPage = useCallback(async () => {
     setLoading(true);
-    await Promise.all([
-      fetchTransactions(),
-      fetchWorkflows(),
-      fetchCategories(),
-      refreshProfile(),
-    ]);
-  }, [fetchCategories, fetchTransactions, fetchWorkflows, refreshProfile]);
+    await fetchTransactions();
+  }, [fetchTransactions]);
 
   useEffect(() => {
     fetchTransactions();
@@ -374,7 +380,7 @@ export default function TransactionsPage() {
     setEditDescription(txn.description);
 
     const normalizedCategory = txn.category.trim().toLowerCase();
-    if (!normalizedCategory && txn.reviewStatus === "pending") {
+    if (!normalizedCategory && txn.reviewStatus === "needs_category") {
       setEditCategory("");
       setEditCustomCategory("");
     } else {
@@ -410,7 +416,7 @@ export default function TransactionsPage() {
     const display = getTransactionDisplayFields({
       description: transaction.description,
       category: transaction.category,
-      reviewStatus: "complete",
+      reviewStatus: "active",
     });
     return `${display.description} • ${display.category} • ${new Date(
       transaction.date || 0
@@ -421,63 +427,83 @@ export default function TransactionsPage() {
   };
 
   const handleUpdateTransaction = async () => {
-    if (!editingTransaction || !editAmount || !editMethod) return;
-
-    // Validate split amount
-    if (editIsSplit && Number(editSplitAmount) >= Number(editAmount)) {
-      alert("Split amount must be less than total amount");
-      return;
-    }
-
-    if (editType === "income" && editCategory === "exchange" && !editExchangeExpenseId) {
-      alert("Select the expense transaction this exchange offsets");
-      return;
-    }
-
-    if (editType === "income" && editCategory === "exchange") {
-      const summary = getExpenseOffsetSummary(
-        transactions,
-        editExchangeExpenseId,
-        editingTransaction._id
-      );
-
-      if (!summary) {
-        alert("Selected expense is no longer available");
-        return;
-      }
-
-      if (Number(editAmount) > summary.remainingAmount) {
-        alert(
-          `Exchange amount cannot exceed ₹${summary.remainingAmount.toFixed(2)}`
-        );
-        return;
-      }
-    }
-
-    setEditSaving(true);
+    if (!editingTransaction) return;
     const finalCategory = editCategory === "other" && editCustomCategory ? editCustomCategory : editCategory;
-    const allowsPendingReview = Boolean(editingTransaction.importSource);
-    const nextDescription = allowsPendingReview
-      ? editDescription.trim()
-      : editDescription.trim() || "No description";
-    const nextCategory = allowsPendingReview
+    const allowsCategoryReview = Boolean(editingTransaction.importSource);
+    const nextDescription = editDescription.trim();
+    const nextCategory = allowsCategoryReview
       ? finalCategory?.trim() || ""
       : finalCategory || "General";
 
-    const payload = {
-      type: editType,
-      amount: Number(editAmount),
-      description: nextDescription,
-      category: nextCategory,
-      paymentMethod: editMethod,
-      splitAmount: editIsSplit ? Number(editSplitAmount) : 0,
-      exchangeExpenseId:
-        editType === "income" && finalCategory === "exchange"
-          ? editExchangeExpenseId
-          : undefined,
-    };
+    if (isPendingReviewEdit && !nextCategory) {
+      alert("Choose a category to complete this review");
+      return;
+    }
 
-    console.log("[Transactions] Updating transaction:", payload);
+    let payload: Record<string, unknown>;
+    if (isPendingReviewEdit) {
+      payload = getPendingReviewUpdate({
+        description: nextDescription,
+        category: nextCategory,
+      });
+    } else {
+      if (!editAmount || !editMethod) return;
+
+      if (editIsSplit && Number(editSplitAmount) >= Number(editAmount)) {
+        alert("Split amount must be less than total amount");
+        return;
+      }
+
+      if (editType === "income" && editCategory === "exchange" && !editExchangeExpenseId) {
+        alert("Select the expense transaction this exchange offsets");
+        return;
+      }
+
+      if (editType === "income" && editCategory === "exchange") {
+        const summary = getExpenseOffsetSummary(
+          transactions,
+          editExchangeExpenseId,
+          editingTransaction._id
+        );
+
+        if (!summary) {
+          alert("Selected expense is no longer available");
+          return;
+        }
+
+        if (Number(editAmount) > summary.remainingAmount) {
+          alert(
+            `Exchange amount cannot exceed ₹${summary.remainingAmount.toFixed(2)}`
+          );
+          return;
+        }
+      }
+
+      payload = {
+        type: editType,
+        amount: Number(editAmount),
+        description: nextDescription,
+        category: nextCategory,
+        paymentMethod: editMethod,
+        splitAmount: editIsSplit ? Number(editSplitAmount) : 0,
+        exchangeExpenseId:
+          editType === "income" && finalCategory === "exchange"
+            ? editExchangeExpenseId
+            : undefined,
+      };
+    }
+
+    setEditSaving(true);
+    const snapshot = transactions;
+    setTransactions((current) =>
+      current.map((transaction) =>
+        transaction._id === editingTransaction._id
+          ? { ...transaction, ...payload } as Transaction
+          : transaction
+      )
+    );
+    setEditDialogOpen(false);
+    setEditingTransaction(null);
 
     try {
       const res = await fetch(`/api/transactions?id=${editingTransaction._id}`, {
@@ -487,16 +513,20 @@ export default function TransactionsPage() {
       });
 
       if (res.ok) {
-        console.log("[Transactions] Transaction updated successfully");
-        setEditDialogOpen(false);
-        setEditingTransaction(null);
-        await fetchTransactions();
-        await refreshProfile();
+        const data = await res.json();
+        setTransactions((current) =>
+          current.map((transaction) =>
+            transaction._id === data.transaction._id
+              ? data.transaction
+              : transaction
+          )
+        );
       } else {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || "Failed to update transaction");
       }
     } catch (err) {
+      setTransactions(snapshot);
       console.error("[Transactions] Error updating:", err);
       alert(err instanceof Error ? err.message : "Failed to update transaction");
     } finally {
@@ -540,7 +570,7 @@ export default function TransactionsPage() {
     const payload = {
       type: newType,
       amount: Number(newAmount),
-      description: newDescription.trim() || "No description",
+      description: newDescription.trim(),
       category: finalCategory || "General",
       paymentMethod: newMethod,
       splitAmount: isSplit ? Number(splitAmount) : 0,
@@ -550,7 +580,17 @@ export default function TransactionsPage() {
           : undefined,
     };
 
-    console.log("[Transactions] Adding transaction:", payload);
+    const snapshot = transactions;
+    const optimisticId = `optimistic-${crypto.randomUUID()}`;
+    const optimisticTransaction: Transaction = {
+      _id: optimisticId,
+      ...payload,
+      reviewStatus: "active",
+      date: new Date().toISOString(),
+    } as Transaction;
+    setTransactions((current) => [optimisticTransaction, ...current]);
+    resetForm();
+    setDialogOpen(false);
 
     try {
       const res = await fetch("/api/transactions", {
@@ -560,16 +600,17 @@ export default function TransactionsPage() {
       });
 
       if (res.ok) {
-        console.log("[Transactions] Transaction added successfully");
-        resetForm();
-        setDialogOpen(false);
-        await fetchTransactions();
-        await refreshProfile();
+        const data = await res.json();
+        setTransactions((current) => [
+          data.transaction,
+          ...current.filter((transaction) => transaction._id !== optimisticId),
+        ]);
       } else {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || "Failed to add transaction");
       }
     } catch (err) {
+      setTransactions(snapshot);
       console.error("[Transactions] Error adding:", err);
       alert(err instanceof Error ? err.message : "Failed to add transaction");
     } finally {
@@ -580,48 +621,53 @@ export default function TransactionsPage() {
   const handleConfirmDelete = async () => {
     if (!deleteId) return;
     setDeleting(true);
+    const snapshot = transactions;
+    const targetId = deleteId;
+    setTransactions((current) =>
+      current.filter((transaction) => transaction._id !== targetId)
+    );
+    setDeleteId(null);
     try {
-      console.log("[Transactions] Deleting transaction:", deleteId);
-      const res = await fetch(`/api/transactions?id=${deleteId}`, {
+      const res = await fetch(`/api/transactions?id=${targetId}`, {
         method: "DELETE",
       });
-      if (res.ok) {
-        console.log("[Transactions] Deleted successfully");
-        await fetchTransactions();
-        await refreshProfile();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Failed to delete transaction");
       }
     } catch (err) {
+      setTransactions(snapshot);
       console.error("[Transactions] Error deleting:", err);
+      alert(err instanceof Error ? err.message : "Failed to delete transaction");
     } finally {
       setDeleting(false);
-      setDeleteId(null);
     }
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="space-y-6 overflow-hidden">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold">Transactions</h1>
           <p className="text-muted-foreground">
             View and manage all your transactions
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => void refreshTransactionPage()}>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <Button className="w-full sm:w-auto" variant="outline" onClick={() => void refreshTransactionPage()}>
             <RotateCcw className="mr-2 size-4" />
             Refresh
           </Button>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger
               render={
-                <Button onClick={resetForm}>
+                <Button className="w-full sm:w-auto" onClick={resetForm}>
                   <Plus className="size-4 mr-1" />
                   Add Transaction
                 </Button>
               }
             />
-          <DialogContent className="sm:max-w-2xl">
+          <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>Add Transaction</DialogTitle>
               <DialogDescription>
@@ -702,7 +748,7 @@ export default function TransactionsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Description</Label>
+                <Label>Description (optional)</Label>
                 <Input
                   placeholder="What was this for?"
                   value={newDescription}
@@ -879,11 +925,11 @@ export default function TransactionsPage() {
               return (
                 <div
                   key={txn._id}
-                  className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors"
+                  className="flex items-start gap-3 p-4 transition-colors hover:bg-muted/30 sm:items-center sm:justify-between"
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
                     <div
-                      className={`rounded-lg p-2 ${
+                      className={`shrink-0 rounded-lg p-2 ${
                         txn.type === "income"
                           ? "bg-emerald-500/10"
                           : "bg-red-500/10"
@@ -895,25 +941,25 @@ export default function TransactionsPage() {
                         <TrendingDown className="size-4 text-red-500" />
                       )}
                     </div>
-                    <div>
-                      <p className="font-medium text-sm">
+                    <div className="min-w-0 flex-1">
+                      <p className="break-words text-sm font-medium leading-5">
                         {display.description}
                         {(txn.splitAmount || 0) > 0 && (
                            <span className="ml-2 inline-flex items-center rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium text-orange-500 ring-1 ring-inset ring-orange-500/20">
                              Split
                            </span>
                         )}
-                        {txn.reviewStatus === "pending" && (
+                        {txn.reviewStatus === "needs_category" && (
                           <span className="ml-2 inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20">
-                            Pending review
+                            Choose category
                           </span>
                         )}
                       </p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="mt-1 flex flex-wrap items-center gap-2 pr-1">
                         <Badge variant="secondary" className="text-xs">
                           {config.label}
                         </Badge>
-                        {display.category !== "General" && (
+                        {display.category && display.category !== "General" && (
                           <Badge variant="outline" className="text-xs">
                             {display.category}
                           </Badge>
@@ -923,7 +969,7 @@ export default function TransactionsPage() {
                             Offsets {linkedExpenseDisplay.category}
                           </Badge>
                         )}
-                        <span className="text-xs text-muted-foreground">
+                        <span className="hidden text-xs text-muted-foreground sm:inline">
                           {new Date(txn.date).toLocaleDateString("en-IN", {
                             day: "numeric",
                             month: "short",
@@ -933,10 +979,17 @@ export default function TransactionsPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
+                  <div className="flex shrink-0 items-start gap-2 sm:items-center">
+                    <div className="min-w-[4.5rem] text-right sm:min-w-0">
+                        <p className="text-[11px] text-muted-foreground sm:hidden">
+                          {new Date(txn.date).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </p>
                         <p
-                          className={`font-semibold flex items-center justify-end gap-0.5 ${
+                          className={`flex items-center justify-end gap-0.5 font-semibold ${
                             txn.type === "income"
                               ? "text-emerald-500"
                               : "text-red-500"
@@ -947,52 +1000,54 @@ export default function TransactionsPage() {
                           <span className={numberClassName}>{txn.amount.toLocaleString("en-IN")}</span>
                         </p>
                         {(txn.splitAmount || 0) > 0 && (
-                            <p className="text-[10px] text-orange-500 flex items-center justify-end gap-1">
+                            <p className="flex items-center justify-end gap-1 text-[10px] text-orange-500">
                                 <ArrowRightLeft className="size-2.5" />
                                 Gets back <span className={numberClassName}>₹{txn.splitAmount}</span>
                             </p>
                         )}
                     </div>
-                    {/* Edit Button */}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 text-muted-foreground hover:text-primary"
-                      onClick={() => handleEditClick(txn)}
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                    {/* Delete Button with Confirmation */}
-                    <AlertDialog open={deleteId === txn._id} onOpenChange={(open) => !open && setDeleteId(null)}>
-                      <AlertDialogTrigger render={
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => setDeleteId(txn._id)}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      } />
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete Transaction</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Are you sure you want to delete &quot;{display.description}&quot;? This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel onClick={() => setDeleteId(null)}>Cancel</AlertDialogCancel>
-                          <AlertDialogAction 
-                            variant="destructive" 
-                            onClick={handleConfirmDelete}
-                            disabled={deleting}
+                    <div className="flex shrink-0 items-center gap-1 self-stretch">
+                      {/* Edit Button */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 text-muted-foreground hover:text-primary"
+                        onClick={() => handleEditClick(txn)}
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
+                      {/* Delete Button with Confirmation */}
+                      <AlertDialog open={deleteId === txn._id} onOpenChange={(open) => !open && setDeleteId(null)}>
+                        <AlertDialogTrigger render={
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-muted-foreground hover:text-destructive"
+                            onClick={() => setDeleteId(txn._id)}
                           >
-                            {deleting ? "Deleting..." : "Delete"}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        } />
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Transaction</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Are you sure you want to delete &quot;{display.description}&quot;? This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel onClick={() => setDeleteId(null)}>Cancel</AlertDialogCancel>
+                            <AlertDialogAction 
+                              variant="destructive" 
+                              onClick={handleConfirmDelete}
+                              disabled={deleting}
+                            >
+                              {deleting ? "Deleting..." : "Delete"}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </div>
                 </div>
               );
@@ -1006,17 +1061,21 @@ export default function TransactionsPage() {
         setEditDialogOpen(open);
         if (!open) setEditingTransaction(null);
       }}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Edit Transaction</DialogTitle>
+            <DialogTitle>{isPendingReviewEdit ? "Review Transaction" : "Edit Transaction"}</DialogTitle>
             <DialogDescription>
-              Update the transaction details.
+              {isPendingReviewEdit
+                ? "Choose a category. The description is optional."
+                : "Update the transaction details."}
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 pt-2">
-            {/* Type toggle */}
-            <div className="flex gap-2 p-1 bg-muted rounded-lg">
+            {!isPendingReviewEdit && (
+              <>
+                {/* Type toggle */}
+                <div className="flex gap-2 p-1 bg-muted rounded-lg">
               <button
                 onClick={() => setEditType("expense")}
                 className={cn(
@@ -1037,11 +1096,11 @@ export default function TransactionsPage() {
                 <TrendingUp className="size-4 text-green-500" />
                 Income
               </button>
-            </div>
+                </div>
 
-            <div className="space-y-2">
-              <Label>Amount</Label>
-              <div className="relative">
+                <div className="space-y-2">
+                  <Label>Amount</Label>
+                  <div className="relative">
                 <IndianRupee className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
                 <Input
                   placeholder="0.00"
@@ -1055,11 +1114,13 @@ export default function TransactionsPage() {
                     if (val === "" || (!isNaN(Number(val)) && Number(val) >= 0)) setEditAmount(val);
                   }}
                 />
-              </div>
-            </div>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="space-y-2">
-              <Label>Description</Label>
+              <Label>Description (optional)</Label>
               <Input
                 placeholder="What was this for?"
                 value={editDescription}
@@ -1070,7 +1131,7 @@ export default function TransactionsPage() {
             <div className="space-y-2">
               <Label>Category</Label>
               <div className="grid grid-cols-2 gap-2">
-                {getCategoriesForType(editType, userCategories).map((cat) => {
+                {editCategoryOptions.map((cat) => {
                   const Icon = cat.icon;
                   return (
                     <button
@@ -1100,7 +1161,7 @@ export default function TransactionsPage() {
               )}
             </div>
 
-            {editType === "income" && editCategory === "exchange" && (
+            {!isPendingReviewEdit && editType === "income" && editCategory === "exchange" && (
               <div className="space-y-2">
                 <Label>Offsets Expense</Label>
                 <select
@@ -1121,7 +1182,8 @@ export default function TransactionsPage() {
               </div>
             )}
 
-            <div className="space-y-2">
+            {!isPendingReviewEdit && (
+              <div className="space-y-2">
               <Label>Payment Method</Label>
               <div className="flex gap-2 flex-wrap">
                 {profile?.paymentMethods.map((method) => {
@@ -1145,9 +1207,10 @@ export default function TransactionsPage() {
                   );
                 })}
               </div>
-            </div>
+              </div>
+            )}
 
-            {editType === "expense" && (
+            {!isPendingReviewEdit && editType === "expense" && (
               <div className="pt-3 border-t space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="flex items-center gap-2 cursor-pointer">
@@ -1197,9 +1260,13 @@ export default function TransactionsPage() {
             <Button
               className="w-full"
               onClick={handleUpdateTransaction}
-              disabled={!editAmount || !editMethod || editSaving}
+              disabled={
+                editSaving ||
+                !editCategory.trim() ||
+                (!isPendingReviewEdit && (!editAmount || !editMethod))
+              }
             >
-              {editSaving ? "Saving..." : "Save Changes"}
+              {editSaving ? "Saving..." : isPendingReviewEdit ? "Save Review" : "Save Changes"}
             </Button>
           </div>
         </DialogContent>

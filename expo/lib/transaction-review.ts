@@ -4,32 +4,48 @@ function isImportedPayload(payload: Pick<CreateTransactionPayload, "importSource
   return Boolean(payload.importSource && payload.importSourceKey);
 }
 
+const IMPORTED_FALLBACK_CATEGORY = "bank import";
+
 export function getPendingReviewStatus(
   payload: Pick<CreateTransactionPayload, "description" | "category" | "importSource" | "importSourceKey">
 ) {
   if (!isImportedPayload(payload)) {
-    return "complete" as const;
+    return "active" as const;
   }
 
-  if (!payload.description.trim() || !payload.category.trim()) {
-    return "pending" as const;
+  const category = payload.category.trim().toLowerCase();
+  if (!category || category === IMPORTED_FALLBACK_CATEGORY) {
+    return "needs_category" as const;
   }
 
-  return "complete" as const;
+  return "active" as const;
 }
 
 export function getTransactionDisplayFields(
   transaction: Pick<ITransaction, "description" | "category" | "reviewStatus">
 ) {
-  if (transaction.reviewStatus === "pending") {
+  if (transaction.reviewStatus === "needs_category") {
+    const category = transaction.category.trim();
+
     return {
-      description: transaction.description.trim() || "Pending details",
-      category: transaction.category.trim() || "Pending category",
+      description: transaction.description.trim() || "Bank transaction",
+      category: category === IMPORTED_FALLBACK_CATEGORY ? "" : category,
     };
   }
 
+  const category = transaction.category.trim();
   return {
-    description: transaction.description.trim() || "No description",
-    category: transaction.category.trim() || "General",
+    description: transaction.description.trim() || category || "Transaction",
+    category: category || "General",
+  };
+}
+
+export function getPendingReviewUpdate(value: {
+  description?: string | null;
+  category?: string | null;
+}) {
+  return {
+    description: value.description?.trim() ?? "",
+    category: value.category?.trim() ?? "",
   };
 }

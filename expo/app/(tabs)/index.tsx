@@ -57,7 +57,7 @@ export default function HomeScreen() {
         description: workflow.description,
         category: workflow.category,
         paymentMethod: workflow.paymentMethod,
-        splitAmount: workflow.splitAmount?.toString() || "0",
+        splitAmount: workflow.splitAmount?.toString() || "",
       },
     });
   };
@@ -439,11 +439,7 @@ export default function HomeScreen() {
                     </Text>
                     <Text style={{ fontSize: 12, color: colors.textMuted }}>
                       {paymentMethodConfig[txn.paymentMethod]?.label} · {formatDate(txn.date)}
-                      {txn.reviewStatus === "pending" && " · Pending review"}
-                      {txn.isLocal &&
-                        ` · ${
-                          txn.syncStatus === "failed" ? "Sync failed" : "Pending sync"
-                        }`}
+                      {txn.reviewStatus === "needs_category" && " · Choose category"}
                     </Text>
                   </View>
                 </View>

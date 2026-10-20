@@ -1,4 +1,6 @@
 import postgres from "postgres";
+import { withDefaultPaymentMethod } from "./payment-methods.js";
+import { toIsoString, toRequiredIsoString } from "./iso-date.js";
 
 const connectionString =
   process.env.SUPABASE_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -29,7 +31,7 @@ if (process.env.NODE_ENV !== "production") {
 
 export type PaymentMethod = "bank" | "cash" | "splitwise";
 export type TransactionType = "income" | "expense";
-export type TransactionReviewStatus = "pending" | "complete";
+export type TransactionReviewStatus = "needs_category" | "active";
 
 export interface UserRow {
   id: string;
@@ -38,11 +40,18 @@ export interface UserRow {
   email: string;
   occupation: string;
   payment_methods: string[];
-  balance_bank: number;
-  balance_cash: number;
-  balance_splitwise: number;
   onboarded: boolean;
   dashboard_tutorial_completed: boolean;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
+export interface BalanceRow {
+  user_id: string;
+  payment_method: PaymentMethod;
+  opening_balance: number | string;
+  opening_at: string | Date;
+  current_balance: number | string;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -66,6 +75,7 @@ export interface TransactionRow {
   payment_method: PaymentMethod;
   split_amount: number;
   date: string | Date;
+  deleted_at: string | Date | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -97,6 +107,12 @@ export interface UserProfile {
     cash: number;
     splitwise: number;
   };
+  balanceAccounts: Array<{
+    paymentMethod: PaymentMethod;
+    openingBalance: number;
+    openingAt: string | null;
+    currentBalance: number;
+  }>;
   onboarded: boolean;
   dashboardTutorialCompleted: boolean;
   createdAt: string;
@@ -127,23 +143,49 @@ export interface BalanceReconciliationAlertRow {
   resolved_at: string | Date | null;
 }
 
-export function mapUserRow(row: UserRow): UserProfile {
+export function mapUserRow(row: UserRow, balanceRows: BalanceRow[] = []): UserProfile {
+  const accountByMethod = new Map(
+    balanceRows.map((balance) => [balance.payment_method, balance])
+  );
+  const balanceAccounts = (["bank", "cash", "splitwise"] as PaymentMethod[]).map(
+    (paymentMethod) => {
+      const balance = accountByMethod.get(paymentMethod);
+      const rawOpeningAt = balance?.opening_at;
+      const openingAtText = rawOpeningAt == null ? "" : String(rawOpeningAt);
+      const openingAt =
+        !openingAtText || openingAtText.toLowerCase().includes("infinity")
+          ? null
+          : toIsoString(rawOpeningAt);
+
+      return {
+        paymentMethod,
+        openingBalance: Number(balance?.opening_balance ?? 0),
+        openingAt,
+        currentBalance: Number(balance?.current_balance ?? 0),
+      };
+    }
+  );
+  const currentBalance = (paymentMethod: PaymentMethod) =>
+    balanceAccounts.find((balance) => balance.paymentMethod === paymentMethod)
+      ?.currentBalance ?? 0;
+
   return {
     _id: row.id,
     userId: row.user_id,
     name: row.name,
     email: row.email,
     occupation: row.occupation,
-    paymentMethods: row.payment_methods ?? [],
+    paymentMethods: withDefaultPaymentMethod(row.payment_methods),
     balances: {
-      bank: Number(row.balance_bank ?? 0),
-      cash: Number(row.balance_cash ?? 0),
-      splitwise: Number(row.balance_splitwise ?? 0),
+      bank: currentBalance("bank"),
+      cash: currentBalance("cash"),
+      splitwise: currentBalance("splitwise"),
     },
+    balanceAccounts,
     onboarded: row.onboarded,
     dashboardTutorialCompleted: Boolean(row.dashboard_tutorial_completed),
-    createdAt: new Date(row.created_at).toISOString(),
-    updatedAt: new Date(row.updated_at).toISOString(),
+    createdAt: toRequiredIsoString(row.created_at),
+    updatedAt: toRequiredIsoString(row.updated_at),
   };
 }
 
@@ -170,6 +212,7 @@ export function mapTransactionRow(row: TransactionRow) {
     paymentMethod: row.payment_method,
     splitAmount: Number(row.split_amount ?? 0),
     date: new Date(row.date).toISOString(),
+    deletedAt: row.deleted_at ? new Date(row.deleted_at).toISOString() : undefined,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   };

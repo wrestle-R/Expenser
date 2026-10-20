@@ -162,16 +162,16 @@ export default function WorkflowsPage() {
   };
 
   const handleSaveWorkflow = async () => {
-    if (!workflowName || !newDescription || !newMethod) return;
+    if (!workflowName.trim() || !newMethod) return;
     setSaving(true);
 
     const finalCategory = newCategory === "other" && customCategory ? customCategory : newCategory;
 
     const workflowData = {
-      name: workflowName,
+      name: workflowName.trim(),
       type: newType,
       amount: newAmount ? Number(newAmount) : 0,
-      description: newDescription,
+      description: newDescription.trim(),
       category: finalCategory || "General",
       paymentMethod: newMethod,
       splitAmount: isSplit ? Number(splitAmount) : 0,
@@ -292,7 +292,7 @@ export default function WorkflowsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Description</Label>
+                <Label>Description (optional)</Label>
                 <Input
                   placeholder="What is this for?"
                   value={newDescription}
@@ -400,7 +400,7 @@ export default function WorkflowsPage() {
               <Button
                 className="w-full"
                 onClick={handleSaveWorkflow}
-                disabled={!workflowName || !newDescription || !newMethod || saving}
+                disabled={!workflowName.trim() || !newMethod || saving}
               >
                 {saving ? "Saving..." : "Save Workflow"}
               </Button>

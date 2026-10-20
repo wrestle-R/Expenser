@@ -6,7 +6,10 @@ import {
   IWorkflow,
   IUserProfile,
   ILocalBalance,
+  BottomTabSlot,
 } from "./types";
+import { acknowledgeOutboxOperation, coalesceOutboxOperation } from "./outbox";
+import { withDefaultPaymentMethod } from "./payment-methods.js";
 
 const KEYS = {
   TRANSACTIONS: "@expenser_transactions",
@@ -21,11 +24,249 @@ const KEYS = {
   STEALTH_MODE: "@expenser_stealth_mode",
   LOCAL_BALANCES: "@expenser_local_balances",
   BANK_REVIEW_EVENTS: "@expenser_bank_review_events",
+  BOTTOM_TAB_SLOTS: "@expenser_bottom_tab_slots",
+  OUTBOX: "@expenser_outbox_v2",
+  OUTBOX_MIGRATED: "@expenser_outbox_v2_migrated",
+  OUTBOX_ALIASES: "@expenser_outbox_aliases",
 };
+
+let transactionStorageQueue: Promise<unknown> = Promise.resolve();
+let outboxStorageQueue: Promise<unknown> = Promise.resolve();
+
+function enqueueStorageMutation<T>(
+  queue: "transactions" | "outbox",
+  mutation: () => Promise<T>
+) {
+  const previous =
+    queue === "transactions" ? transactionStorageQueue : outboxStorageQueue;
+  const result = previous.then(mutation, mutation);
+  const settled = result.then(
+    () => undefined,
+    () => undefined
+  );
+  if (queue === "transactions") transactionStorageQueue = settled;
+  else outboxStorageQueue = settled;
+  return result;
+}
+
+export type OutboxEntity = "transaction" | "workflow" | "profile";
+export type OutboxAction = "create" | "update" | "delete";
+
+export interface OutboxOperation {
+  version: 2;
+  id: string;
+  entity: OutboxEntity;
+  entityId: string;
+  action: OutboxAction;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  attempts: number;
+  // Persisted before sending: a timeout or app restart cannot prove it was not applied.
+  inFlight?: boolean;
+}
+
+function outboxId() {
+  return `outbox_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function readOutbox(): Promise<OutboxOperation[]> {
+  const data = await AsyncStorage.getItem(KEYS.OUTBOX);
+  return data ? JSON.parse(data) : [];
+}
+
+async function writeOutbox(operations: OutboxOperation[]) {
+  await AsyncStorage.setItem(KEYS.OUTBOX, JSON.stringify(operations));
+}
+
+export async function getOutbox(): Promise<OutboxOperation[]> {
+  await outboxStorageQueue;
+  return readOutbox();
+}
+
+export async function setOutbox(operations: OutboxOperation[]) {
+  await enqueueStorageMutation("outbox", () => writeOutbox(operations));
+}
+
+export async function removeOutboxOperation(id: string) {
+  await enqueueStorageMutation("outbox", async () => {
+    await writeOutbox((await readOutbox()).filter((operation) => operation.id !== id));
+  });
+}
+
+export async function claimNextOutboxOperation(): Promise<OutboxOperation | null> {
+  return enqueueStorageMutation("outbox", async () => {
+    const operations = await readOutbox();
+    if (!operations.length) return null;
+    const claimed = { ...operations[0], inFlight: true };
+    await writeOutbox([claimed, ...operations.slice(1)]);
+    return claimed;
+  });
+}
+
+export async function completeOutboxOperation(operation: OutboxOperation, serverId?: string) {
+  await enqueueStorageMutation("outbox", async () => {
+    if (serverId && serverId !== operation.entityId) {
+      const aliases = JSON.parse(await AsyncStorage.getItem(KEYS.OUTBOX_ALIASES) ?? "{}");
+      aliases[`${operation.entity}:${operation.entityId}`] = serverId;
+      await AsyncStorage.setItem(KEYS.OUTBOX_ALIASES, JSON.stringify(aliases));
+    }
+    await writeOutbox(acknowledgeOutboxOperation(await readOutbox(), operation, serverId));
+  });
+}
+
+export async function incrementOutboxAttempt(id: string) {
+  await enqueueStorageMutation("outbox", async () => {
+    await writeOutbox((await readOutbox()).map((operation) =>
+      operation.id === id
+        ? { ...operation, attempts: operation.attempts + 1 }
+        : operation
+    ));
+  });
+}
+
+export async function enqueueOutbox(input: {
+  entity: OutboxEntity;
+  entityId: string;
+  action: OutboxAction;
+  payload?: Record<string, unknown>;
+}) {
+  await enqueueStorageMutation("outbox", async () => {
+    const aliases = JSON.parse(await AsyncStorage.getItem(KEYS.OUTBOX_ALIASES) ?? "{}") as Record<string, string>;
+    const normalizedInput = {
+      ...input,
+      entityId: aliases[`${input.entity}:${input.entityId}`] ?? input.entityId,
+      payload: { ...input.payload },
+    };
+    const expenseId = normalizedInput.payload.exchangeExpenseId;
+    if (typeof expenseId === "string" && aliases[`transaction:${expenseId}`]) {
+      normalizedInput.payload.exchangeExpenseId = aliases[`transaction:${expenseId}`];
+    }
+    const operations = await readOutbox();
+    const next = coalesceOutboxOperation(operations, normalizedInput, () => ({
+      version: 2,
+      id: outboxId(),
+      entity: normalizedInput.entity,
+      entityId: normalizedInput.entityId,
+      action: normalizedInput.action,
+      payload: normalizedInput.payload,
+      createdAt: new Date().toISOString(),
+      attempts: 0,
+    }));
+    await writeOutbox(next);
+  });
+}
+
+export async function migrateLegacyPendingData() {
+  if ((await AsyncStorage.getItem(KEYS.OUTBOX_MIGRATED)) === "true") return;
+
+  const [transactions, workflows, deletes, profile] = await Promise.all([
+    getPendingTransactions(),
+    getPendingWorkflows(),
+    getPendingDeletes(),
+    getPendingProfileUpdate(),
+  ]);
+
+  if (transactions.length) {
+    const stored = await getStoredTransactions();
+    await setStoredTransactions([
+      ...transactions,
+      ...stored.filter(
+        (item) => !transactions.some((pending) => pending._id === item._id)
+      ),
+    ]);
+  }
+  if (workflows.length) {
+    const stored = await getStoredWorkflows();
+    await setStoredWorkflows([
+      ...workflows,
+      ...stored.filter(
+        (item) => !workflows.some((pending) => pending._id === item._id)
+      ),
+    ]);
+  }
+
+  for (const transaction of transactions) {
+    await enqueueOutbox({
+      entity: "transaction",
+      entityId: transaction._id,
+      action: "create",
+      payload: transaction as unknown as Record<string, unknown>,
+    });
+  }
+  for (const workflow of workflows) {
+    await enqueueOutbox({
+      entity: "workflow",
+      entityId: workflow._id,
+      action: "create",
+      payload: workflow as unknown as Record<string, unknown>,
+    });
+  }
+  for (const item of deletes) {
+    await enqueueOutbox({ entity: item.type, entityId: item.id, action: "delete" });
+  }
+  if (deletes.length) {
+    const deletedTransactions = new Set(
+      deletes.filter((item) => item.type === "transaction").map((item) => item.id)
+    );
+    const deletedWorkflows = new Set(
+      deletes.filter((item) => item.type === "workflow").map((item) => item.id)
+    );
+    await Promise.all([
+      getStoredTransactions().then((items) =>
+        setStoredTransactions(items.filter((item) => !deletedTransactions.has(item._id)))
+      ),
+      getStoredWorkflows().then((items) =>
+        setStoredWorkflows(items.filter((item) => !deletedWorkflows.has(item._id)))
+      ),
+    ]);
+  }
+  if (profile) {
+    await enqueueOutbox({
+      entity: "profile",
+      entityId: "current",
+      action: "update",
+      payload: profile as Record<string, unknown>,
+    });
+  }
+
+  await AsyncStorage.multiRemove([
+    KEYS.PENDING_TRANSACTIONS,
+    KEYS.PENDING_WORKFLOWS,
+    KEYS.PENDING_DELETES,
+    KEYS.PENDING_PROFILE,
+  ]);
+  await AsyncStorage.setItem(KEYS.OUTBOX_MIGRATED, "true");
+}
+
+const DEFAULT_BOTTOM_TAB_SLOTS: BottomTabSlot[] = [
+  "transactions",
+  "analysis",
+  "empty",
+];
+
+function normalizeBottomTabSlots(value: unknown): BottomTabSlot[] {
+  const allowed = new Set<BottomTabSlot>([
+    "transactions",
+    "workflows",
+    "analysis",
+    "empty",
+  ]);
+  const source = Array.isArray(value) ? value : DEFAULT_BOTTOM_TAB_SLOTS;
+  const normalized = source
+    .filter((item): item is BottomTabSlot => allowed.has(item as BottomTabSlot))
+    .slice(0, 3);
+
+  while (normalized.length < 3) {
+    normalized.push("empty");
+  }
+
+  return normalized;
+}
 
 // === Transactions ===
 export async function getStoredTransactions(): Promise<ITransaction[]> {
   try {
+    await transactionStorageQueue;
     const data = await AsyncStorage.getItem(KEYS.TRANSACTIONS);
     return data ? JSON.parse(data) : [];
   } catch (error) {
@@ -38,9 +279,29 @@ export async function setStoredTransactions(
   transactions: ITransaction[]
 ): Promise<void> {
   try {
-    await AsyncStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(transactions));
+    await enqueueStorageMutation("transactions", () =>
+      AsyncStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(transactions))
+    );
   } catch (error) {
     console.error("[Storage] Error setting transactions:", error);
+    throw error;
+  }
+}
+
+export async function updateStoredTransactions(
+  update: (transactions: ITransaction[]) => ITransaction[] | Promise<ITransaction[]>
+): Promise<ITransaction[]> {
+  try {
+    return await enqueueStorageMutation("transactions", async () => {
+      const data = await AsyncStorage.getItem(KEYS.TRANSACTIONS);
+      const current: ITransaction[] = data ? JSON.parse(data) : [];
+      const next = await update(current);
+      await AsyncStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(next));
+      return next;
+    });
+  } catch (error) {
+    console.error("[Storage] Error updating transactions:", error);
+    throw error;
   }
 }
 
@@ -101,19 +362,20 @@ export async function getStoredBankReviewEvents(): Promise<BankReviewEvent[]> {
   }
 }
 
-export async function addStoredBankReviewEvent(event: BankReviewEvent): Promise<void> {
+export async function addStoredBankReviewEvent(event: BankReviewEvent): Promise<boolean> {
   try {
     const existing = await getStoredBankReviewEvents();
-    if (existing.some((item) => item.importSourceKey === event.importSourceKey)) {
-      return;
-    }
-
     await AsyncStorage.setItem(
       KEYS.BANK_REVIEW_EVENTS,
-      JSON.stringify([event, ...existing].slice(0, 50))
+      JSON.stringify([
+        event,
+        ...existing.filter((item) => item.importSourceKey !== event.importSourceKey),
+      ].slice(0, 50))
     );
+    return true;
   } catch (error) {
     console.error("[Storage] Error adding bank review event:", error);
+    return false;
   }
 }
 
@@ -266,7 +528,12 @@ export async function clearPendingProfileUpdate(): Promise<void> {
 export async function getStoredProfile(): Promise<IUserProfile | null> {
   try {
     const data = await AsyncStorage.getItem(KEYS.PROFILE);
-    return data ? JSON.parse(data) : null;
+    if (!data) return null;
+    const profile = JSON.parse(data) as IUserProfile;
+    return {
+      ...profile,
+      paymentMethods: withDefaultPaymentMethod(profile.paymentMethods),
+    };
   } catch (error) {
     console.error("[Storage] Error getting profile:", error);
     return null;
@@ -275,7 +542,13 @@ export async function getStoredProfile(): Promise<IUserProfile | null> {
 
 export async function setStoredProfile(profile: IUserProfile): Promise<void> {
   try {
-    await AsyncStorage.setItem(KEYS.PROFILE, JSON.stringify(profile));
+    await AsyncStorage.setItem(
+      KEYS.PROFILE,
+      JSON.stringify({
+        ...profile,
+        paymentMethods: withDefaultPaymentMethod(profile.paymentMethods),
+      })
+    );
   } catch (error) {
     console.error("[Storage] Error setting profile:", error);
   }
@@ -351,6 +624,30 @@ export async function setStoredStealthMode(enabled: boolean): Promise<void> {
   }
 }
 
+// === Bottom Tabs ===
+export async function getStoredBottomTabSlots(): Promise<BottomTabSlot[]> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.BOTTOM_TAB_SLOTS);
+    return normalizeBottomTabSlots(data ? JSON.parse(data) : null);
+  } catch (error) {
+    console.error("[Storage] Error getting bottom tab slots:", error);
+    return DEFAULT_BOTTOM_TAB_SLOTS;
+  }
+}
+
+export async function setStoredBottomTabSlots(
+  slots: BottomTabSlot[]
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      KEYS.BOTTOM_TAB_SLOTS,
+      JSON.stringify(normalizeBottomTabSlots(slots))
+    );
+  } catch (error) {
+    console.error("[Storage] Error setting bottom tab slots:", error);
+  }
+}
+
 // === Sync Metadata ===
 export async function getLastSyncTime(): Promise<number | null> {
   try {
@@ -383,6 +680,10 @@ export async function clearAllData(): Promise<void> {
       KEYS.PENDING_PROFILE,
       KEYS.LAST_SYNC,
       KEYS.LOCAL_BALANCES,
+      KEYS.BANK_REVIEW_EVENTS,
+      KEYS.OUTBOX,
+      KEYS.OUTBOX_MIGRATED,
+      KEYS.OUTBOX_ALIASES,
     ]);
   } catch (error) {
     console.error("[Storage] Error clearing all data:", error);

@@ -6,7 +6,7 @@ export type QueuedBankImport = {
   occurredAt: string;
   referenceNumber: string | null;
   payee: string | null;
-  availableBalance: number;
+  availableBalance: number | null;
   confidence: "high" | "medium";
   importSource: string;
   importSourceKey: string;
@@ -19,17 +19,25 @@ export type NotificationAccessHealth = {
   recentReadCount: number;
   lastReadAt: string | null;
   hasRecentReads: boolean;
+  defaultSmsPackage: string | null;
+  queuedCandidateCount: number;
+  queuedReviewEventCount: number;
+  legacyParsedCount: number;
 };
 
-export type QueuedRawBankCandidate = {
+export type NotificationEnvelope = {
   sourceKey: string;
+  sender: string | null;
   message: string;
   capturedAt: string;
+  sourcePackage: string;
   notificationPackage: string;
 };
 
+export type QueuedRawBankCandidate = NotificationEnvelope;
+
 export type QueuedBankReviewEvent = {
-  bankName: string;
+  bankName: string | null;
   eventType: string;
   amount: number | null;
   accountSuffix: string | null;
@@ -51,3 +59,6 @@ export function getQueuedRawBankCandidates(): QueuedRawBankCandidate[];
 export function clearQueuedRawBankCandidates(sourceKeys: string[]): void;
 export function getQueuedBankReviewEvents(): QueuedBankReviewEvent[];
 export function clearQueuedBankReviewEvents(sourceKeys: string[]): void;
+export function addBankImportQueuedListener(
+  listener: (event: { queued: boolean }) => void
+): { remove: () => void };

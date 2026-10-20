@@ -32,6 +32,10 @@ export function getNotificationAccessHealth(lookbackMs) {
     recentReadCount: 0,
     lastReadAt: null,
     hasRecentReads: false,
+    defaultSmsPackage: null,
+    queuedCandidateCount: 0,
+    queuedReviewEventCount: 0,
+    legacyParsedCount: 0,
   };
 }
 
@@ -67,4 +71,9 @@ export function getQueuedBankReviewEvents() {
 
 export function clearQueuedBankReviewEvents(sourceKeys) {
   getNativeModule()?.clearQueuedBankReviewEvents?.(sourceKeys);
+}
+
+export function addBankImportQueuedListener(listener) {
+  const module = getNativeModule();
+  return module?.addListener?.("onBankImportQueued", listener) ?? { remove() {} };
 }

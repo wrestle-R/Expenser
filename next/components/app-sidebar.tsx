@@ -10,10 +10,12 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { LayoutDashboard, ArrowRightLeft, CalendarDays, ChartPie, LogOut, Moon, Sun, UserRound, Wallet, Workflow } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useRouter, usePathname } from "next/navigation";
+import { useEffect } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { createClient } from "@/lib/supabase/client";
@@ -59,6 +61,13 @@ export function AppSidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
+  const { isMobile, setOpenMobile } = useSidebar();
+
+  useEffect(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [isMobile, pathname, setOpenMobile]);
 
   const handleSignOut = async () => {
     localStorage.removeItem("expenser-user-profile");
@@ -71,7 +80,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="border-r shadow-sm">
       {/* Header - Left aligned, no subtitle */}
-      <SidebarHeader className="px-4 py-6">
+      <SidebarHeader className="px-4 py-4">
         <div className="flex items-center gap-3 transition-all duration-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
           <div className="flex aspect-square size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/20 flex-shrink-0">
             <Wallet className="size-5" />
@@ -83,7 +92,7 @@ export function AppSidebar() {
       </SidebarHeader>
 
       {/* Main Navigation */}
-      <SidebarContent className="py-2">
+      <SidebarContent className="py-1">
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu className="gap-1.5 px-3 group-data-[collapsible=icon]:px-2">
@@ -123,8 +132,8 @@ export function AppSidebar() {
       </SidebarContent>
 
       {/* Footer */}
-      <SidebarFooter className="border-t p-3 bg-muted/40">
-        <SidebarMenu className="gap-2 px-1">
+      <SidebarFooter className="border-t bg-muted/40 p-2">
+        <SidebarMenu className="gap-1 px-1">
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={toggleTheme}

@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   getAuthErrorMessage,
+  isAuthRateLimitError,
   validateSignUpForm,
 } from "./auth-form.js";
 
@@ -49,4 +50,10 @@ test("maps rate limit error to a clearer message", () => {
     getAuthErrorMessage("email rate limit exceeded"),
     "Too many attempts. Please wait a few minutes before trying again."
   );
+});
+
+test("detects auth rate limit variants", () => {
+  assert.equal(isAuthRateLimitError("Request rate limit reached"), true);
+  assert.equal(isAuthRateLimitError("Too many requests"), true);
+  assert.equal(isAuthRateLimitError("Invalid login credentials"), false);
 });

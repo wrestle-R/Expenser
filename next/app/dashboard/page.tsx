@@ -24,7 +24,7 @@ interface Transaction {
   amount: number;
   description: string;
   category: string;
-  reviewStatus: "pending" | "complete";
+  reviewStatus: "needs_category" | "active";
   paymentMethod: "bank" | "cash" | "splitwise";
   date: string;
 }
@@ -218,8 +218,8 @@ export default function DashboardPage() {
                             month: "short",
                           })}
                         </p>
-                        {txn.reviewStatus === "pending" && (
-                          <p className="text-xs text-amber-600">Pending review</p>
+                        {txn.reviewStatus === "needs_category" && (
+                          <p className="text-xs text-amber-600">Choose category</p>
                         )}
                       </div>
                     </div>

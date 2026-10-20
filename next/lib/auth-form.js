@@ -21,7 +21,7 @@ function getAuthErrorMessage(message) {
 
   const lower = message.toLowerCase();
 
-  if (lower.includes("rate limit") || lower.includes("rate_limit")) {
+  if (isAuthRateLimitError(message)) {
     return "Too many attempts. Please wait a few minutes before trying again.";
   }
 
@@ -40,5 +40,16 @@ function getAuthErrorMessage(message) {
   return message;
 }
 
+function isAuthRateLimitError(message) {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("too many requests") ||
+    lower.includes("too many attempts")
+  );
+}
+
 exports.validateSignUpForm = validateSignUpForm;
 exports.getAuthErrorMessage = getAuthErrorMessage;
+exports.isAuthRateLimitError = isAuthRateLimitError;

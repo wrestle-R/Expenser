@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -54,9 +54,24 @@ export default function AddWorkflowScreen() {
   }, [categories, category]);
 
   // Filter payment methods based on user's profile
-  const availableMethods = paymentMethods.filter(
-    (m) => profile?.paymentMethods?.includes(m.id)
+  const availableMethods = useMemo(
+    () => {
+      const configuredMethods = profile?.paymentMethods;
+      return configuredMethods?.length
+        ? paymentMethods.filter((method) => configuredMethods.includes(method.id))
+        : paymentMethods.filter((method) => method.id === "bank");
+    },
+    [profile?.paymentMethods]
   );
+
+  useEffect(() => {
+    if (
+      availableMethods.length > 0 &&
+      !availableMethods.some((method) => method.id === paymentMethod)
+    ) {
+      setPaymentMethod(availableMethods[0].id);
+    }
+  }, [availableMethods, paymentMethod]);
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -64,8 +79,18 @@ export default function AddWorkflowScreen() {
       return;
     }
 
-    if (!description.trim()) {
-      showToast("Please enter a description", "error");
+    const parsedAmount = amount ? Number(amount) : undefined;
+    const parsedSplitAmount = splitAmount ? Number(splitAmount) : undefined;
+    if (parsedAmount != null && (!Number.isFinite(parsedAmount) || parsedAmount <= 0)) {
+      showToast("Please enter a valid default amount", "error");
+      return;
+    }
+    if (
+      parsedSplitAmount != null &&
+      (!Number.isFinite(parsedSplitAmount) || parsedSplitAmount < 0 ||
+        (parsedAmount != null && parsedSplitAmount >= parsedAmount))
+    ) {
+      showToast("Default split must be zero or more and less than the amount", "error");
       return;
     }
 
@@ -74,11 +99,11 @@ export default function AddWorkflowScreen() {
       await addWorkflow({
         name: name.trim(),
         type,
-        amount: amount ? parseFloat(amount) : undefined,
+        amount: parsedAmount,
         description: description.trim(),
         category,
         paymentMethod,
-        splitAmount: splitAmount ? parseFloat(splitAmount) : undefined,
+        splitAmount: parsedSplitAmount,
       });
       showToast("Workflow created successfully", "success");
       router.back();
@@ -96,7 +121,8 @@ export default function AddWorkflowScreen() {
     >
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
+        keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
       >
         {/* Workflow Name */}
@@ -256,7 +282,7 @@ export default function AddWorkflowScreen() {
               marginBottom: 8,
             }}
           >
-            Description
+            Description (optional)
           </Text>
           <TextInput
             style={{

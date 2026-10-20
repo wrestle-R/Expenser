@@ -1,18 +1,41 @@
 package expo.modules.expenserbanknotifications
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.provider.Settings
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class ExpenserBankNotificationsModule : Module() {
+  private val queueReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      sendEvent("onBankImportQueued", mapOf("queued" to true))
+    }
+  }
   private val context: Context
     get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
 
   override fun definition() = ModuleDefinition {
     Name("ExpenserBankNotifications")
+    Events("onBankImportQueued")
+
+    OnStartObserving {
+      val filter = IntentFilter(BANK_IMPORT_QUEUED_ACTION)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        context.registerReceiver(queueReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+      } else {
+        @Suppress("DEPRECATION")
+        context.registerReceiver(queueReceiver, filter)
+      }
+    }
+
+    OnStopObserving {
+      runCatching { context.unregisterReceiver(queueReceiver) }
+    }
 
     Function("isNotificationAccessEnabled") {
       isNotificationAccessEnabled()
@@ -20,7 +43,8 @@ class ExpenserBankNotificationsModule : Module() {
 
     Function("getNotificationAccessHealth") { lookbackMs: Double? ->
       val reads = BankNotificationStore.getRecentReads(context)
-      val cutoff = System.currentTimeMillis() - (lookbackMs ?: FOUR_HOURS_MS.toDouble()).toLong()
+      val nowMs = System.currentTimeMillis()
+      val healthLookbackMs = (lookbackMs ?: FOUR_HOURS_MS.toDouble()).toLong()
       var recentReadCount = 0
       var lastReadAt: String? = null
       var lastReadAtMs = 0L
@@ -28,7 +52,11 @@ class ExpenserBankNotificationsModule : Module() {
       for (index in 0 until reads.length()) {
         val item = reads.optJSONObject(index) ?: continue
         val capturedAtMs = item.optLong("capturedAtMs", 0L)
-        if (capturedAtMs >= cutoff) {
+        if (NotificationAccessHealthPolicy.isRecent(
+            capturedAtMs,
+            nowMs,
+            healthLookbackMs
+          )) {
           recentReadCount += 1
         }
         if (capturedAtMs > lastReadAtMs) {
@@ -41,7 +69,11 @@ class ExpenserBankNotificationsModule : Module() {
         "settingEnabled" to isNotificationAccessEnabled(),
         "recentReadCount" to recentReadCount,
         "lastReadAt" to lastReadAt,
-        "hasRecentReads" to (recentReadCount > 0)
+        "hasRecentReads" to (recentReadCount > 0),
+        "defaultSmsPackage" to DefaultSmsPackageResolver.resolve(context),
+        "queuedCandidateCount" to BankNotificationStore.getRawCandidates(context).length(),
+        "queuedReviewEventCount" to BankNotificationStore.getReviewEvents(context).length(),
+        "legacyParsedCount" to BankNotificationStore.getQueued(context).length()
       )
     }
 
@@ -65,7 +97,7 @@ class ExpenserBankNotificationsModule : Module() {
             "occurredAt" to item.optString("occurredAt"),
             "referenceNumber" to item.nullableString("referenceNumber"),
             "payee" to item.nullableString("payee"),
-            "availableBalance" to item.optDouble("availableBalance"),
+            "availableBalance" to if (item.isNull("availableBalance")) null else item.optDouble("availableBalance"),
             "confidence" to item.optString("confidence"),
             "importSource" to item.optString("importSource"),
             "importSourceKey" to item.optString("importSourceKey"),
@@ -89,8 +121,12 @@ class ExpenserBankNotificationsModule : Module() {
         items.add(
           mapOf(
             "sourceKey" to item.optString("sourceKey"),
+            "sender" to item.nullableString("sender"),
             "message" to item.optString("message"),
             "capturedAt" to item.optString("capturedAt"),
+            "sourcePackage" to item.optString("sourcePackage").ifBlank {
+              item.optString("notificationPackage")
+            },
             "notificationPackage" to item.optString("notificationPackage")
           )
         )
@@ -142,5 +178,6 @@ class ExpenserBankNotificationsModule : Module() {
 
   private companion object {
     private const val FOUR_HOURS_MS = 4 * 60 * 60 * 1000L
+    private const val BANK_IMPORT_QUEUED_ACTION = "expo.modules.expenserbanknotifications.BANK_IMPORT_QUEUED"
   }
 }

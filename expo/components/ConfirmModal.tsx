@@ -2,15 +2,14 @@ import React from "react";
 import {
   View,
   Text,
-  Modal,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   ActivityIndicator,
   StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import { Colors } from "../constants/theme";
+import ResponsiveModal from "./ResponsiveModal";
 
 interface ConfirmModalProps {
   visible: boolean;
@@ -74,37 +73,14 @@ export default function ConfirmModal({
   };
 
   return (
-    <Modal
+    <ResponsiveModal
       visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
+      onClose={onClose}
+      loading={loading}
+      maxWidth={380}
+      contentStyle={styles.modalContent}
     >
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.overlay}>
-          {/* Glassy blur effect using semi-transparent overlay */}
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              {
-                backgroundColor: isDark
-                  ? "rgba(0, 0, 0, 0.7)"
-                  : "rgba(255, 255, 255, 0.7)",
-              },
-            ]}
-          />
-          <TouchableWithoutFeedback>
-            <View
-              style={[
-                styles.modalContent,
-                {
-                  backgroundColor: isDark
-                    ? "rgba(30, 30, 40, 0.98)"
-                    : "rgba(255, 255, 255, 0.98)",
-                  borderColor: colors.border,
-                },
-              ]}
-            >
+      <View style={styles.body}>
               {/* Icon */}
               {icon && (
                 <View
@@ -159,33 +135,19 @@ export default function ConfirmModal({
                   )}
                 </TouchableOpacity>
               </View>
-            </View>
-          </TouchableWithoutFeedback>
-        </View>
-      </TouchableWithoutFeedback>
-    </Modal>
+      </View>
+    </ResponsiveModal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
   modalContent: {
+    alignItems: "center",
+  },
+  body: {
     width: "100%",
-    maxWidth: 340,
-    borderRadius: 20,
     padding: 24,
     alignItems: "center",
-    borderWidth: 1,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
   },
   iconContainer: {
     width: 64,

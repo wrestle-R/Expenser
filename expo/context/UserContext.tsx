@@ -1,111 +1,129 @@
 import React, {
   createContext,
-  useContext,
-  useState,
-  useEffect,
   useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
-import { AppState, AppStateStatus } from "react-native";
+import { Alert, AppState, type AppStateStatus } from "react-native";
 import type { Session } from "@supabase/supabase-js";
-import { ApiError, api } from "../lib/api";
+import { api } from "../lib/api";
 import { supabase } from "../lib/supabase";
 import { syncService } from "../lib/sync";
 import {
-  getStoredProfile,
-  setStoredProfile,
-  getStoredTransactions,
-  setStoredTransactions,
-  addPendingTransaction,
-  removePendingTransaction,
-  getStoredWorkflows,
-  setStoredWorkflows,
-  addPendingWorkflow,
-  removePendingWorkflow,
-  addPendingDelete,
   addStoredBankReviewEvent,
-  getLocalBalances,
-  getStoredLocalBalances,
-  getPendingTransactions,
-  getPendingWorkflows,
-  getPendingDeletes,
-  getLastSyncTime,
-  getPendingProfileUpdate,
-  setPendingProfileUpdate,
-  clearPendingProfileUpdate,
+  clearStoredBankReviewEvents,
+  enqueueOutbox,
+  getStoredBankReviewEvents,
+  getStoredProfile,
+  getStoredStealthMode,
+  getStoredTransactions,
+  getStoredWorkflows,
+  setStoredProfile,
+  setStoredWorkflows,
+  updateStoredTransactions,
 } from "../lib/storage";
-import { IUserProfile, ITransaction, IWorkflow, ILocalBalance, CreateTransactionPayload, CreateWorkflowPayload, UpdateTransactionPayload } from "../lib/types";
+import type {
+  BankImportStatus,
+  BankReviewEvent,
+  CreateTransactionPayload,
+  CreateWorkflowPayload,
+  ITransaction,
+  IUserProfile,
+  IWorkflow,
+  ParsedBankNotificationResponse,
+  PaymentMethod,
+  UpdateTransactionPayload,
+} from "../lib/types";
 import { generateTempId } from "../lib/utils";
 import { notificationService } from "../lib/notifications";
 import {
   bankImportToTransactionPayload,
+  addBankImportQueuedListener,
   clearQueuedBankImports,
+  clearQueuedNativeBankReviewEvents,
   clearQueuedRawBankImportCandidates,
+  getBankImportQueueSnapshot,
   getQueuedBankImports,
+  getQueuedNativeBankReviewEvents,
   getQueuedRawBankImportCandidates,
 } from "../lib/bank-imports";
 import { getPendingReviewStatus } from "../lib/transaction-review";
-import type { ParsedBankNotificationResponse } from "../lib/types";
-
-function dedupeTransactions(items: ITransaction[]) {
-  const deduped = new Map<string, ITransaction>();
-
-  for (const item of items) {
-    const key = item.clientRequestId || item._id;
-    const existing = deduped.get(key);
-
-    if (!existing || (existing.isLocal && !item.isLocal)) {
-      deduped.set(key, item);
-    }
-  }
-
-  return Array.from(deduped.values()).sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-  );
-}
+import { withDefaultPaymentMethod } from "../lib/payment-methods.js";
+import {
+  createCoalescingDrain,
+  processBankImportCandidate,
+} from "../lib/bank-import-processing";
+import {
+  dedupeTransactions,
+  optimisticAddTransaction,
+  optimisticDeleteTransaction,
+  optimisticUpdateTransaction,
+} from "../lib/transaction-state.js";
 
 function dedupeWorkflows(items: IWorkflow[]) {
-  const deduped = new Map<string, IWorkflow>();
-
-  for (const item of items) {
-    const existing = deduped.get(item._id);
-
-    if (!existing || (existing.isLocal && !item.isLocal)) {
-      deduped.set(item._id, item);
-    }
-  }
-
-  return Array.from(deduped.values()).sort(
+  return [...new Map(items.map((item) => [item._id, item])).values()].sort(
     (a, b) =>
       new Date(b.updatedAt || b.createdAt).getTime() -
       new Date(a.updatedAt || a.createdAt).getTime()
   );
 }
 
-function isRetryableSyncError(error: unknown) {
-  if (error instanceof ApiError) {
-    return error.status >= 500 || [408, 409, 429].includes(error.status);
-  }
-
-  return true;
-}
-
-function parsedBankResponseToTransactionPayload(
+function parsedResponsePayload(
   response: Extract<ParsedBankNotificationResponse, { kind: "transaction" }>
 ): CreateTransactionPayload {
   return {
     type: response.parsed.type,
-    amount: Number(response.parsed.amount),
-    description: "",
+    amount: response.parsed.amount,
+    description: response.parsed.payee ?? "",
     category: "",
     paymentMethod: "bank",
     splitAmount: 0,
     date: response.parsed.occurredAt,
     importSource: response.importSource,
     importSourceKey: response.importSourceKey,
-    importedAccountSuffix: response.parsed.accountSuffix,
-    importedBankBalance: Number(response.parsed.availableBalance),
+    importedAccountSuffix: response.parsed.accountSuffix ?? undefined,
+    importedBankBalance: response.parsed.availableBalance ?? undefined,
     importedBankReference: response.parsed.referenceNumber ?? undefined,
     importedBankConfidence: response.parsed.confidence,
+  };
+}
+
+function signedAmount(transaction: ITransaction) {
+  return transaction.type === "income" ? transaction.amount : -transaction.amount;
+}
+
+function deriveBalances(profile: IUserProfile | null, transactions: ITransaction[]) {
+  if (!profile?.balanceAccounts?.length) {
+    return profile?.balances ?? { bank: 0, cash: 0, splitwise: 0 };
+  }
+
+  const account = (method: PaymentMethod) =>
+    profile.balanceAccounts.find((item) => item.paymentMethod === method);
+  const afterOpening = (transaction: ITransaction, method: PaymentMethod) => {
+    const openingAt = account(method)?.openingAt;
+    return !openingAt || new Date(transaction.date) > new Date(openingAt);
+  };
+  const active = transactions.filter((item) => !item.deletedAt);
+  const total = (method: PaymentMethod) =>
+    active
+      .filter((item) => item.paymentMethod === method && afterOpening(item, method))
+      .reduce((sum, item) => sum + signedAmount(item), 0);
+
+  const bank = (account("bank")?.openingBalance ?? 0) + total("bank");
+  const splitReceivables = active
+    .filter((item) => item.type === "expense" && afterOpening(item, "splitwise"))
+    .reduce((sum, item) => sum + Math.max(0, Number(item.splitAmount || 0)), 0);
+
+  return {
+    bank,
+    cash: (account("cash")?.openingBalance ?? 0) + total("cash"),
+    splitwise:
+      (account("splitwise")?.openingBalance ?? 0) +
+      total("splitwise") +
+      splitReceivables,
   };
 }
 
@@ -113,31 +131,25 @@ interface UserContextType {
   profile: IUserProfile | null;
   transactions: ITransaction[];
   workflows: IWorkflow[];
+  bankReviewEvents: BankReviewEvent[];
+  bankImportStatus: BankImportStatus;
   loading: boolean;
   syncing: boolean;
   isOnline: boolean;
-  pendingCount: number;
-  lastSyncTime: number | null;
   refreshProfile: () => Promise<void>;
   refreshTransactions: () => Promise<void>;
   refreshWorkflows: () => Promise<void>;
   refreshAll: () => Promise<void>;
   manualRefresh: () => Promise<void>;
   updateProfile: (data: Partial<IUserProfile>) => Promise<void>;
-  addTransaction: (
-    data: CreateTransactionPayload
-  ) => Promise<void>;
-  updateTransaction: (
-    id: string,
-    data: UpdateTransactionPayload
-  ) => Promise<void>;
+  addTransaction: (data: CreateTransactionPayload) => Promise<void>;
+  updateTransaction: (id: string, data: UpdateTransactionPayload) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
-  retryFailedTransaction: (id: string) => Promise<void>;
-  addWorkflow: (
-    data: CreateWorkflowPayload
-  ) => Promise<void>;
+  addWorkflow: (data: CreateWorkflowPayload) => Promise<void>;
   deleteWorkflow: (id: string) => Promise<void>;
-  getBalance: (method: "bank" | "cash" | "splitwise") => number;
+  dismissBankReviewEvent: (sourceKey: string) => Promise<void>;
+  retryBankReviewEvent: (sourceKey: string) => Promise<void>;
+  getBalance: (method: PaymentMethod) => number;
   getTotalBalance: () => number;
 }
 
@@ -145,55 +157,69 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const isSignedIn = Boolean(session?.user);
+  const [authLoaded, setAuthLoaded] = useState(false);
   const [profile, setProfile] = useState<IUserProfile | null>(null);
   const [transactions, setTransactions] = useState<ITransaction[]>([]);
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
-  const [localBalances, setLocalBalancesState] = useState<ILocalBalance | null>(null);
+  const [bankReviewEvents, setBankReviewEvents] = useState<BankReviewEvent[]>([]);
+  const [bankImportStatus, setBankImportStatus] = useState<BankImportStatus>({
+    queuedCandidates: 0,
+    queuedNativeReviews: 0,
+    localReviews: 0,
+    retrying: false,
+  });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(syncService.isOnlineSync());
-  const [pendingCount, setPendingCount] = useState(0);
-  const [lastSyncTime, setLastSyncTimeState] = useState<number | null>(null);
-  const [authTimedOut, setAuthTimedOut] = useState(false);
+  const transactionsRef = useRef<ITransaction[]>([]);
+  const bankImportDrainRef = useRef<(() => void) | null>(null);
+  const rawRetryAttemptRef = useRef(0);
+  const rawRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSignedIn = Boolean(session?.user);
+
+  const setTransactionSnapshot = useCallback((next: ITransaction[]) => {
+    transactionsRef.current = next;
+    setTransactions(next);
+  }, []);
+
+  const loadLocalData = useCallback(async () => {
+    const [storedProfile, storedTransactions, storedWorkflows, storedReviewEvents] = await Promise.all([
+      getStoredProfile(),
+      getStoredTransactions(),
+      getStoredWorkflows(),
+      getStoredBankReviewEvents(),
+    ]);
+    setProfile(storedProfile);
+    setTransactionSnapshot(dedupeTransactions(storedTransactions));
+    setWorkflows(dedupeWorkflows(storedWorkflows));
+    setBankReviewEvents(storedReviewEvents);
+    const queue = getBankImportQueueSnapshot();
+    setBankImportStatus((current) => ({
+      ...current,
+      queuedCandidates: queue.candidates,
+      queuedNativeReviews: queue.reviewEvents,
+      localReviews: storedReviewEvents.length,
+    }));
+    return Boolean(storedProfile || storedTransactions.length || storedWorkflows.length);
+  }, [setTransactionSnapshot]);
 
   useEffect(() => {
     let mounted = true;
-
-    supabase.auth.getSession().then(({ data }) => {
+    void supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       setSession(data.session);
-      setIsLoaded(true);
+      setAuthLoaded(true);
     });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
-      setIsLoaded(true);
+      setAuthLoaded(true);
     });
-
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      data.subscription.unsubscribe();
     };
   }, []);
 
-  useEffect(() => {
-    if (isLoaded) {
-      setAuthTimedOut(false);
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      setAuthTimedOut(true);
-    }, 5000);
-
-    return () => clearTimeout(timeout);
-  }, [isLoaded]);
-
-  // Set API token getter for fresh tokens on every request
   useEffect(() => {
     if (isSignedIn) {
       api.setTokenGetter(async () => {
@@ -207,772 +233,432 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isSignedIn, session?.access_token]);
 
-  // Subscribe to sync status changes
-  useEffect(() => {
-    const unsubscribe = syncService.subscribe(async (status) => {
+  useEffect(() =>
+    syncService.subscribe((status) => {
       setIsOnline(status.isOnline);
       setSyncing(status.isSyncing);
-      setPendingCount(status.pendingCount);
-      setLastSyncTimeState(status.lastSyncTime);
-
-      // Refresh local state after sync completes
-      if (!status.isSyncing) {
-        await loadLocalData();
+      if (status.error) {
+        Alert.alert(
+          status.errorKind === "rejected" ? "Change could not be uploaded" : "Sync could not finish",
+          status.error,
+        );
       }
-    });
+      if (!status.isSyncing) void loadLocalData();
+    }), [loadLocalData]);
 
-    return () => unsubscribe();
-  }, []);
-
-  // Pause/resume auto-refresh on app background/foreground
   useEffect(() => {
-    const handleAppState = (state: AppStateStatus) => {
+    const listener = (state: AppStateStatus) => {
       if (state === "active" && isSignedIn) {
-        // App came back to foreground - trigger a sync
-        syncService.syncAll().catch(console.error);
+        void syncService.syncAll();
+        bankImportDrainRef.current?.();
       }
     };
-
-    const sub = AppState.addEventListener("change", handleAppState);
-    return () => sub.remove();
+    const subscription = AppState.addEventListener("change", listener);
+    return () => subscription.remove();
   }, [isSignedIn]);
 
-  // Load local data on mount
-  const loadLocalData = useCallback(async () => {
-    try {
-      const [
-        storedProfile,
-        storedTxns,
-        storedWorkflows,
-        pendingTxns,
-        pendingWorkflows,
-        pendingDeletes,
-        pendingProfile,
-        storedBalances,
-        liveBalances,
-        lastSync,
-      ] =
-        await Promise.all([
-          getStoredProfile(),
-          getStoredTransactions(),
-          getStoredWorkflows(),
-          getPendingTransactions(),
-          getPendingWorkflows(),
-          getPendingDeletes(),
-          getPendingProfileUpdate(),
-          getStoredLocalBalances(),
-          getLocalBalances(),
-          getLastSyncTime(),
-        ]);
-
-      const pendingTransactionDeletes = new Set(
-        pendingDeletes
-          .filter((item) => item.type === "transaction")
-          .map((item) => item.id)
-      );
-      const pendingWorkflowDeletes = new Set(
-        pendingDeletes
-          .filter((item) => item.type === "workflow")
-          .map((item) => item.id)
-      );
-
-      const visibleStoredTransactions = storedTxns.filter(
-        (txn) => !pendingTransactionDeletes.has(txn._id)
-      );
-      const visiblePendingTransactions = pendingTxns.filter(
-        (txn) => !pendingTransactionDeletes.has(txn._id)
-      );
-      const visibleStoredWorkflows = storedWorkflows.filter(
-        (workflow) => !pendingWorkflowDeletes.has(workflow._id)
-      );
-      const visiblePendingWorkflows = pendingWorkflows.filter(
-        (workflow) => !pendingWorkflowDeletes.has(workflow._id)
-      );
-
-      const hydratedProfile =
-        storedProfile && pendingProfile ? { ...storedProfile, ...pendingProfile } : storedProfile;
-
-      setProfile(hydratedProfile ?? null);
-      setTransactions(
-        dedupeTransactions([
-          ...visiblePendingTransactions,
-          ...visibleStoredTransactions,
-        ])
-      );
-      setWorkflows(
-        dedupeWorkflows([
-          ...visiblePendingWorkflows,
-          ...visibleStoredWorkflows,
-        ])
-      );
-      setPendingCount(
-        pendingTxns.length +
-          pendingWorkflows.length +
-          pendingDeletes.length +
-          (pendingProfile ? 1 : 0)
-      );
-      setLastSyncTimeState(lastSync);
-      setLocalBalancesState(
-        storedBalances ?? (hydratedProfile ? hydratedProfile.balances : liveBalances)
-      );
-
-      return {
-        hasRenderableData:
-          Boolean(hydratedProfile) ||
-          visibleStoredTransactions.length > 0 ||
-          visibleStoredWorkflows.length > 0 ||
-          visiblePendingTransactions.length > 0 ||
-          visiblePendingWorkflows.length > 0,
-      };
-    } catch (error) {
-      console.error("[UserContext] Error loading local data:", error);
-      return { hasRenderableData: false };
-    }
-  }, []);
-
-  // Initialize data on mount - OFFLINE FIRST
   useEffect(() => {
     let cancelled = false;
-
     async function initialize() {
-      if (isLoaded && !isSignedIn) {
-        setProfile(null);
-        setTransactions([]);
-        setWorkflows([]);
-        setLocalBalancesState(null);
-        setPendingCount(0);
-        setLastSyncTimeState(null);
-        setLoading(false);
-        return;
-      }
-
-      if (!isLoaded && !authTimedOut) {
-        return;
-      }
-
+      if (!authLoaded) return;
       setLoading(true);
-
-      // Step 1: Hydrate cached data first
-      const localSnapshot = await loadLocalData();
-      if (cancelled) return;
-      if (localSnapshot.hasRenderableData) {
-        setLoading(false);
-      }
-
-      // Step 2: Initialize sync service + notifications
+      await loadLocalData();
       await syncService.initialize();
-      notificationService.initialize().catch(console.error);
-
-      // Step 3: Reconcile with the server when possible
-      try {
-        if (!isLoaded || !isSignedIn) {
-          if (!cancelled) {
-            setLoading(false);
-          }
-          return;
-        }
-
-        const online = await syncService.isOnline();
-        if (!online) {
-          console.log("[UserContext] Offline on launch - staying on cached data");
-          if (!cancelled) {
-            setLoading(false);
-          }
-          return;
-        }
-
-        await syncService.syncAll();
+      await notificationService.initialize();
+      if (isSignedIn) await syncService.syncAll();
+      if (!cancelled) {
         await loadLocalData();
-      } catch (error) {
-        console.log("[UserContext] Offline - using cached data:", error);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     }
-
-    initialize();
-
+    void initialize();
     return () => {
       cancelled = true;
       syncService.cleanup();
       notificationService.cleanup();
     };
-  }, [authTimedOut, isLoaded, isSignedIn, loadLocalData]);
+  }, [authLoaded, isSignedIn, loadLocalData]);
 
   const refreshProfile = useCallback(async () => {
-    try {
-      await syncService.fetchProfile();
-      await loadLocalData();
-    } catch (error) {
-      console.error("[UserContext] Error refreshing profile:", error);
-    }
+    await syncService.fetchProfile();
+    await loadLocalData();
   }, [loadLocalData]);
-
   const refreshTransactions = useCallback(async () => {
-    try {
-      await syncService.fetchTransactions();
-      await loadLocalData();
-    } catch (error) {
-      console.error("[UserContext] Error refreshing transactions:", error);
-    }
+    await syncService.fetchTransactions();
+    await loadLocalData();
   }, [loadLocalData]);
-
   const refreshWorkflows = useCallback(async () => {
-    try {
-      await syncService.fetchWorkflows();
-      await loadLocalData();
-    } catch (error) {
-      console.error("[UserContext] Error refreshing workflows:", error);
-    }
+    await syncService.fetchWorkflows();
+    await loadLocalData();
   }, [loadLocalData]);
-
   const refreshAll = useCallback(async () => {
-    await Promise.all([refreshProfile(), refreshTransactions(), refreshWorkflows()]);
-  }, [refreshProfile, refreshTransactions, refreshWorkflows]);
-
-  // Manual refresh button handler - forces a full sync + fetch
-  const manualRefresh = useCallback(async () => {
-    setSyncing(true);
-    try {
-      await syncService.forceRefresh();
-    } catch (error) {
-      console.error("[UserContext] Manual refresh failed:", error);
-    } finally {
-      await loadLocalData();
-      setSyncing(false);
-    }
+    await syncService.forceRefresh();
+    await loadLocalData();
   }, [loadLocalData]);
+  const manualRefresh = refreshAll;
 
-  const updateProfile = useCallback(
-    async (data: Partial<IUserProfile>) => {
-      try {
-        const online = await syncService.isOnline();
-        if (online) {
-          const updated = await api.updateProfile(data);
-          setProfile(updated);
-          await setStoredProfile(updated);
-          await clearPendingProfileUpdate();
-          setLocalBalancesState(updated.balances);
-        } else {
-          // Update locally
-          if (profile) {
-            const updated = { ...profile, ...data };
-            setProfile(updated);
-            await setStoredProfile(updated);
-            const existingPending = await getPendingProfileUpdate();
-            await setPendingProfileUpdate({
-              ...(existingPending ?? {}),
-              ...data,
-            });
-            if (updated.balances) {
-              setLocalBalancesState(updated.balances);
-            }
-          }
+  const updateProfile = useCallback(async (data: Partial<IUserProfile>) => {
+    if (!profile) return;
+    const normalizedData = Array.isArray(data.paymentMethods)
+      ? {
+          ...data,
+          paymentMethods: withDefaultPaymentMethod(data.paymentMethods),
         }
-      } catch (error) {
-        console.error("[UserContext] Error updating profile:", error);
-        throw error;
+      : data;
+    const updated = {
+      ...profile,
+      ...normalizedData,
+      paymentMethods: withDefaultPaymentMethod(
+        Array.isArray(normalizedData.paymentMethods)
+          ? normalizedData.paymentMethods
+          : profile.paymentMethods
+      ),
+    };
+    setProfile(updated);
+    await setStoredProfile(updated);
+    await enqueueOutbox({
+      entity: "profile",
+      entityId: "current",
+      action: "update",
+      payload: normalizedData as Record<string, unknown>,
+    });
+    void syncService.syncAll();
+  }, [profile]);
+
+  const addTransaction = useCallback(async (payload: CreateTransactionPayload) => {
+    const storedTransactions = transactionsRef.current;
+    if (
+      payload.importSource &&
+      payload.importSourceKey &&
+      storedTransactions.some(
+        (item) =>
+          item.importSource === payload.importSource &&
+          item.importSourceKey === payload.importSourceKey
+      )
+    ) {
+      return;
+    }
+    const clientRequestId = payload.clientRequestId || generateTempId();
+    const now = payload.date || new Date().toISOString();
+    const normalizedPayload = {
+      ...payload,
+      clientRequestId,
+      description: payload.description?.trim() ?? "",
+      category: payload.category?.trim() ?? "",
+      date: now,
+    };
+    const transaction: ITransaction = {
+      _id: clientRequestId,
+      userId: profile?.userId ?? "",
+      ...normalizedPayload,
+      reviewStatus: getPendingReviewStatus(normalizedPayload),
+      splitAmount: normalizedPayload.splitAmount || 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const next = optimisticAddTransaction(storedTransactions, transaction);
+    setTransactionSnapshot(next);
+    let inserted = true;
+    const persisted = await updateStoredTransactions((current) => {
+      if (
+        transaction.importSourceKey &&
+        current.some(
+          (item) => item.importSourceKey === transaction.importSourceKey
+        )
+      ) {
+        inserted = false;
+        return current;
       }
-    },
-    [profile]
-  );
+      return optimisticAddTransaction(current, transaction);
+    });
+    setTransactionSnapshot(persisted);
+    if (!inserted) return;
+    await enqueueOutbox({
+      entity: "transaction",
+      entityId: transaction._id,
+      action: "create",
+      payload: transaction as unknown as Record<string, unknown>,
+    });
 
-  const addTransaction = useCallback(
-    async (payload: CreateTransactionPayload) => {
-      const online = syncService.isOnlineSync();
-      const clientRequestId = generateTempId();
-      const now = payload.date || new Date().toISOString();
-
-      const tempTransaction: ITransaction = {
-        _id: clientRequestId,
-        userId: profile?.userId || "",
-        clientRequestId,
-        type: payload.type,
-        amount: payload.amount,
-        description: payload.description,
-        category: payload.category,
-        reviewStatus: getPendingReviewStatus(payload),
-        paymentMethod: payload.paymentMethod,
-        splitAmount: payload.splitAmount || 0,
-        exchangeExpenseId: payload.exchangeExpenseId,
-        importSource: payload.importSource,
-        importSourceKey: payload.importSourceKey,
-        importedAccountSuffix: payload.importedAccountSuffix,
-        importedBankBalance: payload.importedBankBalance,
-        importedBankReference: payload.importedBankReference,
-        importedBankConfidence: payload.importedBankConfidence,
-        date: now,
-        createdAt: now,
-        updatedAt: now,
-        isLocal: true,
-        syncStatus: "pending",
-      };
-
-      setTransactions((prev) => dedupeTransactions([tempTransaction, ...prev]));
-
-      const newBalances = await syncService.applyLocalTransactionImpact(
-        tempTransaction,
-        1
-      );
-      setLocalBalancesState(newBalances);
-
-      await addPendingTransaction(tempTransaction);
-      setPendingCount((prev) => {
-        notificationService.onPendingItemAdded(prev + 1);
-        return prev + 1;
+    if (transaction.importSourceKey) {
+      await notificationService.notifyImportedTransaction({
+        importSourceKey: transaction.importSourceKey,
+        amount: transaction.amount,
+        type: transaction.type,
+        stealthMode: await getStoredStealthMode(),
       });
+    }
+    void syncService.syncAll();
+  }, [profile?.userId, setTransactionSnapshot]);
 
-      if (!online) {
-        return;
-      }
+  const updateTransaction = useCallback(async (id: string, payload: UpdateTransactionPayload) => {
+    const existing = transactionsRef.current.find((item) => item._id === id);
+    if (!existing) throw new Error("Transaction not found");
+    const updated: ITransaction = {
+      ...existing,
+      ...payload,
+      description: payload.description?.trim() ?? existing.description ?? "",
+      category: payload.category?.trim() ?? existing.category,
+      reviewStatus: getPendingReviewStatus({ ...existing, ...payload }),
+      updatedAt: new Date().toISOString(),
+    };
+    setTransactionSnapshot(
+      optimisticUpdateTransaction(transactionsRef.current, id, updated)
+    );
+    const persisted = await updateStoredTransactions((current) =>
+      optimisticUpdateTransaction(current, id, updated)
+    );
+    setTransactionSnapshot(persisted);
+    await enqueueOutbox({
+      entity: "transaction",
+      entityId: id,
+      action: "update",
+      payload: payload as Record<string, unknown>,
+    });
+    void syncService.syncAll();
+  }, [setTransactionSnapshot]);
 
-      void (async () => {
-        try {
-          const created = await api.createTransaction({
-            ...payload,
-            date: now,
-            clientRequestId,
-          });
-
-          await removePendingTransaction(tempTransaction._id);
-          setPendingCount((prev) => Math.max(0, prev - 1));
-
-          const storedTransactions = await getStoredTransactions();
-          await setStoredTransactions(
-            dedupeTransactions([created, ...storedTransactions])
-          );
-          setTransactions((prev) =>
-            dedupeTransactions(
-              prev.map((t) => (t._id === tempTransaction._id ? created : t))
-            )
-          );
-
-          void refreshProfile();
-        } catch (error) {
-          console.log(
-            "[UserContext] Failed immediate transaction sync, will retry later:",
-            error
-          );
-        }
-      })();
-    },
-    [profile, refreshProfile]
-  );
+  const deleteTransaction = useCallback(async (id: string) => {
+    setTransactionSnapshot(
+      optimisticDeleteTransaction(transactionsRef.current, id)
+    );
+    const persisted = await updateStoredTransactions((current) =>
+      optimisticDeleteTransaction(current, id)
+    );
+    setTransactionSnapshot(persisted);
+    await enqueueOutbox({ entity: "transaction", entityId: id, action: "delete" });
+    void syncService.syncAll();
+  }, [setTransactionSnapshot]);
 
   const importQueuedBankNotifications = useCallback(async () => {
-    if (!isSignedIn || !profile) {
-      return;
-    }
+    if (!isSignedIn || !profile) return;
 
-    const queued = getQueuedBankImports();
-    if (queued.length === 0) {
-      return;
-    }
-
-    const importedKeys: string[] = [];
-    for (const item of queued) {
-      try {
-        await addTransaction(bankImportToTransactionPayload(item));
-        importedKeys.push(item.importSourceKey);
-      } catch (error) {
-        console.error("[UserContext] Failed to import bank notification:", error);
-      }
-    }
-
-    if (importedKeys.length > 0) {
-      clearQueuedBankImports(importedKeys);
-    }
-
-    const rawCandidates = getQueuedRawBankImportCandidates();
-    if (rawCandidates.length === 0) {
-      return;
-    }
-
-    const clearedRawKeys: string[] = [];
-    for (const item of rawCandidates) {
-      try {
-        const response = await api.parseBankNotification(item.message);
-        if ("kind" in response && response.kind === "transaction") {
-          await addTransaction(parsedBankResponseToTransactionPayload(response));
-          clearedRawKeys.push(item.sourceKey);
-          continue;
+      const importedKeys: string[] = [];
+      for (const item of getQueuedBankImports()) {
+        try {
+          await addTransaction(bankImportToTransactionPayload(item));
+          importedKeys.push(item.importSourceKey);
+        } catch (error) {
+          console.error("[Bank import] Failed parsed candidate:", error);
         }
+      }
+      if (importedKeys.length) clearQueuedBankImports(importedKeys);
 
-        if ("kind" in response && response.kind === "review_event") {
-          await addStoredBankReviewEvent({
+      let rawFailure = false;
+      const clearedNativeReviewKeys: string[] = [];
+      for (const item of getQueuedNativeBankReviewEvents()) {
+        const saved = await addStoredBankReviewEvent(item);
+        if (saved) {
+          clearedNativeReviewKeys.push(item.importSourceKey);
+        } else {
+          rawFailure = true;
+        }
+      }
+      if (clearedNativeReviewKeys.length) {
+        clearQueuedNativeBankReviewEvents(clearedNativeReviewKeys);
+      }
+
+      const clearedRawKeys: string[] = [];
+      for (const item of getQueuedRawBankImportCandidates()) {
+        try {
+          const envelope = {
+            sourceKey: item.sourceKey,
+            sender: item.sender,
+            message: item.message,
+            capturedAt: item.capturedAt,
+            sourcePackage: item.sourcePackage || item.notificationPackage,
+          };
+          await processBankImportCandidate({
+            candidate: envelope,
+            parse: api.parseBankNotification.bind(api),
+            queueTransaction: async (response) => {
+              await addTransaction(parsedResponsePayload(response));
+            },
+            saveReview: async (response) => {
+              if (response.kind === "review_event") {
+                return addStoredBankReviewEvent({
+                  ...response.event,
+                  importSource: response.importSource,
+                  importSourceKey: response.importSourceKey,
+                  capturedAt: item.capturedAt,
+                  notificationPackage: item.notificationPackage,
+                  parser: response.parser,
+                  rawMessage: item.message,
+                  sender: item.sender,
+                  sourcePackage: item.sourcePackage,
+                  sourceKey: item.sourceKey,
+                });
+              }
+              return addStoredBankReviewEvent({
+                bankName: null,
+                eventType: "unparsed_sms_notification",
+                amount: null,
+                accountSuffix: null,
+                occurredAt: item.capturedAt,
+                summary: "Transaction-like message needs review",
+                confidence: "low",
+                importSource: "sms_notification_review",
+                importSourceKey: `sms:review:${item.sourceKey}`,
+                capturedAt: item.capturedAt,
+                notificationPackage: item.notificationPackage,
+                parser: response.parser,
+                rawMessage: item.message,
+                sender: item.sender,
+                sourcePackage: item.sourcePackage,
+                sourceKey: item.sourceKey,
+                failureReason: response.reason,
+              });
+            },
+          });
+          clearedRawKeys.push(item.sourceKey);
+        } catch (error) {
+          rawFailure = true;
+          console.error("[Bank import] Raw candidate retained for retry:", error);
+        }
+      }
+      if (clearedRawKeys.length) clearQueuedRawBankImportCandidates(clearedRawKeys);
+      if (rawFailure) {
+        rawRetryAttemptRef.current += 1;
+        const delay = Math.min(60_000, 2_000 * 2 ** (rawRetryAttemptRef.current - 1));
+        if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current);
+        rawRetryTimerRef.current = setTimeout(
+          () => bankImportDrainRef.current?.(),
+          delay
+        );
+      } else {
+        rawRetryAttemptRef.current = 0;
+        if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current);
+        rawRetryTimerRef.current = null;
+      }
+      await loadLocalData();
+      const queue = getBankImportQueueSnapshot();
+      setBankImportStatus({
+        queuedCandidates: queue.candidates,
+        queuedNativeReviews: queue.reviewEvents,
+        localReviews: (await getStoredBankReviewEvents()).length,
+        retrying: rawFailure,
+      });
+  }, [addTransaction, isSignedIn, loadLocalData, profile]);
+
+  const requestBankImportDrain = useMemo(
+    () => createCoalescingDrain(importQueuedBankNotifications),
+    [importQueuedBankNotifications]
+  );
+
+  const dismissBankReviewEvent = useCallback(async (sourceKey: string) => {
+    await clearStoredBankReviewEvents([sourceKey]);
+    await loadLocalData();
+  }, [loadLocalData]);
+
+  const retryBankReviewEvent = useCallback(async (sourceKey: string) => {
+    const event = (await getStoredBankReviewEvents()).find(
+      (item) => item.importSourceKey === sourceKey
+    );
+    if (!event?.rawMessage || !event.sourceKey) {
+      throw new Error("This review item does not contain a retryable message.");
+    }
+    const response = await api.parseBankNotification({
+      sourceKey: event.sourceKey,
+      sender: event.sender ?? null,
+      message: event.rawMessage,
+      capturedAt: event.capturedAt ?? new Date().toISOString(),
+      sourcePackage: event.sourcePackage ?? event.notificationPackage ?? "",
+    });
+    if (response.kind === "transaction") {
+      await addTransaction(parsedResponsePayload(response));
+      await clearStoredBankReviewEvents([sourceKey]);
+    } else if (response.kind === "non_transaction") {
+      await clearStoredBankReviewEvents([sourceKey]);
+    } else {
+      const nextEvent: BankReviewEvent = response.kind === "review_event"
+        ? {
             ...response.event,
             importSource: response.importSource,
-            importSourceKey: response.importSourceKey,
-            capturedAt: item.capturedAt,
-            notificationPackage: item.notificationPackage,
+            importSourceKey: sourceKey,
             parser: response.parser,
-          });
-          clearedRawKeys.push(item.sourceKey);
-          continue;
-        }
-
-        await addStoredBankReviewEvent({
-          bankName: "Union Bank of India",
-          eventType: "unparsed_union_bank_notification",
-          amount: null,
-          accountSuffix: null,
-          occurredAt: item.capturedAt,
-          summary: "Union Bank notification needs review",
-          confidence: "low",
-          importSource: "union_bank_event",
-          importSourceKey: `union-bank:event:raw:${item.sourceKey}`,
-          capturedAt: item.capturedAt,
-          notificationPackage: item.notificationPackage,
-          parser: "groq",
-        });
-        clearedRawKeys.push(item.sourceKey);
-      } catch (error) {
-        console.error("[UserContext] Failed to parse raw bank notification:", error);
-      }
+          }
+        : {
+            ...event,
+            parser: response.parser,
+            failureReason: response.reason,
+          };
+      const saved = await addStoredBankReviewEvent({
+        ...nextEvent,
+        rawMessage: event.rawMessage,
+        sender: event.sender,
+        sourcePackage: event.sourcePackage,
+        sourceKey: event.sourceKey,
+        capturedAt: event.capturedAt,
+        notificationPackage: event.notificationPackage,
+      });
+      if (!saved) throw new Error("Review item could not be updated.");
     }
-
-    if (clearedRawKeys.length > 0) {
-      clearQueuedRawBankImportCandidates(clearedRawKeys);
-    }
-  }, [addTransaction, isSignedIn, profile]);
+    await loadLocalData();
+  }, [addTransaction, loadLocalData]);
 
   useEffect(() => {
-    if (isSignedIn && profile) {
-      importQueuedBankNotifications().catch(console.error);
-    }
+    bankImportDrainRef.current = () => void requestBankImportDrain();
+    if (isSignedIn && profile) void requestBankImportDrain();
+    const subscription = addBankImportQueuedListener(() => {
+      if (isSignedIn && profile) void requestBankImportDrain();
+    });
+    return () => {
+      subscription.remove();
+      bankImportDrainRef.current = null;
+      if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current);
+    };
+  }, [isSignedIn, profile, requestBankImportDrain]);
 
-    const interval = setInterval(() => {
-      if (isSignedIn && profile) {
-        importQueuedBankNotifications().catch(console.error);
-      }
-    }, 30_000);
-
-    return () => clearInterval(interval);
-  }, [importQueuedBankNotifications, isSignedIn, profile]);
-
-  const updateTransaction = useCallback(
-    async (id: string, payload: UpdateTransactionPayload) => {
-      const online = await syncService.isOnline();
-      const isTemp = id.startsWith("temp_");
-
-      // For local/temp transactions, we can't update them easily
-      // They'll be synced and then can be edited
-      if (isTemp) {
-        throw new Error("Cannot edit pending transactions. Please wait for sync.");
-      }
-
-      if (!online) {
-        throw new Error("Cannot edit transactions while offline");
-      }
-
-      try {
-        // Update on server
-        const updated = await api.updateTransaction(id, payload);
-        
-        // Update local state
-        setTransactions((prev) =>
-          prev.map((t) => (t._id === id ? updated : t))
-        );
-        const storedTransactions = await getStoredTransactions();
-        await setStoredTransactions(
-          dedupeTransactions(
-            storedTransactions.map((t) => (t._id === id ? updated : t))
-          )
-        );
-        
-        // Refresh profile to get updated balances
-        await refreshProfile();
-      } catch (error) {
-        console.error("[UserContext] Error updating transaction:", error);
-        throw error;
-      }
-    },
-    [refreshProfile]
-  );
-
-  const deleteTransaction = useCallback(
-    async (id: string) => {
-      const online = await syncService.isOnline();
-      const isTemp = id.startsWith("temp_");
-      const transaction = transactions.find((t) => t._id === id);
-
-      setTransactions((prev) => prev.filter((t) => t._id !== id));
-      const storedTransactions = await getStoredTransactions();
-      await setStoredTransactions(storedTransactions.filter((t) => t._id !== id));
-      if (transaction) {
-        const nextBalances = await syncService.applyLocalTransactionImpact(
-          transaction,
-          -1
-        );
-        setLocalBalancesState(nextBalances);
-      }
-
-      if (isTemp) {
-        await removePendingTransaction(id);
-        setPendingCount((prev) => Math.max(0, prev - 1));
-      } else if (online) {
-        try {
-          await api.deleteTransaction(id);
-          await refreshProfile();
-        } catch (error) {
-          console.error("[UserContext] Error deleting transaction:", error);
-          if (transaction) {
-            await setStoredTransactions(
-              dedupeTransactions([transaction, ...(await getStoredTransactions())])
-            );
-            setTransactions((prev) => dedupeTransactions([transaction, ...prev]));
-            const restoredBalances = await syncService.applyLocalTransactionImpact(
-              transaction,
-              1
-            );
-            setLocalBalancesState(restoredBalances);
-          }
-          throw error;
-        }
-      } else {
-        await addPendingDelete({ type: "transaction", id });
-        setPendingCount((prev) => {
-          notificationService.onPendingItemAdded(prev + 1);
-          return prev + 1;
-        });
-      }
-    },
-    [refreshProfile, transactions]
-  );
-
-  const retryFailedTransaction = useCallback(
-    async (id: string) => {
-      const transaction = transactions.find((item) => item._id === id);
-
-      if (!transaction || transaction.syncStatus !== "failed" || !transaction.isLocal) {
-        throw new Error("Only failed local transactions can be retried");
-      }
-
-      const pendingTransaction: ITransaction = {
-        ...transaction,
-        syncStatus: "pending",
-        syncError: undefined,
-      };
-
-      const replaceLocalTransaction = async (nextTransaction: ITransaction) => {
-        const storedTransactions = await getStoredTransactions();
-        await setStoredTransactions(
-          dedupeTransactions(
-            storedTransactions.map((item) => {
-              const sameKey =
-                item._id === id ||
-                (item.clientRequestId || item._id) ===
-                  (transaction.clientRequestId || transaction._id);
-              return sameKey ? nextTransaction : item;
-            })
-          )
-        );
-        setTransactions((prev) =>
-          dedupeTransactions(
-            prev.map((item) => {
-              const sameKey =
-                item._id === id ||
-                (item.clientRequestId || item._id) ===
-                  (transaction.clientRequestId || transaction._id);
-              return sameKey ? nextTransaction : item;
-            })
-          )
-        );
-      };
-
-      const online = await syncService.isOnline();
-      if (!online) {
-        await removePendingTransaction(transaction._id);
-        await addPendingTransaction(pendingTransaction);
-        await replaceLocalTransaction(pendingTransaction);
-        setPendingCount((prev) => {
-          notificationService.onPendingItemAdded(prev + 1);
-          return prev + 1;
-        });
-        return;
-      }
-
-      await replaceLocalTransaction(pendingTransaction);
-
-      try {
-        const created = await api.createTransaction({
-          type: transaction.type,
-          amount: transaction.amount,
-          description: transaction.description,
-          category: transaction.category,
-          paymentMethod: transaction.paymentMethod,
-          splitAmount: transaction.splitAmount,
-          exchangeExpenseId: transaction.exchangeExpenseId,
-          importSource: transaction.importSource,
-          importSourceKey: transaction.importSourceKey,
-          importedAccountSuffix: transaction.importedAccountSuffix,
-          importedBankBalance: transaction.importedBankBalance,
-          importedBankReference: transaction.importedBankReference,
-          importedBankConfidence: transaction.importedBankConfidence,
-          date: transaction.date,
-          clientRequestId: transaction.clientRequestId ?? transaction._id,
-        });
-
-        const storedTransactions = await getStoredTransactions();
-        await setStoredTransactions(dedupeTransactions([created, ...storedTransactions]));
-        setTransactions((prev) =>
-          dedupeTransactions(
-            prev.map((item) => {
-              const sameKey =
-                item._id === id ||
-                (item.clientRequestId || item._id) ===
-                  (transaction.clientRequestId || transaction._id);
-              return sameKey ? created : item;
-            })
-          )
-        );
-        void refreshProfile();
-      } catch (error) {
-        if (isRetryableSyncError(error)) {
-          await removePendingTransaction(transaction._id);
-          await addPendingTransaction(pendingTransaction);
-          await replaceLocalTransaction(pendingTransaction);
-          setPendingCount((prev) => {
-            notificationService.onPendingItemAdded(prev + 1);
-            return prev + 1;
-          });
-          return;
-        }
-
-        const failedTransaction: ITransaction = {
-          ...transaction,
-          syncStatus: "failed",
-          syncError: error instanceof Error ? error.message : "Sync failed",
-        };
-        await replaceLocalTransaction(failedTransaction);
-        throw error;
-      }
-    },
-    [refreshProfile, transactions]
-  );
-
-  const addWorkflow = useCallback(
-    async (payload: CreateWorkflowPayload) => {
-      const online = await syncService.isOnline();
-
-      // Always save locally first
-      const tempWorkflow: IWorkflow = {
-        _id: generateTempId(),
-        userId: profile?.userId || "",
-        clientRequestId: generateTempId(),
-        name: payload.name,
-        type: payload.type,
-        amount: payload.amount,
-        description: payload.description,
-        category: payload.category,
-        paymentMethod: payload.paymentMethod,
-        splitAmount: payload.splitAmount,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        isLocal: true,
-        syncStatus: "pending",
-      };
-
-      await addPendingWorkflow(tempWorkflow);
-      setWorkflows((prev) => [tempWorkflow, ...prev]);
-      setPendingCount((prev) => {
-        notificationService.onPendingItemAdded(prev + 1);
-        return prev + 1;
-      });
-
-      if (online) {
-        try {
-          console.log("[UserContext] Syncing workflow online:", payload);
-          const created = await api.createWorkflow({
-            ...payload,
-            clientRequestId: tempWorkflow.clientRequestId,
-          });
-          await removePendingWorkflow(tempWorkflow._id);
-          const storedWorkflows = await getStoredWorkflows();
-          await setStoredWorkflows(
-            dedupeWorkflows([created, ...storedWorkflows])
-          );
-          setWorkflows((prev) =>
-            prev.map((w) => w._id === tempWorkflow._id ? created : w)
-          );
-          setPendingCount((prev) => Math.max(0, prev - 1));
-        } catch (error) {
-          console.log("[UserContext] Failed to sync workflow, will retry later:", error);
-        }
-      }
-    },
-    [profile]
-  );
+  const addWorkflow = useCallback(async (payload: CreateWorkflowPayload) => {
+    const id = generateTempId();
+    const now = new Date().toISOString();
+    const workflow: IWorkflow = {
+      _id: id,
+      userId: profile?.userId ?? "",
+      clientRequestId: id,
+      ...payload,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const next = dedupeWorkflows([workflow, ...workflows]);
+    setWorkflows(next);
+    await setStoredWorkflows(next);
+    await enqueueOutbox({
+      entity: "workflow",
+      entityId: id,
+      action: "create",
+      payload: workflow as unknown as Record<string, unknown>,
+    });
+    void syncService.syncAll();
+  }, [profile?.userId, workflows]);
 
   const deleteWorkflow = useCallback(async (id: string) => {
-    const online = await syncService.isOnline();
-    const isTemp = id.startsWith("temp_");
-    const workflow = workflows.find((w) => w._id === id);
-
-    setWorkflows((prev) => prev.filter((w) => w._id !== id));
-    const storedWorkflows = await getStoredWorkflows();
-    await setStoredWorkflows(storedWorkflows.filter((w) => w._id !== id));
-
-    if (isTemp) {
-      // Just remove from pending (already handled by filter)
-      await removePendingWorkflow(id);
-      setPendingCount((prev) => Math.max(0, prev - 1));
-    } else if (online) {
-      try {
-        await api.deleteWorkflow(id);
-      } catch (error) {
-        console.error("[UserContext] Error deleting workflow:", error);
-        if (workflow) {
-          await setStoredWorkflows(
-            dedupeWorkflows([workflow, ...(await getStoredWorkflows())])
-          );
-          setWorkflows((prev) => dedupeWorkflows([workflow, ...prev]));
-        }
-        throw error;
-      }
-    } else {
-      await addPendingDelete({ type: "workflow", id });
-      setPendingCount((prev) => {
-        notificationService.onPendingItemAdded(prev + 1);
-        return prev + 1;
-      });
-    }
+    const next = workflows.filter((item) => item._id !== id);
+    setWorkflows(next);
+    await setStoredWorkflows(next);
+    await enqueueOutbox({ entity: "workflow", entityId: id, action: "delete" });
+    void syncService.syncAll();
   }, [workflows]);
 
-  const getBalance = useCallback(
-    (method: "bank" | "cash" | "splitwise") => {
-      const localValue = localBalances?.[method];
-      const profileValue = profile?.balances?.[method];
-
-      if (typeof localValue === "number") {
-        return localValue;
-      }
-
-      if (typeof profileValue === "number") {
-        return profileValue;
-      }
-
-      return 0;
-    },
-    [profile, localBalances]
+  const balances = useMemo(
+    () => deriveBalances(profile, transactions),
+    [profile, transactions]
   );
-
-  const getTotalBalance = useCallback(() => {
-    if (!profile) return 0;
-    let total = 0;
-    if (profile.paymentMethods.includes("bank")) {
-      total += getBalance("bank");
-    }
-    if (profile.paymentMethods.includes("cash")) {
-      total += getBalance("cash");
-    }
-    if (profile.paymentMethods.includes("splitwise")) {
-      total += getBalance("splitwise");
-    }
-    return total;
-  }, [profile, getBalance]);
+  const getBalance = useCallback(
+    (method: PaymentMethod) => balances[method] ?? 0,
+    [balances]
+  );
+  const getTotalBalance = useCallback(
+    () =>
+      (profile?.paymentMethods ?? []).reduce(
+        (sum, method) =>
+          ["bank", "cash", "splitwise"].includes(method)
+            ? sum + getBalance(method as PaymentMethod)
+            : sum,
+        0
+      ),
+    [getBalance, profile?.paymentMethods]
+  );
 
   return (
     <UserContext.Provider
@@ -980,11 +666,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         profile,
         transactions,
         workflows,
+        bankReviewEvents,
+        bankImportStatus,
         loading,
         syncing,
         isOnline,
-        pendingCount,
-        lastSyncTime,
         refreshProfile,
         refreshTransactions,
         refreshWorkflows,
@@ -994,9 +680,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         addTransaction,
         updateTransaction,
         deleteTransaction,
-        retryFailedTransaction,
         addWorkflow,
         deleteWorkflow,
+        dismissBankReviewEvent,
+        retryBankReviewEvent,
         getBalance,
         getTotalBalance,
       }}
@@ -1008,8 +695,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
 export function useUserContext() {
   const context = useContext(UserContext);
-  if (!context) {
-    throw new Error("useUserContext must be used within a UserProvider");
-  }
+  if (!context) throw new Error("useUserContext must be used within UserProvider");
   return context;
 }

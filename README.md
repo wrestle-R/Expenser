@@ -1,51 +1,47 @@
 # Expenser
 
+The web app is available at [expenser-rdp.vercel.app](https://expenser-rdp.vercel.app).
+
+[Download the Expo Android app](https://github.com/wrestle-R/Expenser/releases/download/v2.1.0-preview/expenser-full.apk).
+
+[Download Expenser Lite for Android](https://github.com/wrestle-R/Expenser/releases/download/v2.1.0-preview/expenser-lite.apk).
+
 Personal transaction tracking on Android and the web.
 
-Expenser records income and expenses against Bank, Cash, and Splitwise balances. The Android app can turn supported bank SMS notifications into transactions, keeps edits usable offline, and syncs queued changes when connectivity returns.
+Expenser records income and expenses across Bank, Cash, and Splitwise. The Android apps parse supported transaction SMS locally, use cloud parsing when local rules cannot resolve a message, and keep saved transactions and edits available offline.
 
-## Screenshots
+Lite uses the same account and SMS import, with a focused transactions screen for adding, editing, searching and deleting transactions. It installs beside the full app and needs its own sign-in and notification access. Both downloads are Android preview builds; Lite supports ARM64 and ARMv7 phones.
 
-### Mobile
+## Desktop preview
 
-<table>
-  <tr>
-    <th>Light</th>
-    <th>Dark</th>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/mobile-dashboard-light.png" alt="Privacy-redacted Expenser Android dashboard in light mode" width="360" /></td>
-    <td><img src="docs/screenshots/mobile-dashboard-dark.png" alt="Privacy-redacted Expenser Android dashboard in dark mode" width="360" /></td>
-  </tr>
-</table>
+![Expenser desktop dashboard with fictional sample balances and transactions](docs/screenshots/desktop-demo.jpg)
 
-### Web
-
-<table>
-  <tr>
-    <th>Light</th>
-    <th>Dark</th>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/web-dashboard-light.png" alt="Privacy-redacted Expenser web dashboard in light mode" width="620" /></td>
-    <td><img src="docs/screenshots/web-dashboard-dark.png" alt="Privacy-redacted Expenser web dashboard in dark mode" width="620" /></td>
-  </tr>
-</table>
-
-Personal names, balances, transaction descriptions, and transaction amounts are blurred in every screenshot. No account identifiers or credentials are shown.
+The preview uses fictional sample data.
 
 ## Run locally
 
+Web:
+
 ```bash
 cd next
-npm install
+npm ci
 npm run dev
 ```
 
+Full Android app:
+
 ```bash
 cd expo
-npm install
+npm ci
 npm start
 ```
 
-The web app is available at [expenser-rdp.vercel.app](https://expenser-rdp.vercel.app).
+Lite:
+
+```bash
+cd lite
+npm ci
+npm start
+```
+
+See [Lite setup and release builds](lite/README.md). Mobile regression tests run with `npm test` from `expo/` or `lite/`.

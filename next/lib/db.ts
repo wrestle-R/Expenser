@@ -81,6 +81,7 @@ export interface TransactionRow {
 }
 
 export interface WorkflowRow {
+  schedule?: import("./workflow-schedule").WorkflowSchedule | null;
   id: string;
   user_id: string;
   client_request_id: string | null;
@@ -252,6 +253,7 @@ export function mapBalanceReconciliationAlertRow(
 
 export function mapWorkflowRow(row: WorkflowRow) {
   return {
+    schedule: row.schedule ?? null,
     _id: row.id,
     userId: row.user_id,
     clientRequestId: row.client_request_id ?? undefined,

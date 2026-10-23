@@ -10,6 +10,7 @@ import postgres from "postgres";
 import * as pagination from "./transaction-pagination.js";
 import * as review from "./transaction-review.js";
 import * as bankBalance from "./bank-import-balance.js";
+import * as schedule from "./workflow-schedule.js";
 import reconciliation from "./balance-reconciliation.js";
 import apiErrors from "./api-errors.js";
 
@@ -20,6 +21,7 @@ const available = process.getuid?.() !== 0 && ["initdb", "pg_ctl"].every((cmd) =
 function loadRoute(name, sql) {
   const exports = {};
   const dependencies = {
+    "@/lib/workflow-schedule.js": schedule,
     "@/lib/balance-reconciliation": reconciliation,
     "@/lib/transaction-pagination.js": pagination,
     "next/server": require("next/server"),
@@ -56,6 +58,7 @@ function concurrentSql(database, table) {
   let release;
   const barrier = new Promise((resolve) => { release = resolve; });
   const sql = (...args) => database(...args);
+  sql.json = database.json;
   sql.begin = (callback) => database.begin((tx) => callback(new Proxy(tx, {
     apply: async (target, thisArg, args) => {
       const rows = await Reflect.apply(target, thisArg, args);
@@ -94,7 +97,7 @@ test("concurrent duplicate POST requests recover in PostgreSQL", { skip: !availa
       create table workflows (
         id uuid primary key default gen_random_uuid(), user_id text not null,
         client_request_id text, name text, type text, amount numeric,
-        description text, category text, payment_method text, split_amount numeric
+        description text, category text, payment_method text, split_amount numeric, schedule jsonb
       );
       create unique index on workflows (user_id, client_request_id) where client_request_id is not null;
     `);

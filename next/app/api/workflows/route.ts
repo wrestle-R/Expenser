@@ -8,6 +8,8 @@ import {
   type WorkflowRow,
 } from "@/lib/db";
 
+import { parseWorkflowSchedule } from "@/lib/workflow-schedule.js";
+
 const PAYMENT_METHODS = ["bank", "cash", "splitwise"] as const;
 const TRANSACTION_TYPES = ["income", "expense"] as const;
 const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -79,6 +81,7 @@ function parseWorkflowInput(body: Record<string, unknown>) {
   }
 
   return {
+    schedule: parseWorkflowSchedule(body.schedule, amount),
     name: sanitizeText(body.name, {
       field: "name",
       maxLength: 120,
@@ -189,7 +192,8 @@ export async function POST(req: NextRequest) {
             description,
             category,
             payment_method,
-            split_amount
+            split_amount,
+            schedule
           )
           values (
             ${userId},
@@ -200,7 +204,8 @@ export async function POST(req: NextRequest) {
             ${payload.description},
             ${payload.category},
             ${payload.paymentMethod},
-            ${payload.splitAmount}
+            ${payload.splitAmount},
+            ${payload.schedule ? trx.json(payload.schedule) : null}
           )
           returning *
         `)) as WorkflowRow[];
@@ -300,9 +305,8 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const payload = parseWorkflowInput(
-      (await req.json()) as Record<string, unknown>
-    );
+    const body = (await req.json()) as Record<string, unknown>;
+    const payload = parseWorkflowInput(body);
 
     const updatedWorkflows = await sql<WorkflowRow[]>`
       update workflows
@@ -313,7 +317,8 @@ export async function PUT(req: NextRequest) {
         description = ${payload.description},
         category = ${payload.category},
         payment_method = ${payload.paymentMethod},
-        split_amount = ${payload.splitAmount}
+        split_amount = ${payload.splitAmount},
+        schedule = case when ${Object.hasOwn(body, "schedule")} then ${payload.schedule ? sql.json(payload.schedule) : null}::jsonb else schedule end
       where id = ${id} and user_id = ${userId}
       returning *
     `;

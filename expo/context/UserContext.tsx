@@ -7,15 +7,16 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Alert, AppState, type AppStateStatus } from "react-native";
+import { AppState, type AppStateStatus } from "react-native";
 import type { Session } from "@supabase/supabase-js";
 import { api } from "../lib/api";
-import { supabase } from "../lib/supabase";
-import { syncService } from "../lib/sync";
+import { supabase, initialSession } from "../lib/supabase";
+import { syncService, type SyncStatus } from "../lib/sync";
 import {
   addStoredBankReviewEvent,
   clearStoredBankReviewEvents,
   enqueueOutbox,
+  saveTransactionChange,
   getStoredBankReviewEvents,
   getStoredProfile,
   getStoredStealthMode,
@@ -23,7 +24,6 @@ import {
   getStoredWorkflows,
   setStoredProfile,
   setStoredWorkflows,
-  updateStoredTransactions,
 } from "../lib/storage";
 import type {
   BankImportStatus,
@@ -136,6 +136,7 @@ interface UserContextType {
   loading: boolean;
   syncing: boolean;
   isOnline: boolean;
+  syncStatus: SyncStatus;
   refreshProfile: () => Promise<void>;
   refreshTransactions: () => Promise<void>;
   refreshWorkflows: () => Promise<void>;
@@ -171,6 +172,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(syncService.isOnlineSync());
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ isOnline: false, isSyncing: false, pendingChanges: 0, rejectedChanges: 0 });
   const transactionsRef = useRef<ITransaction[]>([]);
   const bankImportDrainRef = useRef<(() => void) | null>(null);
   const rawRetryAttemptRef = useRef(0);
@@ -205,12 +207,14 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    void supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
+    let authChanged = false;
+    void initialSession.then((cachedSession) => {
+      if (!mounted || authChanged) return;
+      setSession(cachedSession);
       setAuthLoaded(true);
     });
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      authChanged = true;
       setSession(nextSession);
       setAuthLoaded(true);
     });
@@ -235,14 +239,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() =>
     syncService.subscribe((status) => {
+      setSyncStatus(status);
       setIsOnline(status.isOnline);
+      if (status.isOnline && !status.isSyncing) bankImportDrainRef.current?.();
       setSyncing(status.isSyncing);
-      if (status.error) {
-        Alert.alert(
-          status.errorKind === "rejected" ? "Change could not be uploaded" : "Sync could not finish",
-          status.error,
-        );
-      }
       if (!status.isSyncing) void loadLocalData();
     }), [loadLocalData]);
 
@@ -261,14 +261,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     async function initialize() {
       if (!authLoaded) return;
-      setLoading(true);
-      await loadLocalData();
-      await syncService.initialize();
-      await notificationService.initialize();
-      if (isSignedIn) await syncService.syncAll();
-      if (!cancelled) {
+      try {
         await loadLocalData();
-        setLoading(false);
+        // Render saved data immediately. Connectivity and refresh run behind the screen.
+        if (!cancelled) setLoading(false);
+        await syncService.initialize();
+        await notificationService.initialize();
+        if (isSignedIn && !cancelled) await syncService.syncAll();
+        if (!cancelled) await loadLocalData();
+      } catch (error) {
+        console.error("[User] Initialization failed", error instanceof Error ? error.name : "UnknownError");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }
     void initialize();
@@ -356,16 +360,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       createdAt: now,
       updatedAt: now,
     };
-    const next = optimisticAddTransaction(storedTransactions, transaction);
-    setTransactionSnapshot(next);
     let inserted = true;
-    const persisted = await updateStoredTransactions((current) => {
-      if (
-        transaction.importSourceKey &&
-        current.some(
-          (item) => item.importSourceKey === transaction.importSourceKey
-        )
-      ) {
+    const persisted = await saveTransactionChange({
+      entityId: transaction._id, action: "create", payload: transaction as unknown as Record<string, unknown>,
+    }, (current) => {
+      if (current.some((item) => item.clientRequestId === transaction.clientRequestId ||
+          (transaction.importSourceKey && item.importSourceKey === transaction.importSourceKey))) {
         inserted = false;
         return current;
       }
@@ -373,12 +373,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     });
     setTransactionSnapshot(persisted);
     if (!inserted) return;
-    await enqueueOutbox({
-      entity: "transaction",
-      entityId: transaction._id,
-      action: "create",
-      payload: transaction as unknown as Record<string, unknown>,
-    });
+
 
     if (transaction.importSourceKey) {
       await notificationService.notifyImportedTransaction({
@@ -402,36 +397,23 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       reviewStatus: getPendingReviewStatus({ ...existing, ...payload }),
       updatedAt: new Date().toISOString(),
     };
-    setTransactionSnapshot(
-      optimisticUpdateTransaction(transactionsRef.current, id, updated)
-    );
-    const persisted = await updateStoredTransactions((current) =>
+    const persisted = await saveTransactionChange({ entityId: id, action: "update", payload: payload as Record<string, unknown> }, (current) =>
       optimisticUpdateTransaction(current, id, updated)
     );
     setTransactionSnapshot(persisted);
-    await enqueueOutbox({
-      entity: "transaction",
-      entityId: id,
-      action: "update",
-      payload: payload as Record<string, unknown>,
-    });
     void syncService.syncAll();
   }, [setTransactionSnapshot]);
 
   const deleteTransaction = useCallback(async (id: string) => {
-    setTransactionSnapshot(
-      optimisticDeleteTransaction(transactionsRef.current, id)
-    );
-    const persisted = await updateStoredTransactions((current) =>
+    const persisted = await saveTransactionChange({ entityId: id, action: "delete" }, (current) =>
       optimisticDeleteTransaction(current, id)
     );
     setTransactionSnapshot(persisted);
-    await enqueueOutbox({ entity: "transaction", entityId: id, action: "delete" });
     void syncService.syncAll();
   }, [setTransactionSnapshot]);
 
   const importQueuedBankNotifications = useCallback(async () => {
-    if (!isSignedIn || !profile) return;
+    if (!isSignedIn || !profile?.userId) return;
 
       const importedKeys: string[] = [];
       for (const item of getQueuedBankImports()) {
@@ -470,7 +452,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           };
           await processBankImportCandidate({
             candidate: envelope,
-            parse: api.parseBankNotification.bind(api),
+            parse: (envelope) => api.parseBankNotification(envelope, syncService.isOnlineSync()),
             queueTransaction: async (response) => {
               await addTransaction(parsedResponsePayload(response));
             },
@@ -538,7 +520,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         localReviews: (await getStoredBankReviewEvents()).length,
         retrying: rawFailure,
       });
-  }, [addTransaction, isSignedIn, loadLocalData, profile]);
+  }, [addTransaction, isSignedIn, loadLocalData, profile?.userId]);
 
   const requestBankImportDrain = useMemo(
     () => createCoalescingDrain(importQueuedBankNotifications),
@@ -563,7 +545,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       message: event.rawMessage,
       capturedAt: event.capturedAt ?? new Date().toISOString(),
       sourcePackage: event.sourcePackage ?? event.notificationPackage ?? "",
-    });
+    }, syncService.isOnlineSync());
     if (response.kind === "transaction") {
       await addTransaction(parsedResponsePayload(response));
       await clearStoredBankReviewEvents([sourceKey]);
@@ -598,16 +580,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     bankImportDrainRef.current = () => void requestBankImportDrain();
-    if (isSignedIn && profile) void requestBankImportDrain();
+    if (isSignedIn && profile?.userId) void requestBankImportDrain();
     const subscription = addBankImportQueuedListener(() => {
-      if (isSignedIn && profile) void requestBankImportDrain();
+      if (isSignedIn && profile?.userId) void requestBankImportDrain();
     });
     return () => {
       subscription.remove();
       bankImportDrainRef.current = null;
       if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current);
     };
-  }, [isSignedIn, profile, requestBankImportDrain]);
+  }, [isSignedIn, profile?.userId, requestBankImportDrain]);
 
   const addWorkflow = useCallback(async (payload: CreateWorkflowPayload) => {
     const id = generateTempId();
@@ -671,6 +653,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         loading,
         syncing,
         isOnline,
+        syncStatus,
         refreshProfile,
         refreshTransactions,
         refreshWorkflows,

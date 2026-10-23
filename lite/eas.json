@@ -1,0 +1,15 @@
+{
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://expenser-rdp.vercel.app",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://gyecojxcdmjulwtfuuoz.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_lLSV2oTNjQVYnOBtwPE5lg_zcx-bmqv"
+      }
+    }
+  }
+}

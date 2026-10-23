@@ -15,9 +15,8 @@ object BankNotificationStore {
   private const val RAW_CANDIDATES_KEY = "raw_bank_candidates"
   private const val REVIEW_EVENTS_KEY = "bank_review_events"
   private const val MAX_RECENT_READS = 200
-  private const val MAX_RAW_CANDIDATES = 100
-  private const val MAX_REVIEW_EVENTS = 50
 
+  @Synchronized
   fun recordNotificationRead(context: Context, packageName: String) {
     val now = System.currentTimeMillis()
     val read = JSONObject()
@@ -36,6 +35,7 @@ object BankNotificationStore {
     return JSONArray(prefs.getString(RECENT_READS_KEY, "[]"))
   }
 
+  @Synchronized
   fun enqueue(context: Context, parsed: JSONObject) {
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val queue = JSONArray(prefs.getString(QUEUE_KEY, "[]"))
@@ -46,7 +46,7 @@ object BankNotificationStore {
     }
 
     queue.put(parsed)
-    prefs.edit().putString(QUEUE_KEY, queue.toString()).apply()
+    prefs.edit().putString(QUEUE_KEY, queue.toString()).commit()
   }
 
   fun getQueued(context: Context): JSONArray {
@@ -58,6 +58,7 @@ object BankNotificationStore {
     clearBySourceKey(context, QUEUE_KEY, sourceKeys)
   }
 
+  @Synchronized
   fun enqueueRawCandidate(
     context: Context,
     sender: String?,
@@ -86,8 +87,8 @@ object BankNotificationStore {
 
     queue.put(candidate)
     prefs.edit()
-      .putString(RAW_CANDIDATES_KEY, trimToLatest(queue, MAX_RAW_CANDIDATES).toString())
-      .apply()
+      .putString(RAW_CANDIDATES_KEY, queue.toString())
+      .commit()
   }
 
   fun getRawCandidates(context: Context): JSONArray {
@@ -99,6 +100,7 @@ object BankNotificationStore {
     clearBySourceKey(context, RAW_CANDIDATES_KEY, sourceKeys)
   }
 
+  @Synchronized
   fun enqueueReviewEvent(
     context: Context,
     event: JSONObject,
@@ -123,8 +125,8 @@ object BankNotificationStore {
 
     queue.put(item)
     prefs.edit()
-      .putString(REVIEW_EVENTS_KEY, trimToLatest(queue, MAX_REVIEW_EVENTS).toString())
-      .apply()
+      .putString(REVIEW_EVENTS_KEY, queue.toString())
+      .commit()
   }
 
   fun getReviewEvents(context: Context): JSONArray {
@@ -136,6 +138,7 @@ object BankNotificationStore {
     clearBySourceKey(context, REVIEW_EVENTS_KEY, sourceKeys)
   }
 
+  @Synchronized
   private fun clearBySourceKey(context: Context, key: String, sourceKeys: List<String>) {
     if (sourceKeys.isEmpty()) {
       return
@@ -155,7 +158,7 @@ object BankNotificationStore {
       }
     }
 
-    prefs.edit().putString(key, next.toString()).apply()
+    prefs.edit().putString(key, next.toString()).commit()
   }
 
   private fun containsSourceKey(queue: JSONArray, sourceKey: String): Boolean {

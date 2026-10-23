@@ -13,9 +13,10 @@ export function dedupeTransactions(items) {
     if (item.deletedAt) continue;
     deduped.set(transactionKey(item), item);
   }
-  return [...deduped.values()].sort(
-    (left, right) => transactionTime(right) - transactionTime(left)
-  );
+  // Parse each timestamp once, rather than twice per sort comparison.
+  return [...deduped.values()].map((transaction) => ({ transaction, time: transactionTime(transaction) }))
+    .sort((left, right) => right.time - left.time)
+    .map((entry) => entry.transaction);
 }
 
 export function optimisticAddTransaction(items, transaction) {
@@ -50,7 +51,7 @@ export function mergeServerTransactions({
       .map((item) => item.entityId)
   );
   const pendingLocal = localTransactions.filter((item) =>
-    pendingIds.has(item._id)
+    pendingIds.has(item._id) && !deletedIds.has(item._id)
   );
 
   return dedupeTransactions([

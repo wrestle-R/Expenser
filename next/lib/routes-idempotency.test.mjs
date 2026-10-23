@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import { execFileSync, spawnSync } from "node:child_process";
 import postgres from "postgres";
+import * as pagination from "./transaction-pagination.js";
 import * as review from "./transaction-review.js";
 import * as bankBalance from "./bank-import-balance.js";
 import apiErrors from "./api-errors.js";
@@ -18,6 +19,7 @@ const available = process.getuid?.() !== 0 && ["initdb", "pg_ctl"].every((cmd) =
 function loadRoute(name, sql) {
   const exports = {};
   const dependencies = {
+    "@/lib/transaction-pagination.js": pagination,
     "next/server": require("next/server"),
     "@/lib/auth": { getAuthenticatedUser: async () => ({ userId: "test-user" }) },
     "@/lib/api-errors": apiErrors,
@@ -81,7 +83,7 @@ test("concurrent duplicate POST requests recover in PostgreSQL", { skip: !availa
         import_source text, import_source_key text, imported_account_suffix text,
         imported_bank_balance numeric, imported_bank_reference text, imported_bank_confidence text,
         type text, amount numeric, description text, category text, review_status text,
-        payment_method text, split_amount numeric, date timestamptz, deleted_at timestamptz
+        payment_method text, split_amount numeric, date timestamptz, deleted_at timestamptz, created_at timestamptz default now(), updated_at timestamptz default now()
       );
       create unique index on transactions (user_id, client_request_id) where client_request_id is not null;
       create unique index on transactions (user_id, import_source_key) where import_source_key is not null;
@@ -111,6 +113,25 @@ test("concurrent duplicate POST requests recover in PostgreSQL", { skip: !availa
         assert.equal(rows[0].count, 1);
       });
     }
+    await t.test("history pagination does not skip equal timestamps or expose another user's rows", async () => {
+      await database`truncate transactions`;
+      await database`insert into transactions (user_id, type, amount, payment_method, category, date, created_at)
+        select 'test-user', 'expense', 10, 'cash', 'food', '2026-10-23 12:00:00.123456+00'::timestamptz, '2026-10-23 12:00:00.654321+00'::timestamptz from generate_series(1, 1001)`;
+      await database`insert into transactions (user_id, type, amount, date, created_at) values ('another-user','expense',99,now(),now())`;
+      const route = loadRoute('transactions', database);
+      const ids = new Set(); let cursor = null, pages = 0;
+      do {
+        const response = await route.GET(new Request(`http://localhost/api/transactions?limit=250${cursor ? `&cursor=${cursor}` : ''}`));
+        assert.equal(response.status, 200);
+        const body = await response.json();
+        assert.ok(body.transactions.length <= 250);
+        for (const row of body.transactions) { assert.ok(!ids.has(row._id)); ids.add(row._id); }
+        cursor = body.nextCursor; pages++;
+      } while (cursor);
+      assert.equal(ids.size, 1001); assert.equal(pages, 5);
+      assert.equal((await route.GET(new Request('http://localhost/api/transactions?limit=10000'))).status, 400);
+    });
+
   } finally {
     await database?.end({ timeout: 2 });
     if (started) execFileSync("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], { stdio: "pipe" });

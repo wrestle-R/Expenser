@@ -16,10 +16,14 @@ function validateSignUpForm({ name, email, password, confirmPassword }) {
 
 function getAuthErrorMessage(message) {
   if (message === "Invalid API key") {
-    return "Authentication is misconfigured. Restart the Next app after updating the Supabase public key.";
+    return "Sign-in is unavailable because the authentication configuration is invalid.";
   }
 
   const lower = message.toLowerCase();
+
+  if (/network request failed|failed to fetch|fetch failed|networkerror|load failed|timed out|aborted/i.test(message)) {
+    return "Could not reach the sign-in service. Check your connection and try again. If this continues, the authentication service may be unavailable.";
+  }
 
   if (isAuthRateLimitError(message)) {
     return "Too many attempts. Please wait a few minutes before trying again.";

@@ -76,3 +76,5 @@ export function buildNotificationReviewKey(
 ): string | null;
 
 export type ParsedUnionBankNotification = ParsedFinancialNotification;
+
+export function hasNotificationAmount(message: string, amount: number): boolean;

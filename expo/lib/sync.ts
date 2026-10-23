@@ -10,7 +10,9 @@ import {
   getStoredWorkflows,
   incrementOutboxAttempt,
   migrateLegacyPendingData,
-  removeOutboxOperation,
+  rejectOutboxOperation,
+  retryRejectedOperations,
+  subscribeOutbox,
   setLastSyncTime,
   setStoredProfile,
   setStoredWorkflows,
@@ -31,7 +33,9 @@ export interface SyncStatus {
   isOnline: boolean;
   isSyncing: boolean;
   error?: string;
-  errorKind?: "sync" | "rejected";
+  errorKind?: "sync" | "rejected" | "auth";
+  pendingChanges: number;
+  rejectedChanges: number;
 }
 
 const NETINFO_TIMEOUT_MS = 3000;
@@ -51,22 +55,42 @@ function isPermanent(error: unknown) {
 
 class SyncService {
   private initialized = false;
+  private transactionsOnly = false;
+
+  configure(options: { transactionsOnly: boolean }) {
+    this.transactionsOnly = options.transactionsOnly;
+  }
   private syncing = false;
   private syncRequested = false;
   private online = false;
   private listeners: ((status: SyncStatus) => void)[] = [];
   private unsubscribe: (() => void) | null = null;
   private lastError: string | null = null;
-  private lastErrorKind: "sync" | "rejected" = "sync";
+  private lastErrorKind: "sync" | "rejected" | "auth" = "sync";
+  private pendingChanges = 0;
+  private rejectedChanges = 0;
+  private unsubscribeOutbox: (() => void) | null = null;
 
   private emit() {
     const status = {
       isOnline: this.online,
       isSyncing: this.syncing,
+      pendingChanges: this.pendingChanges,
+      rejectedChanges: this.rejectedChanges,
       ...(this.lastError ? { error: this.lastError, errorKind: this.lastErrorKind } : {}),
     };
     this.listeners.forEach((listener) => listener(status));
-    this.lastError = null;
+  }
+
+  private async refreshPending() {
+    const operations = await getOutbox();
+    this.pendingChanges = operations.length;
+    this.rejectedChanges = operations.filter((item) => item.rejected).length;
+    if (this.rejectedChanges && !this.lastError) {
+      this.lastErrorKind = "rejected";
+      this.lastError = "Some changes need attention. They remain saved on this device.";
+    }
+    this.emit();
   }
 
   private async networkState() {
@@ -87,6 +111,8 @@ class SyncService {
     if (this.initialized) return;
     this.initialized = true;
     await migrateLegacyPendingData();
+    this.unsubscribeOutbox = subscribeOutbox(() => { void this.refreshPending(); });
+    await this.refreshPending();
     this.unsubscribe = NetInfo.addEventListener((state) => {
       const wasOffline = !this.online;
       this.online = isOnlineState(state);
@@ -104,6 +130,8 @@ class SyncService {
   cleanup() {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.unsubscribeOutbox?.();
+    this.unsubscribeOutbox = null;
     this.initialized = false;
   }
 
@@ -212,18 +240,21 @@ class SyncService {
         await completeOutboxOperation(operation, serverId);
       } catch (error) {
         if (isPermanent(error)) {
-          console.error("[Outbox] Change rejected permanently:", error);
+          console.warn("[Outbox] Change needs attention", error instanceof ApiError ? error.status : "unknown");
           this.lastErrorKind = "rejected";
           this.lastError =
             error instanceof Error
               ? error.message
               : "The server rejected an offline change.";
-          await removeOutboxOperation(operation.id);
+          await rejectOutboxOperation(operation.id, this.lastError);
           continue;
         }
         await incrementOutboxAttempt(operation.id);
-        this.lastErrorKind = "sync";
-        this.lastError = "Changes are saved on this device but could not be uploaded. Please try syncing again.";
+        const authError = error instanceof ApiError && [401, 403].includes(error.status);
+        this.lastErrorKind = authError ? "auth" : "sync";
+        this.lastError = authError
+          ? "Sign in again to upload changes. Your changes remain saved on this device."
+          : "Changes are saved on this device but could not be uploaded. Please try syncing again.";
         return false;
       }
     }
@@ -238,6 +269,7 @@ class SyncService {
     this.syncing = true;
     try {
       if (!(await this.isOnline())) return null;
+      this.lastError = null;
       this.emit();
       let result;
       do {
@@ -246,22 +278,27 @@ class SyncService {
         result = await this.fetchAllFromServer();
         if (!uploaded) return result;
       } while (this.syncRequested);
-      await setLastSyncTime(Date.now());
+      if (!(await getOutbox()).length) await setLastSyncTime(Date.now());
       return result;
     } catch (error) {
-      this.lastErrorKind = "sync";
-      this.lastError = error instanceof Error ? error.message : "Sync failed. Please try again.";
+      const authError = error instanceof ApiError && [401, 403].includes(error.status);
+      // Preserve an upload authentication error even if the refresh also failed.
+      if (authError || this.lastErrorKind !== "auth") {
+        this.lastErrorKind = authError ? "auth" : "sync";
+        this.lastError = authError ? "Sign in again to sync. Your changes remain saved on this device."
+          : error instanceof Error ? error.message : "Sync failed. Please try again.";
+      }
       return null;
     } finally {
       this.syncing = false;
-      this.emit();
+      await this.refreshPending();
     }
   }
 
   async fetchAllFromServer() {
     const results = await Promise.allSettled([
       api.getTransactions(),
-      api.getWorkflows(),
+      this.transactionsOnly ? getStoredWorkflows() : api.getWorkflows(),
       api.getProfile(),
     ]);
     const serverTransactions = results[0].status === "fulfilled" ? results[0].value : null;
@@ -305,6 +342,8 @@ class SyncService {
     const failed = results.some((result) => result.status === "rejected");
     if (failed) {
       const allFailed = results.every((result) => result.status === "rejected");
+      const authFailure = results.find((result) => result.status === "rejected" && result.reason instanceof ApiError && [401, 403].includes(result.reason.status));
+      if (authFailure?.status === "rejected") throw authFailure.reason;
       throw new Error(allFailed
         ? "Could not refresh from the server. Your saved data is still available. Please try again."
         : "Some data could not be refreshed. Please try syncing again.");
@@ -318,6 +357,7 @@ class SyncService {
 
   async forceRefresh() {
     if (!(await this.isOnline())) return null;
+    await retryRejectedOperations();
     return this.syncAll();
   }
 

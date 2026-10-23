@@ -9,7 +9,7 @@ import { getAuthErrorMessage, isAuthRateLimitError } from "@/lib/auth-form";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const AUTH_RATE_LIMIT_COOLDOWN_MS = 3 * 60 * 1000;
@@ -43,7 +43,7 @@ export default function SignInPage() {
         return;
       }
       setLoading(false);
-    });
+    }).catch(() => setLoading(false));
   }, [router]);
 
   useEffect(() => {
@@ -55,34 +55,39 @@ export default function SignInPage() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (cooldownActive) return;
+    if (submitting || cooldownActive) return;
 
     setSubmitting(true);
     setError("");
 
-    const { error: signInError } = await createClient().auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    try {
+      const { error: signInError } = await createClient().auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    setSubmitting(false);
-    if (signInError) {
-      if (isAuthRateLimitError(signInError.message)) {
-        setNow(Date.now());
-        setCooldownUntil(Date.now() + AUTH_RATE_LIMIT_COOLDOWN_MS);
+      if (signInError) {
+        if (isAuthRateLimitError(signInError.message)) {
+          setNow(Date.now());
+          setCooldownUntil(Date.now() + AUTH_RATE_LIMIT_COOLDOWN_MS);
+        }
+        setError(getAuthErrorMessage(signInError.message));
+        return;
       }
-      setError(getAuthErrorMessage(signInError.message));
-      return;
-    }
 
-    router.replace("/dashboard");
-    router.refresh();
+      router.replace("/dashboard");
+      router.refresh();
+    } catch (error) {
+      setError(getAuthErrorMessage(error instanceof Error ? error.message : "Sign-in failed. Please try again."));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
-        <Card className="w-full max-w-md space-y-5 p-6">
+      <div className="flex min-h-svh items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-md flex flex-col gap-5 p-6">
           <Skeleton className="mx-auto size-12 rounded-xl" />
           <Skeleton className="h-8 w-2/3" />
           <Skeleton className="h-11 w-full" />
@@ -94,27 +99,28 @@ export default function SignInPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md p-6 shadow-xl">
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-2 text-center">
+    <div className="flex min-h-svh items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md p-6 shadow-sm">
+        <form onSubmit={handleSubmit}>
+          <FieldGroup>
+          <div className="flex flex-col gap-2 text-center">
             <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <Wallet className="size-6" />
             </div>
-            <h1 className="text-2xl font-bold">Sign in</h1>
+            <h1 className="text-3xl font-semibold tracking-tight">Sign in</h1>
             <p className="text-sm text-muted-foreground">
               Use your email and password to continue.
             </p>
           </div>
 
           {error ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div role="alert" aria-live="polite" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
             </div>
           ) : null}
 
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
+          <Field>
+            <FieldLabel htmlFor="email">Email</FieldLabel>
             <Input
               id="email"
               type="email"
@@ -123,9 +129,9 @@ export default function SignInPage() {
               onChange={(event) => setEmail(event.target.value)}
               required
             />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="password">Password</FieldLabel>
             <div className="relative">
               <Input
                 id="password"
@@ -147,7 +153,7 @@ export default function SignInPage() {
                 {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </Button>
             </div>
-          </div>
+          </Field>
 
           <Button className="w-full" type="submit" disabled={submitting || cooldownActive}>
             {submitting
@@ -163,6 +169,7 @@ export default function SignInPage() {
               Create one
             </Link>
           </p>
+          </FieldGroup>
         </form>
       </Card>
     </div>

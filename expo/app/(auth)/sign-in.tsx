@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Link, useRouter } from "expo-router";
 import { useTheme } from "../../context/ThemeContext";
@@ -18,6 +19,7 @@ import { supabase } from "../../lib/supabase";
 import {
   AUTH_RATE_LIMIT_COOLDOWN_MS,
   formatCooldown,
+  getAuthErrorMessage,
   isAuthRateLimitError,
 } from "../../lib/auth-rate-limit";
 
@@ -25,10 +27,12 @@ export default function SignInScreen() {
   const { isDark } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [now, setNow] = useState(0);
@@ -43,7 +47,7 @@ export default function SignInScreen() {
         return;
       }
       setLoading(false);
-    });
+    }).catch(() => setLoading(false));
   }, [router]);
 
   useEffect(() => {
@@ -54,6 +58,7 @@ export default function SignInScreen() {
   }, [cooldownActive]);
 
   const handleSignIn = async () => {
+    if (submitting) return;
     if (cooldownActive) {
       Alert.alert(
         "Please wait",
@@ -68,22 +73,28 @@ export default function SignInScreen() {
     }
 
     setSubmitting(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
-    setSubmitting(false);
+    setErrorMessage("");
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    if (error) {
-      if (isAuthRateLimitError(error.message)) {
-        setNow(Date.now());
-        setCooldownUntil(Date.now() + AUTH_RATE_LIMIT_COOLDOWN_MS);
+      if (error) {
+        if (isAuthRateLimitError(error.message)) {
+          setNow(Date.now());
+          setCooldownUntil(Date.now() + AUTH_RATE_LIMIT_COOLDOWN_MS);
+        }
+        setErrorMessage(getAuthErrorMessage(error.message));
+        return;
       }
-      Alert.alert("Sign In Failed", error.message);
-      return;
-    }
 
-    router.replace("/(tabs)");
+      router.replace("/(tabs)");
+    } catch (error) {
+      setErrorMessage(getAuthErrorMessage(error instanceof Error ? error.message : "Sign-in failed. Please try again."));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (loading) {
@@ -100,27 +111,32 @@ export default function SignInScreen() {
       style={{ flex: 1, backgroundColor: colors.background }}
     >
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 24 }}
+        contentContainerStyle={{ flexGrow: 1, justifyContent: "center", paddingHorizontal: 24, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24, width: "100%", maxWidth: 440, alignSelf: "center" }}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={{ alignItems: "center", marginBottom: 40 }}>
+        <View style={{ alignItems: "center", marginBottom: 32 }}>
           <View
             style={{
-              width: 72,
-              height: 72,
-              borderRadius: 18,
+              width: 56,
+              height: 56,
+              borderRadius: 16,
               backgroundColor: colors.primary,
               justifyContent: "center",
               alignItems: "center",
               marginBottom: 16,
             }}
           >
-            <Ionicons name="wallet" size={36} color={colors.primaryForeground} />
+            <Ionicons name="wallet-outline" size={28} color={colors.primaryForeground} />
           </View>
-          <Text style={{ fontSize: 30, fontWeight: "bold", color: colors.text }}>Expenser</Text>
+          <Text style={{ fontSize: 30, fontWeight: "600", letterSpacing: -0.8, color: colors.text }}>Expenser</Text>
           <Text style={{ fontSize: 16, color: colors.textMuted, marginTop: 8 }}>Sign in to continue</Text>
         </View>
 
+        {errorMessage ? (
+          <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ color: colors.error, backgroundColor: colors.errorBg, padding: 14, borderRadius: 12, marginBottom: 16, lineHeight: 21 }}>
+            {errorMessage}
+          </Text>
+        ) : null}
         <View style={{ gap: 16 }}>
           <View>
             <Text style={{ fontSize: 14, fontWeight: "500", color: colors.text, marginBottom: 8 }}>Email</Text>
@@ -136,6 +152,8 @@ export default function SignInScreen() {
                 color: colors.text,
               }}
               placeholder="you@example.com"
+              autoComplete="email"
+              accessibilityLabel="Email"
               placeholderTextColor={colors.textMuted}
               value={email}
               onChangeText={setEmail}
@@ -165,6 +183,10 @@ export default function SignInScreen() {
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
+                autoComplete="current-password"
+                accessibilityLabel="Password"
+                returnKeyType="go"
+                onSubmitEditing={handleSignIn}
               />
               <TouchableOpacity onPress={() => setShowPassword((value) => !value)}>
                 <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textMuted} />

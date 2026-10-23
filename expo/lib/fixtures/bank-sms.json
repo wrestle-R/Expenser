@@ -1,0 +1,238 @@
+{
+  "provenance": "Synthetic anonymized fixtures modelled on Indian transaction-alert conventions. No real customer SMS, accounts, names or references. Coverage is regression evidence, not certification by banks.",
+  "capturedAt": "2026-10-23T12:00:00.000Z",
+  "cases": [
+    {
+      "id": "bank-hdfcbk",
+      "sender": "VM-HDFCBK",
+      "bank": "HDFC Bank",
+      "message": "INR 1,234.50 debited from A/c XX1234 on 23-10-2026. Ref No 111222333444. Avl Bal INR 9,876.54",
+      "amount": 1234.5,
+      "type": "expense"
+    },
+    {
+      "id": "bank-icicib",
+      "sender": "VM-ICICIB",
+      "bank": "ICICI Bank",
+      "message": "Your Acct **1234 credited Rs.2,500.25 on 23-Oct-2026 by NEFT. UTR SYNTH12345678. Available Balance Rs.9,000.00",
+      "amount": 2500.25,
+      "type": "income"
+    },
+    {
+      "id": "bank-axisbk",
+      "sender": "VM-AXISBK",
+      "bank": "Axis Bank",
+      "message": "Rs 99.90 spent on card ending 1234 at SYNTHETIC SHOP on 23/10/26 8:15 PM. Ref 111222333444",
+      "amount": 99.9,
+      "type": "expense"
+    },
+    {
+      "id": "bank-sbiupi",
+      "sender": "VM-SBIUPI",
+      "bank": "State Bank of India",
+      "message": "Avl Bal Rs 9000.00. Rs 30 sent from your a/c XX1234 via UPI to SYNTHETIC SHOP. Ref No 111222333444",
+      "amount": 30,
+      "type": "expense"
+    },
+    {
+      "id": "bank-unionb",
+      "sender": "VM-UNIONB",
+      "bank": "Union Bank of India",
+      "message": "Rs 340 withdrawn from account XX1234 on 23 Oct 2026. Available balance INR 8,000",
+      "amount": 340,
+      "type": "expense"
+    },
+    {
+      "id": "bank-yesbnk",
+      "sender": "VM-YESBNK",
+      "bank": "YES BANK",
+      "message": "INR 550 received in your account XX1234 on 23-10-2026. UPI Ref No 111222333444",
+      "amount": 550,
+      "type": "income"
+    },
+    {
+      "id": "bank-bobtxn",
+      "sender": "VM-BOBTXN",
+      "bank": "Bank of Baroda",
+      "message": "INR 1,234.50 debited from A/c XX1234 on 23-10-2026. Ref No 111222333444. Avl Bal INR 9,876.54",
+      "amount": 1234.5,
+      "type": "expense"
+    },
+    {
+      "id": "bank-kotakb",
+      "sender": "VM-KOTAKB",
+      "bank": "Kotak Mahindra Bank",
+      "message": "Your Acct **1234 credited Rs.2,500.25 on 23-Oct-2026 by NEFT. UTR SYNTH12345678. Available Balance Rs.9,000.00",
+      "amount": 2500.25,
+      "type": "income"
+    },
+    {
+      "id": "bank-canbnk",
+      "sender": "VM-CANBNK",
+      "bank": "Canara Bank",
+      "message": "Rs 99.90 spent on card ending 1234 at SYNTHETIC SHOP on 23/10/26 8:15 PM. Ref 111222333444",
+      "amount": 99.9,
+      "type": "expense"
+    },
+    {
+      "id": "bank-pnbsms",
+      "sender": "VM-PNBSMS",
+      "bank": "Punjab National Bank",
+      "message": "Avl Bal Rs 9000.00. Rs 30 sent from your a/c XX1234 via UPI to SYNTHETIC SHOP. Ref No 111222333444",
+      "amount": 30,
+      "type": "expense"
+    },
+    {
+      "id": "bank-idfcfb",
+      "sender": "VM-IDFCFB",
+      "bank": "IDFC FIRST Bank",
+      "message": "Rs 340 withdrawn from account XX1234 on 23 Oct 2026. Available balance INR 8,000",
+      "amount": 340,
+      "type": "expense"
+    },
+    {
+      "id": "bank-indusind",
+      "sender": "VM-INDUSIND",
+      "bank": "IndusInd Bank",
+      "message": "INR 550 received in your account XX1234 on 23-10-2026. UPI Ref No 111222333444",
+      "amount": 550,
+      "type": "income"
+    },
+    {
+      "id": "bank-boiind",
+      "sender": "VM-BOIIND",
+      "bank": "Bank of India",
+      "message": "INR 1,234.50 debited from A/c XX1234 on 23-10-2026. Ref No 111222333444. Avl Bal INR 9,876.54",
+      "amount": 1234.5,
+      "type": "expense"
+    },
+    {
+      "id": "bank-indbnk",
+      "sender": "VM-INDBNK",
+      "bank": "Indian Bank",
+      "message": "Your Acct **1234 credited Rs.2,500.25 on 23-Oct-2026 by NEFT. UTR SYNTH12345678. Available Balance Rs.9,000.00",
+      "amount": 2500.25,
+      "type": "income"
+    },
+    {
+      "id": "bank-fedbnk",
+      "sender": "VM-FEDBNK",
+      "bank": "Federal Bank",
+      "message": "Rs 99.90 spent on card ending 1234 at SYNTHETIC SHOP on 23/10/26 8:15 PM. Ref 111222333444",
+      "amount": 99.9,
+      "type": "expense"
+    },
+    {
+      "id": "bank-idbibk",
+      "sender": "VM-IDBIBK",
+      "bank": "IDBI Bank",
+      "message": "Avl Bal Rs 9000.00. Rs 30 sent from your a/c XX1234 via UPI to SYNTHETIC SHOP. Ref No 111222333444",
+      "amount": 30,
+      "type": "expense"
+    },
+    {
+      "id": "bank-iobchn",
+      "sender": "VM-IOBCHN",
+      "bank": "Indian Overseas Bank",
+      "message": "Rs 340 withdrawn from account XX1234 on 23 Oct 2026. Available balance INR 8,000",
+      "amount": 340,
+      "type": "expense"
+    },
+    {
+      "id": "bank-mahabk",
+      "sender": "VM-MAHABK",
+      "bank": "Bank of Maharashtra",
+      "message": "INR 550 received in your account XX1234 on 23-10-2026. UPI Ref No 111222333444",
+      "amount": 550,
+      "type": "income"
+    },
+    {
+      "id": "bank-aubank",
+      "sender": "VM-AUBANK",
+      "bank": "AU Small Finance Bank",
+      "message": "INR 1,234.50 debited from A/c XX1234 on 23-10-2026. Ref No 111222333444. Avl Bal INR 9,876.54",
+      "amount": 1234.5,
+      "type": "expense"
+    },
+    {
+      "id": "bank-rblbnk",
+      "sender": "VM-RBLBNK",
+      "bank": "RBL Bank",
+      "message": "Your Acct **1234 credited Rs.2,500.25 on 23-Oct-2026 by NEFT. UTR SYNTH12345678. Available Balance Rs.9,000.00",
+      "amount": 2500.25,
+      "type": "income"
+    },
+    {
+      "id": "bank-centbk",
+      "sender": "VM-CENTBK",
+      "bank": "Central Bank of India",
+      "message": "Rs 99.90 spent on card ending 1234 at SYNTHETIC SHOP on 23/10/26 8:15 PM. Ref 111222333444",
+      "amount": 99.9,
+      "type": "expense"
+    },
+    {
+      "id": "hdfc-ambiguous-transfer",
+      "sender": "VM-HDFCBK",
+      "message": "INR 300 transferred successfully. Ref No 111222333444",
+      "outcome": "unresolved"
+    },
+    {
+      "id": "different-debit-credit",
+      "sender": "VM-SBIUPI",
+      "message": "Rs 100 debited and Rs 200 credited to account XX1234",
+      "outcome": "unresolved"
+    },
+    {
+      "id": "balance-only",
+      "sender": "VM-ICICIB",
+      "message": "Avl Bal Rs 1,23,456.78 in your account XX1234",
+      "outcome": "unresolved"
+    },
+    {
+      "id": "otp",
+      "sender": "VM-AXISBK",
+      "message": "123456 is your OTP for payment of INR 1,000. Do not share.",
+      "outcome": "non_transaction"
+    },
+    {
+      "id": "mandate-not-completed",
+      "sender": "VM-KOTAKB",
+      "message": "Your account will be debited INR 499 tomorrow for a scheduled payment",
+      "outcome": "non_transaction"
+    },
+    {
+      "id": "failed-with-refund-promise",
+      "sender": "VM-YESBNK",
+      "message": "Payment of Rs 999 failed. If debited it will be refunded within 5 days",
+      "outcome": "non_transaction"
+    },
+    {
+      "id": "request",
+      "sender": "VM-UNIONB",
+      "message": "Collect request received for INR 700. Approve to pay.",
+      "outcome": "non_transaction"
+    },
+    {
+      "id": "invalid-date",
+      "sender": "VM-PNBSMS",
+      "message": "Rs 100 debited from account XX1234 on 31-02-2026",
+      "outcome": "unresolved"
+    },
+    {
+      "id": "completed-refund",
+      "sender": "VM-HDFCBK",
+      "bank": "HDFC Bank",
+      "message": "Rs 400 refunded to your account XX1234. UTR REFUND111222. Avl Bal Rs 10000",
+      "amount": 400,
+      "type": "income"
+    },
+    {
+      "id": "completed-autopay",
+      "sender": "VM-UNIONB",
+      "bank": "Union Bank of India",
+      "message": "Account XX1234 debited INR 499.00 for UPI AutoPay successfully on 23-10-2026. Avl Bal INR 1,000",
+      "amount": 499,
+      "type": "expense"
+    }
+  ]
+}

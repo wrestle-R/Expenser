@@ -1,0 +1,15 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "../expo/context/UserContext.tsx",
+    "../expo/context/ThemeContext.tsx",
+    "../expo/components/SyncStatusBanner.tsx"
+  ]
+}

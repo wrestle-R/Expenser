@@ -4,11 +4,11 @@ import { api } from "../lib/api";
 import { useUserContext } from "../context/UserContext";
 
 export default function BalanceReconciliationPrompt() {
-  const { profile, refreshProfile, syncing } = useUserContext();
+  const { profile, refreshProfile, syncing, isOnline } = useUserContext();
   const activeAlertId = useRef<string | null>(null);
 
   const checkAlerts = useCallback(async () => {
-      if (!profile) {
+      if (!profile || !isOnline) {
         return;
       }
 
@@ -30,13 +30,15 @@ export default function BalanceReconciliationPrompt() {
             2
           )}, but Expenser expected Rs ${alert.expectedBalance.toFixed(2)}.`,
           [
+            { text: "Later", style: "cancel" },
             {
               text: "Keep App Balance",
-              style: "cancel",
               onPress: async () => {
                 try {
                   await api.resolveBalanceAlert(alert._id, "keep");
                   await refreshProfile();
+                } catch {
+                  Alert.alert("Could not update balance", "Please check your connection and try again.");
                 } finally {
                   activeAlertId.current = null;
                 }
@@ -48,6 +50,8 @@ export default function BalanceReconciliationPrompt() {
                 try {
                   await api.resolveBalanceAlert(alert._id, "apply");
                   await refreshProfile();
+                } catch {
+                  Alert.alert("Could not update balance", "Please check your connection and try again.");
                 } finally {
                   activeAlertId.current = null;
                 }
@@ -58,7 +62,7 @@ export default function BalanceReconciliationPrompt() {
       } catch (error) {
         console.error("[BalanceReconciliationPrompt] Error:", error);
       }
-  }, [profile, refreshProfile]);
+  }, [profile, refreshProfile, isOnline]);
 
   useEffect(() => {
     let cancelled = false;

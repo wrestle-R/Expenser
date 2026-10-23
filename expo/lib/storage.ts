@@ -1,4 +1,5 @@
 // Offline storage service using AsyncStorage
+import { readSnapshot, writeSnapshots } from "./snapshot-storage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   BankReviewEvent,
@@ -63,6 +64,7 @@ export interface OutboxOperation {
   attempts: number;
   // Persisted before sending: a timeout or app restart cannot prove it was not applied.
   inFlight?: boolean;
+  rejected?: string;
 }
 
 function outboxId() {
@@ -70,12 +72,28 @@ function outboxId() {
 }
 
 async function readOutbox(): Promise<OutboxOperation[]> {
-  const data = await AsyncStorage.getItem(KEYS.OUTBOX);
-  return data ? JSON.parse(data) : [];
+  return readSnapshot<OutboxOperation>(AsyncStorage, KEYS.OUTBOX);
 }
 
+const outboxListeners = new Set<() => void>();
+export function subscribeOutbox(listener: () => void) {
+  outboxListeners.add(listener);
+  return () => { outboxListeners.delete(listener); };
+}
+function notifyOutbox() { outboxListeners.forEach((listener) => listener()); }
 async function writeOutbox(operations: OutboxOperation[]) {
-  await AsyncStorage.setItem(KEYS.OUTBOX, JSON.stringify(operations));
+  await writeSnapshots(AsyncStorage, [[KEYS.OUTBOX, operations]]);
+  notifyOutbox();
+}
+export async function rejectOutboxOperation(id: string, message: string) {
+  await enqueueStorageMutation("outbox", async () => {
+    await writeOutbox((await readOutbox()).map((item) => item.id === id ? { ...item, inFlight: false, rejected: message } : item));
+  });
+}
+export async function retryRejectedOperations() {
+  await enqueueStorageMutation("outbox", async () => {
+    await writeOutbox((await readOutbox()).map(({ rejected: _rejected, ...item }) => item));
+  });
 }
 
 export async function getOutbox(): Promise<OutboxOperation[]> {
@@ -96,9 +114,12 @@ export async function removeOutboxOperation(id: string) {
 export async function claimNextOutboxOperation(): Promise<OutboxOperation | null> {
   return enqueueStorageMutation("outbox", async () => {
     const operations = await readOutbox();
-    if (!operations.length) return null;
-    const claimed = { ...operations[0], inFlight: true };
-    await writeOutbox([claimed, ...operations.slice(1)]);
+    // A rejected entity is parked until a deliberate retry, including dependent edits.
+    const blocked = new Set(operations.filter((item) => item.rejected).map((item) => `${item.entity}:${item.entityId}`));
+    const index = operations.findIndex((item) => !blocked.has(`${item.entity}:${item.entityId}`));
+    if (index < 0) return null;
+    const claimed = { ...operations[index], inFlight: true };
+    await writeOutbox(operations.map((item, i) => i === index ? claimed : item));
     return claimed;
   });
 }
@@ -267,8 +288,7 @@ function normalizeBottomTabSlots(value: unknown): BottomTabSlot[] {
 export async function getStoredTransactions(): Promise<ITransaction[]> {
   try {
     await transactionStorageQueue;
-    const data = await AsyncStorage.getItem(KEYS.TRANSACTIONS);
-    return data ? JSON.parse(data) : [];
+    return await readSnapshot<ITransaction>(AsyncStorage, KEYS.TRANSACTIONS);
   } catch (error) {
     console.error("[Storage] Error getting transactions:", error);
     return [];
@@ -280,7 +300,7 @@ export async function setStoredTransactions(
 ): Promise<void> {
   try {
     await enqueueStorageMutation("transactions", () =>
-      AsyncStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(transactions))
+      writeSnapshots(AsyncStorage, [[KEYS.TRANSACTIONS, transactions]])
     );
   } catch (error) {
     console.error("[Storage] Error setting transactions:", error);
@@ -293,16 +313,41 @@ export async function updateStoredTransactions(
 ): Promise<ITransaction[]> {
   try {
     return await enqueueStorageMutation("transactions", async () => {
-      const data = await AsyncStorage.getItem(KEYS.TRANSACTIONS);
-      const current: ITransaction[] = data ? JSON.parse(data) : [];
+      const current = await readSnapshot<ITransaction>(AsyncStorage, KEYS.TRANSACTIONS);
       const next = await update(current);
-      await AsyncStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(next));
+      await writeSnapshots(AsyncStorage, [[KEYS.TRANSACTIONS, next]]);
       return next;
     });
   } catch (error) {
     console.error("[Storage] Error updating transactions:", error);
     throw error;
   }
+}
+
+
+// On Android AsyncStorage multiSet commits both keys in one SQLite transaction.
+// A killed process cannot acknowledge a cached edit without its upload intent.
+export async function saveTransactionChange(
+  input: { entityId: string; action: OutboxAction; payload?: Record<string, unknown> },
+  update: (transactions: ITransaction[]) => ITransaction[],
+) {
+  return enqueueStorageMutation("transactions", () => enqueueStorageMutation("outbox", async () => {
+    const current = await readSnapshot<ITransaction>(AsyncStorage, KEYS.TRANSACTIONS);
+    const next = update(current);
+    if (next === current) return current;
+    const aliases = JSON.parse(await AsyncStorage.getItem(KEYS.OUTBOX_ALIASES) ?? "{}");
+    const normalized = { ...input, entity: "transaction" as const, entityId: aliases[`transaction:${input.entityId}`] ?? input.entityId, payload: { ...input.payload } };
+    const linkedExpense = normalized.payload.exchangeExpenseId;
+    if (typeof linkedExpense === "string" && aliases[`transaction:${linkedExpense}`]) {
+      normalized.payload.exchangeExpenseId = aliases[`transaction:${linkedExpense}`];
+    }
+    const operations = coalesceOutboxOperation(await readOutbox(), normalized, () => ({
+      version: 2, id: outboxId(), ...normalized, createdAt: new Date().toISOString(), attempts: 0,
+    }));
+    await writeSnapshots(AsyncStorage, [[KEYS.TRANSACTIONS, next], [KEYS.OUTBOX, operations]]);
+    notifyOutbox();
+    return next;
+  }));
 }
 
 export async function addPendingTransaction(
@@ -670,7 +715,15 @@ export async function setLastSyncTime(time: number): Promise<void> {
 // === Clear All Data (for logout) ===
 export async function clearAllData(): Promise<void> {
   try {
+    const partKeys: string[] = [];
+    for (const key of [KEYS.TRANSACTIONS, KEYS.OUTBOX]) {
+      const manifest = JSON.parse(await AsyncStorage.getItem(key) ?? "[]");
+      if (manifest?.version === 3 && Number.isInteger(manifest.parts) && manifest.parts <= 10000) {
+        for (let index = 0; index < manifest.parts; index++) partKeys.push(`${key}:part:${index}`);
+      }
+    }
     await AsyncStorage.multiRemove([
+      ...partKeys,
       KEYS.TRANSACTIONS,
       KEYS.WORKFLOWS,
       KEYS.PROFILE,

@@ -1,5 +1,5 @@
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from "@react-navigation/native";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { Stack, useGlobalSearchParams, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { View, ActivityIndicator } from "react-native";
@@ -14,7 +14,7 @@ import { ToastProvider } from "../context/ToastContext";
 import { TabPreferencesProvider } from "../context/TabPreferencesContext";
 import { Colors } from "../constants/theme";
 import { syncService } from "../lib/sync";
-import { supabase } from "../lib/supabase";
+import { supabase, initialSession } from "../lib/supabase";
 import BalanceReconciliationPrompt from "../components/BalanceReconciliationPrompt";
 
 const AUTH_LOAD_TIMEOUT_MS = 5000;
@@ -25,21 +25,24 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   const [isLoaded, setIsLoaded] = useState(false);
   const isSignedIn = Boolean(session?.user);
   const segments = useSegments();
+  const { reauthenticate } = useGlobalSearchParams<{ reauthenticate?: string }>();
   const router = useRouter();
   const [authTimedOut, setAuthTimedOut] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+    let authChanged = false;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
+    initialSession.then((cachedSession) => {
+      if (!mounted || authChanged) return;
+      setSession(cachedSession);
       setIsLoaded(true);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      authChanged = true;
       setSession(nextSession);
       setIsLoaded(true);
     });
@@ -74,7 +77,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
       console.log("[AuthGuard] isSignedIn:", isSignedIn, "inAuthGroup:", inAuthGroup, "segments:", segments);
 
-      if (isSignedIn && inAuthGroup) {
+      if (isSignedIn && inAuthGroup && reauthenticate !== "1") {
         console.log("[AuthGuard] Redirecting signed-in user to (tabs)");
         setTimeout(() => {
           if (!cancelled) {
@@ -105,7 +108,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, isLoaded, segments, authTimedOut, router]);
+  }, [isSignedIn, isLoaded, segments, authTimedOut, router, reauthenticate]);
 
   if (!isLoaded && !authTimedOut) {
     return (

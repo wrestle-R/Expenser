@@ -4,6 +4,11 @@
   "main": "index.js",
   "types": "index.d.ts",
   "expo-module": {
-    "platforms": ["android"]
+    "platforms": [
+      "android"
+    ]
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.8.0"
   }
 }

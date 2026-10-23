@@ -34,7 +34,7 @@ test("accepts sign up when required fields are present and passwords match", () 
 test("maps invalid api key auth errors to a clearer message", () => {
   assert.equal(
     getAuthErrorMessage("Invalid API key"),
-    "Authentication is misconfigured. Restart the Next app after updating the Supabase public key."
+    "Sign-in is unavailable because the authentication configuration is invalid."
   );
 });
 
@@ -56,4 +56,10 @@ test("detects auth rate limit variants", () => {
   assert.equal(isAuthRateLimitError("Request rate limit reached"), true);
   assert.equal(isAuthRateLimitError("Too many requests"), true);
   assert.equal(isAuthRateLimitError("Invalid login credentials"), false);
+});
+
+test("network failures explain recovery without blaming credentials", () => {
+  for (const message of ["Network request failed", "Failed to fetch", "fetch failed", "Request timed out"]) {
+    assert.match(getAuthErrorMessage(message), /Could not reach the sign-in service/);
+  }
 });

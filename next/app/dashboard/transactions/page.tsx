@@ -1,5 +1,7 @@
 "use client";
 
+import { fetchTransactionHistory } from "@/lib/fetch-transactions.js";
+
 import React, { useEffect, useState, useCallback } from "react";
 import { useUserContext } from "@/context/UserContext";
 import { useStealthMode } from "@/context/StealthContext";
@@ -244,15 +246,8 @@ export default function TransactionsPage() {
 
   const fetchTransactions = useCallback(async () => {
     try {
-      const res = await fetch("/api/transactions");
-      if (res.ok) {
-        const data = await res.json();
-        setTransactions(data.transactions);
-        console.log("[Transactions] Fetched", data.transactions.length, "transactions");
-      } else {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error || `Failed to fetch transactions (${res.status})`);
-      }
+      const data = await fetchTransactionHistory<Transaction>();
+      setTransactions(data.transactions);
     } catch (err) {
       console.error("[Transactions] Error:", err);
     } finally {

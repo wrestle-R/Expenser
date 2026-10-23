@@ -54,19 +54,20 @@ export default function TabLayout() {
   };
 
   // Extra padding for gesture navigation
-  const bottomPadding = Platform.OS === "android" ? 20 : Math.max(insets.bottom, 20);
+  const bottomPadding = Math.max(insets.bottom, Platform.OS === "android" ? 12 : 16);
 
   return (
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: colors.tint,
         tabBarInactiveTintColor: colors.tabIconDefault,
+        tabBarLabelStyle: { fontSize: 10, fontWeight: "500", marginTop: 3 },
         tabBarStyle: {
           backgroundColor: colors.card,
           borderTopColor: colors.border,
           paddingBottom: bottomPadding,
           paddingTop: 10,
-          height: 70 + bottomPadding,
+          height: 60 + bottomPadding,
         },
         headerShown: false,
         tabBarButton: HapticTab,

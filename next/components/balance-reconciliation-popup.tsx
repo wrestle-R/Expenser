@@ -44,7 +44,9 @@ export function BalanceReconciliationPopup() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: alert._id, action }),
       });
-      if (res.ok) {
+      if (res.status === 409) {
+        await loadAlert();
+      } else if (res.ok) {
         setAlert(null);
         await refreshProfile();
         await loadAlert();

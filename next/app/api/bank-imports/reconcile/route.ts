@@ -24,22 +24,19 @@ export async function GET(req: Request) {
     const includeHistory =
       new URL(req.url).searchParams.get("includeHistory") === "true";
 
-    const alerts = includeHistory
-      ? await sql<BalanceReconciliationAlertRow[]>`
-          select *
-          from balance_reconciliation_alerts
-          where user_id = ${userId}
-            and status = 'pending'
-          order by created_at desc
-        `
-      : await sql<BalanceReconciliationAlertRow[]>`
-          select *
-          from balance_reconciliation_alerts
-          where user_id = ${userId}
-            and status = 'pending'
-          order by created_at desc
-          limit 1
-        `;
+    // One decision for the latest transaction covers the pending batch, even
+    // when older SMS messages were imported after newer ones.
+    const alerts = await sql<BalanceReconciliationAlertRow[]>`
+      select alerts.*
+      from balance_reconciliation_alerts alerts
+      join transactions on transactions.id = alerts.transaction_id
+      where alerts.user_id = ${userId}
+        and transactions.user_id = ${userId}
+        and transactions.deleted_at is null
+        and alerts.status = 'pending'
+      order by transactions.date desc, alerts.created_at desc, alerts.id desc
+      limit 1
+    `;
 
     const mappedAlerts = alerts.map(mapBalanceReconciliationAlertRow);
     if (!includeHistory) {
@@ -88,19 +85,29 @@ export async function POST(req: Request) {
 
     const result = await sql.begin(async (tx) => {
       const trx = tx as unknown as typeof sql;
+      // Imports lock this same balance row before recording a mismatch. Hold
+      // it until the choice and all covered alerts are committed together.
+      await trx`select ensure_user_balances(${userId})`;
+      await trx`
+        select user_id from balances
+        where user_id = ${userId} and payment_method = 'bank'
+        for update
+      `;
       const alerts = (await trx`
-        select alerts.*, transactions.date as transaction_date
+        select alerts.*, transactions.date::text as transaction_date
         from balance_reconciliation_alerts alerts
         join transactions on transactions.id = alerts.transaction_id
-        where alerts.id = ${id}
-          and alerts.user_id = ${userId}
+        where alerts.user_id = ${userId}
+          and transactions.user_id = ${userId}
+          and transactions.deleted_at is null
           and alerts.status = 'pending'
+        order by transactions.date desc, alerts.created_at desc, alerts.id desc
         limit 1
         for update of alerts
-      `) as (BalanceReconciliationAlertRow & { transaction_date: string | Date })[];
+      `) as (BalanceReconciliationAlertRow & { transaction_date: string })[];
 
       const alert = alerts[0];
-      if (!alert) {
+      if (!alert || alert.id !== id) {
         return null;
       }
 
@@ -116,7 +123,7 @@ export async function POST(req: Request) {
           user_id, payment_method, opening_balance, opening_at, current_balance
         ) values (
           ${userId}, 'bank', ${openingBalance},
-          ${alert.transaction_date}, ${openingBalance}
+          ${alert.transaction_date}::text::timestamptz, ${openingBalance}
         )
         on conflict (user_id, payment_method) do update set
           opening_balance = excluded.opening_balance,
@@ -138,19 +145,20 @@ export async function POST(req: Request) {
         set
           status = ${action === "apply" ? "applied" : "kept"},
           resolved_at = timezone('utc', now())
-        where id = ${id}
-          and user_id = ${userId}
+        where user_id = ${userId}
+          and payment_method = ${alert.payment_method}
+          and status = 'pending'
         returning *
       `) as BalanceReconciliationAlertRow[];
 
       return {
-        alert: updatedAlerts[0],
+        alert: updatedAlerts.find((row) => row.id === id)!,
         profile,
       };
     });
 
     if (!result) {
-      return NextResponse.json({ error: "Balance alert not found" }, { status: 404 });
+      return NextResponse.json({ error: "Balance alert changed. Refresh to review the latest balance." }, { status: 409 });
     }
 
     return NextResponse.json({

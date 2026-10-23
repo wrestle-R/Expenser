@@ -17,31 +17,3 @@ Lite uses the same account and SMS import, with a focused transactions screen fo
 ![Expenser desktop dashboard with fictional sample balances and transactions](docs/screenshots/desktop-demo.jpg)
 
 The preview uses fictional sample data.
-
-## Run locally
-
-Web:
-
-```bash
-cd next
-npm ci
-npm run dev
-```
-
-Full Android app:
-
-```bash
-cd expo
-npm ci
-npm start
-```
-
-Lite:
-
-```bash
-cd lite
-npm ci
-npm start
-```
-
-See [Lite setup and release builds](lite/README.md). Mobile regression tests run with `npm test` from `expo/` or `lite/`.

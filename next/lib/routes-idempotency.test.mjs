@@ -10,6 +10,7 @@ import postgres from "postgres";
 import * as pagination from "./transaction-pagination.js";
 import * as review from "./transaction-review.js";
 import * as bankBalance from "./bank-import-balance.js";
+import reconciliation from "./balance-reconciliation.js";
 import apiErrors from "./api-errors.js";
 
 const require = createRequire(import.meta.url);
@@ -19,6 +20,7 @@ const available = process.getuid?.() !== 0 && ["initdb", "pg_ctl"].every((cmd) =
 function loadRoute(name, sql) {
   const exports = {};
   const dependencies = {
+    "@/lib/balance-reconciliation": reconciliation,
     "@/lib/transaction-pagination.js": pagination,
     "next/server": require("next/server"),
     "@/lib/auth": { getAuthenticatedUser: async () => ({ userId: "test-user" }) },
@@ -27,6 +29,8 @@ function loadRoute(name, sql) {
     "@/lib/bank-import-balance.js": bankBalance,
     "@/lib/db": {
       sql,
+      mapBalanceReconciliationAlertRow: (row) => ({ ...row, _id: row.id, createdAt: row.created_at }),
+      mapUserRow: (row, balances) => ({ ...row, balances }),
       normalizeNumber: (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback,
       normalizeDate: (value) => new Date(value ?? Date.now()),
       mapTransactionRow: (row) => ({ _id: row.id }),
@@ -130,6 +134,54 @@ test("concurrent duplicate POST requests recover in PostgreSQL", { skip: !availa
       } while (cursor);
       assert.equal(ids.size, 1001); assert.equal(pages, 5);
       assert.equal((await route.GET(new Request('http://localhost/api/transactions?limit=10000'))).status, 400);
+    });
+
+    await t.test("latest balance choice resolves the batch across clients", async () => {
+      await database.unsafe(`
+        create table users (user_id text primary key);
+        insert into users values ('test-user'), ('another-user');
+        create table balances (user_id text, payment_method text, opening_balance numeric, opening_at timestamptz, current_balance numeric, unique(user_id,payment_method));
+        insert into balances values ('test-user','bank',1000,now(),1000);
+        create function ensure_user_balances(text) returns void language sql as 'select';
+        create function recalculate_user_balances(text) returns void language sql as 'select';
+        create table balance_reconciliation_alerts (
+          id uuid primary key default gen_random_uuid(), user_id text, transaction_id uuid,
+          payment_method text default 'bank', expected_balance numeric, bank_balance numeric,
+          difference numeric, status text default 'pending', created_at timestamptz default now(), resolved_at timestamptz
+        );
+      `);
+      const route = loadRoute('bank-imports/reconcile', database);
+      const get = (history = false) => route.GET(new Request(`http://localhost/api/bank-imports/reconcile?includeHistory=${history}`));
+      const post = (id, action) => route.POST(new Request('http://localhost/api/bank-imports/reconcile', {method:'POST', body:JSON.stringify({id,action})}));
+      for (const action of ['apply', 'keep']) {
+        await database`truncate balance_reconciliation_alerts, transactions`;
+        const ids = [];
+        // Import order deliberately differs from transaction order.
+        for (const [day, owner, deleted] of [[3,'test-user',false],[1,'test-user',false],[2,'test-user',false],[5,'another-user',false],[6,'test-user',true]]) {
+          const [transaction] = await database`insert into transactions(user_id,date,deleted_at) values (${owner},${`2026-10-0${day}T12:00:00.123456Z`}::text::timestamptz,${deleted ? new Date() : null}) returning id`;
+          const [alert] = await database`insert into balance_reconciliation_alerts(user_id,transaction_id,expected_balance,bank_balance,difference,created_at) values (${owner},${transaction.id},800,750,-50,${`2026-10-10T12:00:0${ids.length}Z`}) returning id`;
+          ids.push(alert.id);
+        }
+        for (const history of [false,true]) {
+          const body = await (await get(history)).json();
+          assert.equal(body.alerts.length,1);
+          assert.equal(body.alerts[0]._id,ids[0]);
+        }
+        assert.equal((await post(ids[1],action)).status,409);
+        assert.equal((await database`select count(*)::int as n from balance_reconciliation_alerts where status='pending'`)[0].n,5);
+        const results = await Promise.all([post(ids[0],action),post(ids[0],action)]);
+        assert.deepEqual(results.map(r => r.status).sort(),[200,409]);
+        assert.equal((await results.find(r => r.status===200).json()).alert._id,ids[0]);
+        const [balance] = await database`select opening_balance, (opening_at at time zone 'UTC')::text as opening_at from balances where user_id='test-user'`;
+        assert.equal(Number(balance.opening_balance), action==='apply' ? 750 : 800);
+        assert.match(balance.opening_at,/2026-10-03 12:00:00.123456/);
+        assert.equal((await (await get()).json()).alerts.length,0);
+        const rows = await database`select * from balance_reconciliation_alerts`;
+        assert.ok(rows.filter(r=>r.user_id==='test-user').every(r=>r.status===(action==='apply'?'applied':'kept')));
+        assert.equal(rows.find(r=>r.user_id==='another-user').status,'pending');
+        await database`update balance_reconciliation_alerts set status='pending' where id=${ids[0]}`;
+        assert.equal((await (await get()).json()).alerts[0]._id,ids[0]);
+      }
     });
 
   } finally {

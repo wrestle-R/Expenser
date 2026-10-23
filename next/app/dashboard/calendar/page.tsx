@@ -1,5 +1,7 @@
 "use client";
 
+import { fetchTransactionHistory } from "@/lib/fetch-transactions.js";
+
 import React, { useState, useEffect, useMemo } from "react";
 import { useStealthMode } from "@/context/StealthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,11 +71,8 @@ export default function CalendarPage() {
   useEffect(() => {
     async function fetchTransactions() {
       try {
-        const res = await fetch("/api/transactions");
-        if (res.ok) {
-          const data = await res.json();
-          setTransactions(data.transactions);
-        }
+        const data = await fetchTransactionHistory<Transaction>();
+        setTransactions(data.transactions);
       } catch (error) {
         console.error("[Calendar] Failed to load transactions:", error);
       } finally {

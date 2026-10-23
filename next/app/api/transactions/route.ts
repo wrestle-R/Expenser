@@ -1,3 +1,4 @@
+import { parseTransactionPage, transactionPageCursor } from "@/lib/transaction-pagination.js";
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { getApiErrorResponse } from "@/lib/api-errors";
@@ -406,17 +407,28 @@ export async function GET(req: Request) {
     }
     const userId = authUser.userId;
 
+    let page;
+    try { page = parseTransactionPage(new URL(req.url).searchParams); }
+    catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid page" }, { status: 400 }); }
+    if (page) {
+      const cursor = page.cursor;
+      const rows = await sql<(TransactionRow & { cursor_date: string; cursor_created_at: string })[]>`
+        select *, date::text as cursor_date, created_at::text as cursor_created_at
+        from transactions
+        where user_id = ${userId} and deleted_at is null
+          ${cursor ? sql`and (date, created_at, id) < (${cursor.date}::text::timestamptz, ${cursor.createdAt}::text::timestamptz, ${cursor.id}::uuid)` : sql``}
+        order by date desc, created_at desc, id desc
+        limit ${page.limit + 1}
+      `;
+      const hasMore = rows.length > page.limit;
+      const visible = rows.slice(0, page.limit);
+      return NextResponse.json({ transactions: visible.map(mapTransactionRow), nextCursor: hasMore ? transactionPageCursor(visible[visible.length - 1]) : null });
+    }
     const transactions = await sql<TransactionRow[]>`
-      select *
-      from transactions
-      where user_id = ${userId}
-        and deleted_at is null
-      order by date desc, created_at desc
+      select * from transactions where user_id = ${userId} and deleted_at is null
+      order by date desc, created_at desc, id desc
     `;
-
-    return NextResponse.json({
-      transactions: transactions.map(mapTransactionRow),
-    });
+    return NextResponse.json({ transactions: transactions.map(mapTransactionRow) });
   } catch (error) {
     console.error("[API /transactions GET] Error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

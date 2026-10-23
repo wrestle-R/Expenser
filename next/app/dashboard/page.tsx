@@ -1,5 +1,7 @@
 "use client";
 
+import { fetchTransactionHistory } from "@/lib/fetch-transactions.js";
+
 import React, { useEffect, useState } from "react";
 import { useUserContext } from "@/context/UserContext";
 import { useStealthMode } from "@/context/StealthContext";
@@ -59,15 +61,8 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchTransactions() {
       try {
-        const res = await fetch("/api/transactions");
-        if (res.ok) {
-          const data = await res.json();
-          setTransactions(data.transactions);
-          console.log("[Dashboard] Fetched", data.transactions.length, "transactions");
-        } else {
-          const data = await res.json().catch(() => null);
-          throw new Error(data?.error || `Failed to fetch transactions (${res.status})`);
-        }
+        const data = await fetchTransactionHistory<Transaction>();
+        setTransactions(data.transactions);
       } catch (err) {
         console.error("[Dashboard] Error fetching transactions:", err);
       } finally {

@@ -1,5 +1,7 @@
 "use client";
 
+import { fetchTransactionHistory } from "@/lib/fetch-transactions.js";
+
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowDownRight,
@@ -74,17 +76,11 @@ export default function AnalysisPage() {
   useEffect(() => {
     async function loadAnalysisData() {
       try {
-        const [transactionRes, reconciliationRes] = await Promise.all([
-          fetch("/api/transactions"),
+        const [transactionData, reconciliationRes] = await Promise.all([
+          fetchTransactionHistory<Transaction>(),
           fetch("/api/bank-imports/reconcile?includeHistory=true"),
         ]);
 
-        if (!transactionRes.ok) {
-          const data = await transactionRes.json().catch(() => null);
-          throw new Error(data?.error || "Failed to load transactions");
-        }
-
-        const transactionData = await transactionRes.json();
         setTransactions(transactionData.transactions ?? []);
 
         if (reconciliationRes.ok) {

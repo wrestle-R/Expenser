@@ -159,6 +159,7 @@ function getCategoriesForType(
 
 export default function TransactionsPage() {
   const { profile } = useUserContext();
+  const canSplit = profile?.paymentMethods.includes("splitwise") ?? false;
   const { isStealthMode } = useStealthMode();
   const searchParams = useSearchParams();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -480,7 +481,7 @@ export default function TransactionsPage() {
         description: nextDescription,
         category: nextCategory,
         paymentMethod: editMethod,
-        splitAmount: editIsSplit ? Number(editSplitAmount) : 0,
+        splitAmount: editType === "income" ? 0 : canSplit ? (editIsSplit ? Number(editSplitAmount) : 0) : (editingTransaction?.splitAmount ?? 0),
         exchangeExpenseId:
           editType === "income" && finalCategory === "exchange"
             ? editExchangeExpenseId
@@ -568,7 +569,7 @@ export default function TransactionsPage() {
       description: newDescription.trim(),
       category: finalCategory || "General",
       paymentMethod: newMethod,
-      splitAmount: isSplit ? Number(splitAmount) : 0,
+      splitAmount: canSplit && isSplit ? Number(splitAmount) : 0,
       exchangeExpenseId:
         newType === "income" && finalCategory === "exchange"
           ? newExchangeExpenseId
@@ -831,14 +832,14 @@ export default function TransactionsPage() {
                 </div>
               </div>
 
-              {newType === "expense" && (
+              {canSplit && newType === "expense" && (
                 <div className="pt-3 border-t space-y-3">
                   <div className="flex items-center justify-between">
                     <Label className="flex items-center gap-2 cursor-pointer">
                       <ArrowRightLeft className="size-4 text-orange-500" />
                       Split transaction?
                     </Label>
-                    <Switch checked={isSplit} onCheckedChange={setIsSplit} />
+                    <Switch aria-label="Split transaction" checked={isSplit} onCheckedChange={setIsSplit} />
                   </div>
 
                   {isSplit && (
@@ -1205,14 +1206,14 @@ export default function TransactionsPage() {
               </div>
             )}
 
-            {!isPendingReviewEdit && editType === "expense" && (
+            {canSplit && !isPendingReviewEdit && editType === "expense" && (
               <div className="pt-3 border-t space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="flex items-center gap-2 cursor-pointer">
                     <ArrowRightLeft className="size-4 text-orange-500" />
                     Split transaction?
                   </Label>
-                  <Switch checked={editIsSplit} onCheckedChange={setEditIsSplit} />
+                  <Switch aria-label="Split transaction" checked={editIsSplit} onCheckedChange={setEditIsSplit} />
                 </div>
 
                 {editIsSplit && (

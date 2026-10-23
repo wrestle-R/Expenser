@@ -96,6 +96,7 @@ interface IWorkflow {
 
 export default function WorkflowsPage() {
   const { profile } = useUserContext();
+  const canSplit = profile?.paymentMethods.includes("splitwise") ?? false;
   const { isStealthMode } = useStealthMode();
   const [workflows, setWorkflows] = useState<IWorkflow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -184,7 +185,7 @@ export default function WorkflowsPage() {
       description: newDescription.trim(),
       category: finalCategory || "General",
       paymentMethod: newMethod,
-      splitAmount: isSplit ? Number(splitAmount) : 0,
+      splitAmount: newType === "income" ? 0 : canSplit ? (isSplit ? Number(splitAmount) : 0) : (workflows.find(item=>item._id===editingId)?.splitAmount ?? 0),
     };
 
     try {
@@ -243,11 +244,11 @@ export default function WorkflowsPage() {
               </Button>
             }
           />
-          <DialogContent className="sm:max-w-xl">
+          <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
             <DialogHeader>
               <DialogTitle>{editingId ? "Edit Workflow" : "Create Workflow"}</DialogTitle>
               <DialogDescription>
-                Save a transaction template for quick reuse.
+                Save a shortcut, or set it to repeat on your schedule.
               </DialogDescription>
             </DialogHeader>
 
@@ -286,7 +287,7 @@ export default function WorkflowsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Amount (Optional)</Label>
+                <Label>{schedule ? "Amount" : "Amount (optional)"}</Label>
                 <div className="relative">
                   <IndianRupee className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
                   <Input
@@ -372,14 +373,14 @@ export default function WorkflowsPage() {
                 </div>
               </div>
 
-              {newType === "expense" && (
+              {canSplit && newType === "expense" && (
                 <div className="pt-3 border-t space-y-3">
                   <div className="flex items-center justify-between">
                     <Label className="flex items-center gap-2 cursor-pointer">
                       <ArrowRightLeft className="size-4 text-orange-500" />
                       Split transaction?
                     </Label>
-                    <Switch checked={isSplit} onCheckedChange={setIsSplit} />
+                    <Switch aria-label="Split transaction" checked={isSplit} onCheckedChange={setIsSplit} />
                   </div>
 
                   {isSplit && (
@@ -483,7 +484,9 @@ export default function WorkflowsPage() {
                   </div>
                   <Button size="sm" variant="ghost" onClick={()=>{
                     setEditingId(wf._id);setWorkflowName(wf.name);setNewType(wf.type);setNewAmount(wf.amount?.toString()??"");
-                    setNewDescription(wf.description);setNewCategory(wf.category);setNewMethod(wf.paymentMethod);
+                    setNewDescription(wf.description);
+                    const knownCategory=getCategoriesForType(wf.type).some(item=>item.id===wf.category);
+                    setNewCategory(knownCategory?wf.category:"other");setCustomCategory(knownCategory?"":wf.category);setNewMethod(wf.paymentMethod);
                     setSplitAmount(wf.splitAmount?.toString()??"");setIsSplit(!!wf.splitAmount);setSchedule(wf.schedule??null);setSaveError("");setDialogOpen(true);
                   }}>Edit</Button>
                   {wf.schedule && <Button size="sm" variant="outline" onClick={async()=>{

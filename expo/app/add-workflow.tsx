@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Switch,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -46,6 +47,8 @@ export default function AddWorkflowScreen() {
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("other");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("bank");
+  const canSplit = profile?.paymentMethods.includes("splitwise") ?? false;
+  const [isSplit,setIsSplit] = useState(false);
   const [splitAmount, setSplitAmount] = useState("");
   const [saving, setSaving] = useState(false);
   const [schedule,setSchedule] = useState<WorkflowSchedule|null>(null);
@@ -55,17 +58,17 @@ export default function AddWorkflowScreen() {
   useEffect(()=>{
     if(!editing || initialized.current)return;
     initialized.current=true;
-    setName(editing.name);setType(editing.type);setAmount(editing.amount?.toString()??"");
+    setName(editing.name);setType(editing.type);setAmount(editing.amount ? editing.amount.toString() : "");
     setDescription(editing.description);setCategory(editing.category);setPaymentMethod(editing.paymentMethod);
-    setSplitAmount(editing.splitAmount?.toString()??"");setSchedule(editing.schedule??null);
+    setSplitAmount(editing.splitAmount?.toString()??"");setIsSplit(!!editing.splitAmount);setSchedule(editing.schedule??null);
   },[editing]);
 
   useEffect(() => {
     const validIds = categories.map((item) => item.id);
-    if (!validIds.includes(category)) {
+    if (!validIds.includes(category) && !(editing?.category === category && editing.type === type)) {
       setCategory("other");
     }
-  }, [categories, category]);
+  }, [categories, category, editing?.category, editing?.type, type]);
 
   // Filter payment methods based on user's profile
   const availableMethods = useMemo(
@@ -94,7 +97,7 @@ export default function AddWorkflowScreen() {
     }
 
     const parsedAmount = amount ? Number(amount) : undefined;
-    const parsedSplitAmount = splitAmount ? Number(splitAmount) : undefined;
+    const parsedSplitAmount = type === "income" ? 0 : canSplit ? (isSplit && splitAmount ? Number(splitAmount) : 0) : (editing?.splitAmount ?? 0);
     if (parsedAmount != null && (!Number.isFinite(parsedAmount) || parsedAmount <= 0)) {
       showToast("Please enter a valid default amount", "error");
       return;
@@ -148,7 +151,6 @@ export default function AddWorkflowScreen() {
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
       >
-        <WorkflowScheduleEditor value={schedule} onChange={setSchedule} />
         {/* Workflow Name */}
         <View style={{ marginBottom: 20 }}>
           <Text
@@ -434,18 +436,13 @@ export default function AddWorkflowScreen() {
         </View>
 
         {/* Split Amount (optional) */}
-        {paymentMethod === "splitwise" && (
+        {canSplit && type === "expense" && (
           <View style={{ marginBottom: 20 }}>
-            <Text
-              style={{
-                fontSize: 14,
-                fontWeight: "600",
-                color: colors.textMuted,
-                marginBottom: 8,
-              }}
-            >
-              Default Split Amount (Optional)
-            </Text>
+            <View style={{flexDirection:"row",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <Text style={{fontSize:15,fontWeight:"600",color:colors.text}}>Split transaction?</Text>
+              <Switch accessibilityLabel="Split transaction" value={isSplit} onValueChange={setIsSplit} trackColor={{false:colors.border,true:colors.primary}} thumbColor={colors.primaryForeground}/>
+            </View>
+            {isSplit && <>
             <View
               style={{
                 flexDirection: "row",
@@ -476,8 +473,11 @@ export default function AddWorkflowScreen() {
                 onChangeText={setSplitAmount}
               />
             </View>
+            </>}
           </View>
         )}
+
+        <WorkflowScheduleEditor value={schedule} onChange={setSchedule} />
 
         {/* Save Button */}
         <TouchableOpacity

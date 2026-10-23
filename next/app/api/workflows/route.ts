@@ -76,7 +76,7 @@ function parseWorkflowInput(body: Record<string, unknown>) {
   if (body.type === "income" && splitAmount > 0) {
     throw new Error("Income workflows cannot include a split amount");
   }
-  if (body.type === "expense" && splitAmount >= amount) {
+  if (body.type === "expense" && splitAmount > 0 && splitAmount >= amount) {
     throw new Error("Split amount must be less than the total amount");
   }
 

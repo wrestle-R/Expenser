@@ -379,7 +379,7 @@ export default function TransactionsScreen() {
         description: trimmedDescription,
         category: trimmedCategory,
         paymentMethod: editPaymentMethod,
-        splitAmount: editIsSplit ? parseFloat(editSplitAmount || "0") : 0,
+        splitAmount: editType === "income" ? 0 : profile?.paymentMethods.includes("splitwise") ? (editIsSplit ? parseFloat(editSplitAmount || "0") : 0) : (editingTxn.splitAmount ?? 0),
       };
     }
 
@@ -852,7 +852,7 @@ export default function TransactionsScreen() {
                         </View>
 
                         {/* Split Option (for expenses only) */}
-                        {editType === "expense" && (
+                        {profile?.paymentMethods.includes("splitwise") && editType === "expense" && (
                           <View style={{ marginBottom: 16 }}>
                         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                           <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted }}>Split transaction?</Text>

@@ -88,6 +88,7 @@ test('scheduled workflows run once, catch up, skip and undo with real balance tr
     const input={name:'Rickshaw',type:'expense',amount:20,description:'',category:'transport',paymentMethod:'cash',schedule:config};
     const request=(method,body,id='')=>new Request(`http://localhost/api/workflows${id?`?id=${id}`:''}`,{method,body:JSON.stringify(body)});
     assert.equal((await api.POST(request('POST',{...input,schedule:{...config,days:[]}}))).status,400);
+    assert.equal((await api.POST(request('POST',{...input,schedule:null,amount:0}))).status,201);
     const created=await api.POST(request('POST',input));
     assert.equal(created.status,201);
     const wf=(await created.json()).workflow;

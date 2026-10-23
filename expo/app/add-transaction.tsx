@@ -35,6 +35,7 @@ export default function AddTransactionScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { addTransaction, profile } = useUserContext();
+  const canSplit = profile?.paymentMethods.includes("splitwise") ?? false;
   const { showToast } = useToast();
 
   const [type, setType] = useState<TransactionType>("expense");
@@ -96,7 +97,7 @@ export default function AddTransactionScreen() {
 
     // Calculate net expense if split
     const split = Number(splitAmount || "0");
-    const finalSplit = isSplit ? split : 0;
+    const finalSplit = canSplit && isSplit ? split : 0;
 
     // Validate split amount
     if (isSplit && (!Number.isFinite(finalSplit) || finalSplit < 0 || finalSplit >= payAmount)) {
@@ -358,7 +359,7 @@ export default function AddTransactionScreen() {
         </View>
 
         {/* Split Amount (for Expenses) */}
-        {type === "expense" && (
+        {canSplit && type === "expense" && (
           <View
             style={{
               marginBottom: 20,

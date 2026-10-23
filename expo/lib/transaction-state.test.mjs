@@ -69,3 +69,8 @@ test("pending deletes stay absent when merging server data", () => {
 
   assert.deepEqual(merged, []);
 });
+
+test('a pending deletion stays absent even when an old cached copy survived interruption', () => {
+  const merged = mergeServerTransactions({ localTransactions: [serverTransaction], serverTransactions: [serverTransaction], operations: [{ entity: 'transaction', entityId: 'server-1', action: 'delete' }] });
+  assert.deepEqual(merged, []);
+});

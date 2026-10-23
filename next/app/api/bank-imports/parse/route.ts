@@ -3,8 +3,9 @@ import { getAuthenticatedUser } from "@/lib/auth";
 import {
   buildNotificationImportKey,
   buildNotificationReviewKey,
-  isFinancialNotificationLike,
   parseBankNotification,
+  getNonTransactionReason,
+  hasNotificationAmount,
   type ParsedBankReviewEvent,
   type ParsedFinancialNotification,
 } from "@/lib/bank-import-parser";
@@ -60,7 +61,8 @@ function validTimestamp(value: unknown, fallback?: string | null) {
 
 function normalizeTransaction(
   value: unknown,
-  capturedAt: string
+  capturedAt: string,
+  message: string
 ): ParsedFinancialNotification | null {
   if (!value || typeof value !== "object") return null;
   const data = value as Record<string, unknown>;
@@ -70,7 +72,7 @@ function normalizeTransaction(
   const occurredAt = validTimestamp(data.occurredAt, capturedAt);
   const availableBalance = finiteNumber(data.availableBalance, true);
   const confidence = data.confidence === "high" ? "high" : data.confidence === "medium" ? "medium" : null;
-  if (!type || amount == null || amount <= 0 || !occurredAt || !confidence) return null;
+  if (!type || amount == null || amount <= 0 || !occurredAt || !confidence || data.currency !== "INR" || !hasNotificationAmount(message, amount)) return null;
 
   return {
     bankName: nullableText(data.bankName, 120),
@@ -129,6 +131,7 @@ async function parseWithGroq(envelope: NotificationEnvelope): Promise<ParseResul
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GROQ_TIMEOUT_MS);
   let response: Response;
+  let completionBody = "";
   try {
     response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -237,6 +240,7 @@ async function parseWithGroq(envelope: NotificationEnvelope): Promise<ParseResul
         ],
       }),
     });
+    if (response.ok) completionBody = await response.text();
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new ParseRouteError("Groq fallback timed out", 503, "timeout");
@@ -256,12 +260,12 @@ async function parseWithGroq(envelope: NotificationEnvelope): Promise<ParseResul
   }
 
   try {
-    const body = await response.json();
+    const body = JSON.parse(completionBody);
     const content = body?.choices?.[0]?.message?.content;
     if (typeof content !== "string") throw new Error("Missing completion");
     const decoded = JSON.parse(content) as Record<string, unknown>;
     if (decoded.kind === "transaction") {
-      const parsed = normalizeTransaction(decoded.parsed, envelope.capturedAt);
+      const parsed = normalizeTransaction(decoded.parsed, envelope.capturedAt, envelope.message);
       if (parsed) return { kind: "transaction", parsed };
     }
     if (decoded.kind === "review_event") {
@@ -288,6 +292,7 @@ async function parseWithGroq(envelope: NotificationEnvelope): Promise<ParseResul
 }
 
 function parseEnvelope(body: Record<string, unknown>): NotificationEnvelope | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   const message = typeof body.message === "string" ? body.message.trim() : "";
   if (!message || message.length > MAX_MESSAGE_LENGTH) return null;
   const capturedAt = validTimestamp(body.capturedAt);
@@ -331,16 +336,10 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!isFinancialNotificationLike(envelope.message)) {
-      logOutcome("non_transaction", "regex", startedAt);
-      return NextResponse.json({
-        kind: "non_transaction",
-        reason: "not_financial",
-        parser: "regex",
-      });
-    }
-
-    const deterministic = parseBankNotification(envelope.message, envelope);
+    const excluded = getNonTransactionReason(envelope.message);
+    const deterministic = excluded
+      ? { kind: "non_transaction" as const, reason: excluded }
+      : parseBankNotification(envelope.message, envelope);
     const result = deterministic ?? (await parseWithGroq(envelope));
     const parser = deterministic ? "regex" : "groq";
     logOutcome(result.kind, parser, startedAt);

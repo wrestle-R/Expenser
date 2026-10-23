@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -32,7 +32,10 @@ import {
   getTransactionDisplayFields,
 } from "../../lib/transaction-review";
 
-const PAGE_SIZE = 10;
+import SyncStatusBanner from "../../components/SyncStatusBanner";
+import { indexTransactions, searchTransactions } from "../../lib/transaction-list";
+
+const PAGE_SIZE = 40;
 const IMPORTED_FALLBACK_CATEGORY = "bank import";
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -209,11 +212,17 @@ export default function TransactionsScreen() {
     deleteTransaction,
     updateTransaction,
     isOnline,
+    syncStatus,
+    manualRefresh,
     refreshTransactions,
   } = useUserContext();
   const { showToast } = useToast();
 
   const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
+  const searchIndex = useMemo(() => indexTransactions(transactions), [transactions]);
+  const filteredTransactions = useMemo(() => searchTransactions(searchIndex, deferredQuery), [searchIndex, deferredQuery]);
   const [page, setPage] = useState(1);
   const [deleting, setDeleting] = useState<string | null>(null);
   
@@ -269,10 +278,10 @@ export default function TransactionsScreen() {
   }, [refreshTransactions]);
 
   const paginatedTransactions = useMemo(
-    () => transactions.slice(0, page * PAGE_SIZE),
-    [page, transactions]
+    () => filteredTransactions.slice(0, page * PAGE_SIZE),
+    [page, filteredTransactions]
   );
-  const hasMore = transactions.length > page * PAGE_SIZE;
+  const hasMore = filteredTransactions.length > page * PAGE_SIZE;
 
   const handleDeletePress = (txn: ITransaction) => {
     setTransactionToDelete(txn);
@@ -354,7 +363,7 @@ export default function TransactionsScreen() {
       });
     } else {
       const parsedAmount = parseFloat(editAmount);
-      if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      if (!/^\d+(?:\.\d{1,2})?$/.test(editAmount.trim()) || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
         showToast("Please enter a valid amount", "error");
         return;
       }
@@ -433,7 +442,7 @@ export default function TransactionsScreen() {
             Transactions
           </Text>
           <Text style={{ color: colors.textMuted, marginTop: 2 }}>
-            {transactions.length} total transactions
+            {query ? `${filteredTransactions.length} matches · ` : ""}{transactions.length} total transactions
           </Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -475,6 +484,8 @@ export default function TransactionsScreen() {
         </View>
       </View>
 
+      <SyncStatusBanner status={syncStatus} colors={colors} onRetry={() => void manualRefresh()} onSignIn={() => router.push({ pathname: "/(auth)/sign-in", params: { reauthenticate: "1" } })} />
+      <TextInput accessibilityLabel="Search transactions" placeholder="Search description, category or amount" placeholderTextColor={colors.textMuted} value={query} onChangeText={(value) => { setQuery(value); setPage(1); }} style={{ marginHorizontal: 16, marginBottom: 12, padding: 12, borderRadius: 10, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, color: colors.text }} />
       <FlatList
         data={paginatedTransactions}
         keyExtractor={(transaction) => transaction._id}
@@ -488,12 +499,12 @@ export default function TransactionsScreen() {
         )}
         style={{ flex: 1 }}
         contentContainerStyle={{
-          flexGrow: transactions.length === 0 ? 1 : undefined,
+          flexGrow: filteredTransactions.length === 0 ? 1 : undefined,
           padding: 16,
           paddingTop: 0,
         }}
-        initialNumToRender={PAGE_SIZE}
-        maxToRenderPerBatch={PAGE_SIZE}
+        initialNumToRender={12}
+        maxToRenderPerBatch={10}
         windowSize={7}
         removeClippedSubviews
         onEndReachedThreshold={0.35}
@@ -575,7 +586,7 @@ export default function TransactionsScreen() {
                 fontSize: 16,
               }}
             >
-              No transactions yet
+              {query ? "No matching transactions" : "No transactions yet"}
             </Text>
             <TouchableOpacity
               style={{
@@ -585,10 +596,10 @@ export default function TransactionsScreen() {
                 borderRadius: 10,
                 marginTop: 16,
               }}
-              onPress={() => router.push("/add-transaction")}
+              onPress={() => query ? setQuery("") : router.push("/add-transaction")}
             >
               <Text style={{ color: colors.primaryForeground, fontWeight: "600" }}>
-                Add your first transaction
+                {query ? "Clear search" : "Add your first transaction"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -607,7 +618,7 @@ export default function TransactionsScreen() {
             onPress={() => setPage((p) => p + 1)}
           >
             <Text style={{ color: colors.primary, fontWeight: "600" }}>
-              Load More ({transactions.length - page * PAGE_SIZE} remaining)
+              Load More ({filteredTransactions.length - page * PAGE_SIZE} remaining)
             </Text>
           </TouchableOpacity>
         ) : <View style={{ height: 24 }} />}

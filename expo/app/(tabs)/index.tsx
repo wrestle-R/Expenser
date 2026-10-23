@@ -1,3 +1,4 @@
+import SyncStatusBanner from "../../components/SyncStatusBanner";
 import React from "react";
 import {
   View,
@@ -30,6 +31,8 @@ export default function HomeScreen() {
     workflows,
     loading,
     isOnline,
+    syncing,
+    syncStatus,
     manualRefresh,
     getBalance,
     getTotalBalance,
@@ -39,8 +42,11 @@ export default function HomeScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await manualRefresh();
-    setRefreshing(false);
+    try {
+      await manualRefresh();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const recentTransactions = transactions.slice(0, 5);
@@ -95,7 +101,10 @@ export default function HomeScreen() {
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <TouchableOpacity
               onPress={toggleStealthMode}
-              style={{ padding: 4 }}
+              accessibilityRole="button"
+              accessibilityLabel={isStealthMode ? "Show balances" : "Hide balances"}
+              hitSlop={8}
+              style={{ padding: 8 }}
             >
               <Ionicons
                 name={isStealthMode ? "eye-off" : "eye"}
@@ -103,20 +112,19 @@ export default function HomeScreen() {
                 color={colors.text}
               />
             </TouchableOpacity>
-          <View
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: 5,
-              backgroundColor: isOnline ? colors.success : colors.error,
-            }}
-          />
+          <View accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isOnline ? colors.success : colors.textMuted }} />
+            <Text style={{ fontSize: 12, color: colors.textMuted }}>
+              {syncing ? "Syncing" : isOnline ? "Online" : "Offline"}
+            </Text>
+          </View>
         </View>
       </View>
 
+      <SyncStatusBanner status={syncStatus} colors={colors} onRetry={() => void manualRefresh()} onSignIn={() => router.push({ pathname: "/(auth)/sign-in", params: { reauthenticate: "1" } })} />
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, paddingTop: 0 }}
+        contentContainerStyle={{ padding: 20, paddingTop: 4, paddingBottom: 28 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -134,10 +142,10 @@ export default function HomeScreen() {
               color: colors.text,
             }}
           >
-            Welcome back, {profile?.name?.split(" ")[0] || "User"}!
+            Hey{profile?.name ? `, ${profile.name.split(" ")[0]}` : ""}.
           </Text>
           <Text style={{ color: colors.textMuted, marginTop: 4 }}>
-            Here&apos;s your financial overview
+            {isOnline ? "Your money, at a glance." : "Saved on this device. Changes sync when you’re back online."}
           </Text>
         </View>
 
@@ -166,7 +174,7 @@ export default function HomeScreen() {
               Total Balance
             </Text>
             <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-              <Text style={{ fontSize: 32, fontWeight: "bold", color: colors.text }}>
+              <Text style={{ fontSize: 36, fontWeight: "600", letterSpacing: -1.2, fontVariant: ["tabular-nums"], color: colors.text }}>
                 {isStealthMode ? "₹••••••" : `₹${formatCurrency(totalBalance)}`}
               </Text>
             </View>

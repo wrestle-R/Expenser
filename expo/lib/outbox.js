@@ -15,13 +15,15 @@ export function coalesceOutboxOperation(operations, input, createOperation) {
   } else if (existing.action === "create") {
     next[index] = {
       ...existing,
+      rejected: undefined,
       payload: { ...existing.payload, ...payload },
     };
   } else if (input.action === "delete") {
-    next[index] = { ...existing, action: "delete", payload: {} };
+    next[index] = { ...existing, rejected: undefined, action: "delete", payload: {} };
   } else {
     next[index] = {
       ...existing,
+      rejected: undefined,
       action: "update",
       payload: { ...existing.payload, ...payload },
     };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import {
   Colors,
   paymentMethodConfig,
 } from "../constants/theme";
+import { generateTempId } from "../lib/utils";
 import { TransactionType, PaymentMethod } from "../lib/types";
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: string }[] = [
@@ -43,6 +44,8 @@ export default function AddTransactionScreen() {
   const [splitAmount, setSplitAmount] = useState("");
   const [isSplit, setIsSplit] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const requestId = useRef(generateTempId());
 
   // Pre-fill from workflow params
   useEffect(() => {
@@ -84,8 +87,9 @@ export default function AddTransactionScreen() {
   }, [availableMethods, paymentMethod]);
 
   const handleSave = async () => {
+    if (savingRef.current) return;
     const payAmount = Number(amount);
-    if (!Number.isFinite(payAmount) || payAmount <= 0) {
+    if (!/^\d+(?:\.\d{1,2})?$/.test(amount.trim()) || !Number.isFinite(payAmount) || payAmount <= 0) {
       showToast("Please enter a valid amount", "error");
       return;
     }
@@ -100,9 +104,11 @@ export default function AddTransactionScreen() {
       return;
     }
 
+    savingRef.current = true;
     setSaving(true);
     try {
       const payload = {
+        clientRequestId: requestId.current,
         type,
         amount: payAmount,
         description: description.trim(),
@@ -126,6 +132,7 @@ export default function AddTransactionScreen() {
         "error"
       );
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };

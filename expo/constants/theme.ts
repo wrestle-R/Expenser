@@ -30,12 +30,12 @@ export const Colors = {
     tabIconSelected: tintColorLight,
 
     // Semantic colors
-    primary: "#666666",
+    primary: "#454545",
     primaryForeground: "#ffffff",
     secondary: "#e7e7e7",
     secondaryForeground: "#434343",
     accent: "#cecece",
-    accentForeground: "#ffffff",
+    accentForeground: "#434343",
     destructive: "#ef4444",
     muted: "#ececec",
     mutedForeground: "#737373",
@@ -62,17 +62,17 @@ export const Colors = {
     // Base colors
     text: "#ebebeb",
     textMuted: "#adadad",
-    background: "#292929",
+    background: "#202020",
     backgroundSecondary: "#333333",
     tint: tintColorDark,
 
     // Card colors
-    card: "#303030",
+    card: "#2a2a2a",
     cardForeground: "#ebebeb",
 
     // UI elements
-    border: "#4a4a4a",
-    input: "#454545",
+    border: "#3c3c3c",
+    input: "#333333",
     icon: "#adadad",
     tabIconDefault: "#adadad",
     tabIconSelected: tintColorDark,

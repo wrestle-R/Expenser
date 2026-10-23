@@ -18,3 +18,7 @@
 *.jks
 *.keystore
 *.tsbuildinfo
+
+# Private project memory and agent settings
+/local-docs/
+/.agents/

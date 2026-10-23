@@ -1,5 +1,7 @@
 // API service for communicating with the Next.js backend
+import { withRequestDeadline } from "./request-deadline";
 import { ENV } from "../env";
+import { parseNotificationLocally } from "./local-bank-parser";
 import {
   ITransaction,
   IWorkflow,
@@ -48,6 +50,7 @@ class ApiService {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
+    return withRequestDeadline(async (signal) => {
     const url = `${this.baseUrl}${endpoint}`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -74,24 +77,8 @@ class ApiService {
 
     console.log(`[API] ${options.method || "GET"} ${url}`);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    let response: Response;
-
-    try {
-      response = await fetch(url, {
-        ...options,
-        headers,
-        signal: controller.signal,
-      });
-    } catch (error: any) {
-      if (error?.name === "AbortError") {
-        throw new Error("Request timed out. Please check your internet connection.");
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    if (signal.aborted) throw new Error("Request timed out before authentication completed.");
+    const response = await fetch(url, { ...options, headers, signal });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -101,18 +88,29 @@ class ApiService {
     }
 
     return response.json();
+    }, REQUEST_TIMEOUT_MS);
   }
 
   // === Transactions ===
   async getTransactions(): Promise<ITransaction[]> {
-    const data = await this.request<TransactionsResponse>("/api/transactions");
-    return data.transactions;
+    const transactions = new Map<string, ITransaction>();
+    const cursors = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const data: TransactionsResponse = await this.request<TransactionsResponse>(`/api/transactions?limit=250${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      for (const transaction of data.transactions) transactions.set(transaction._id, transaction);
+      cursor = data.nextCursor ?? null;
+      if (cursor && cursors.has(cursor)) throw new Error("The server repeated a history page. Your saved data is unchanged.");
+      if (cursor) cursors.add(cursor);
+    } while (cursor);
+    // Only a complete history is returned to sync; a failed page never replaces the cache.
+    return [...transactions.values()];
   }
 
   async createTransaction(
     payload: CreateTransactionPayload
   ): Promise<ITransaction> {
-    console.log("[API] Creating transaction with payload:", payload);
+
     const data = await this.request<{ transaction: ITransaction }>(
       "/api/transactions",
       {
@@ -167,8 +165,12 @@ class ApiService {
   }
 
   async parseBankNotification(
-    envelope: NotificationEnvelope
+    envelope: NotificationEnvelope,
+    allowCloud = true
   ): Promise<ParsedBankNotificationResponse> {
+    const local = parseNotificationLocally(envelope);
+    if (local) return local;
+    if (!allowCloud) throw new Error("Message saved for cloud parsing when online.");
     return this.request<ParsedBankNotificationResponse>("/api/bank-imports/parse", {
       method: "POST",
       body: JSON.stringify(envelope),
@@ -185,7 +187,7 @@ class ApiService {
     id: string,
     payload: Partial<CreateTransactionPayload>
   ): Promise<ITransaction> {
-    console.log("[API] Updating transaction with payload:", { id, payload });
+
     const data = await this.request<{ transaction: ITransaction }>(
       `/api/transactions?id=${id}`,
       {
@@ -205,7 +207,7 @@ class ApiService {
   async createWorkflow(
     payload: CreateWorkflowPayload
   ): Promise<IWorkflow> {
-    console.log("[API] Creating workflow with payload:", payload);
+
     const data = await this.request<{ workflow: IWorkflow }>("/api/workflows", {
       method: "POST",
       body: JSON.stringify(payload),

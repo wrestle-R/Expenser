@@ -193,6 +193,7 @@ export interface CreateWorkflowPayload {
 
 // API Response types
 export interface TransactionsResponse {
+  nextCursor?: string | null;
   transactions: ITransaction[];
 }
 

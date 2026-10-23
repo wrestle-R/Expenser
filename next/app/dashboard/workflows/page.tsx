@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useUserContext } from "@/context/UserContext";
 import { useStealthMode } from "@/context/StealthContext";
 import { Card } from "@/components/ui/card";
@@ -113,6 +113,8 @@ export default function WorkflowsPage() {
   const [isSplit, setIsSplit] = useState(false);
   const [splitAmount, setSplitAmount] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const requestId = useRef("");
   const [editingId,setEditingId] = useState<string|null>(null);
   const [schedule, setSchedule] = useState<WorkflowSchedule | null>(null);
   const [saveError, setSaveError] = useState("");
@@ -158,6 +160,7 @@ export default function WorkflowsPage() {
   }, [newType, newCategory]);
 
   const resetForm = () => {
+    requestId.current = "";
     setEditingId(null);
     setSchedule(null);
     setSaveError("");
@@ -173,12 +176,15 @@ export default function WorkflowsPage() {
   };
 
   const handleSaveWorkflow = async () => {
-    if (!workflowName.trim() || !newMethod) return;
+    if (!workflowName.trim() || !newMethod || savingRef.current) return;
+    savingRef.current = true;
+    requestId.current ||= crypto.randomUUID();
     setSaving(true);
 
     const finalCategory = newCategory === "other" && customCategory ? customCategory : newCategory;
 
     const workflowData = {
+      clientRequestId: requestId.current,
       name: workflowName.trim(),
       type: newType,
       amount: newAmount ? Number(newAmount) : 0,
@@ -207,6 +213,7 @@ export default function WorkflowsPage() {
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Could not save workflow");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };

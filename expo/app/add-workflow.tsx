@@ -51,6 +51,8 @@ export default function AddWorkflowScreen() {
   const [isSplit,setIsSplit] = useState(false);
   const [splitAmount, setSplitAmount] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = React.useRef(false);
+  const requestId = React.useRef(`workflow_${Date.now()}_${Math.random().toString(36).slice(2,10)}`);
   const [schedule,setSchedule] = useState<WorkflowSchedule|null>(null);
   const categories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
 
@@ -91,6 +93,7 @@ export default function AddWorkflowScreen() {
   }, [availableMethods, paymentMethod]);
 
   const handleSave = async () => {
+    if (savingRef.current) return;
     if (!name.trim()) {
       showToast("Please enter a workflow name", "error");
       return;
@@ -118,10 +121,12 @@ export default function AddWorkflowScreen() {
         showToast("Choose weekdays, a valid time, time zone and amount", "error"); return;
       }
     }
+    savingRef.current = true;
     setSaving(true);
     try {
       const save = editing ? (data: import("../lib/types").CreateWorkflowPayload)=>updateWorkflow(editing._id,data) : addWorkflow;
       await save({
+        clientRequestId: editing?.clientRequestId ?? requestId.current,
         schedule,
         name: name.trim(),
         type,
@@ -136,6 +141,7 @@ export default function AddWorkflowScreen() {
     } catch {
       showToast("Failed to create workflow", "error");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };

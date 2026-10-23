@@ -198,6 +198,13 @@ class ApiService {
     return data.transaction;
   }
 
+  async getScheduledWorkflowEvents(): Promise<import("./types").ScheduledWorkflowEvent[]> {
+    return (await this.request<{events: import("./types").ScheduledWorkflowEvent[]}>("/api/workflows/events")).events;
+  }
+  async skipWorkflowOccurrence(workflowId: string, localDate: string): Promise<void> {
+    await this.request("/api/workflows/events",{method:"POST",body:JSON.stringify({workflowId,localDate,action:"skip"})});
+  }
+
   // === Workflows ===
   async getWorkflows(): Promise<IWorkflow[]> {
     const data = await this.request<WorkflowsResponse>("/api/workflows");

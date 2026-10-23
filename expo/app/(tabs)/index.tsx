@@ -1,3 +1,4 @@
+import ScheduledWorkflowReminders from "../../components/ScheduledWorkflowReminders";
 import SyncStatusBanner from "../../components/SyncStatusBanner";
 import React from "react";
 import {
@@ -149,6 +150,7 @@ export default function HomeScreen() {
           </Text>
         </View>
 
+      <ScheduledWorkflowReminders />
       {/* Total Balance Card */}
       <View
         style={{

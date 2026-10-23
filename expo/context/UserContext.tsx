@@ -148,6 +148,7 @@ interface UserContextType {
   deleteTransaction: (id: string) => Promise<void>;
   addWorkflow: (data: CreateWorkflowPayload) => Promise<void>;
   deleteWorkflow: (id: string) => Promise<void>;
+  updateWorkflow: (id: string, data: CreateWorkflowPayload) => Promise<void>;
   dismissBankReviewEvent: (sourceKey: string) => Promise<void>;
   retryBankReviewEvent: (sourceKey: string) => Promise<void>;
   getBalance: (method: PaymentMethod) => number;
@@ -614,6 +615,15 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     void syncService.syncAll();
   }, [profile?.userId, workflows]);
 
+  const updateWorkflow = useCallback(async (id: string, payload: CreateWorkflowPayload) => {
+    const stored = await getStoredWorkflows();
+    const next = stored.map(item => item._id === id ? {...item,...payload,updatedAt:new Date().toISOString()} : item);
+    await setStoredWorkflows(next);
+    await enqueueOutbox({entity:"workflow",entityId:id,action:"update",payload:payload as unknown as Record<string,unknown>});
+    setWorkflows(next);
+    void syncService.syncAll();
+  }, []);
+
   const deleteWorkflow = useCallback(async (id: string) => {
     const next = workflows.filter((item) => item._id !== id);
     setWorkflows(next);
@@ -664,6 +674,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         updateTransaction,
         deleteTransaction,
         addWorkflow,
+        updateWorkflow,
         deleteWorkflow,
         dismissBankReviewEvent,
         retryBankReviewEvent,

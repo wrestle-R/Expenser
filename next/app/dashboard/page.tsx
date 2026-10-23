@@ -2,7 +2,8 @@
 
 import { fetchTransactionHistory } from "@/lib/fetch-transactions.js";
 
-import React, { useEffect, useState } from "react";
+import { ScheduledReminders } from "@/components/workflows/scheduled-reminders";
+import React, { useCallback, useEffect, useState } from "react";
 import { useUserContext } from "@/context/UserContext";
 import { useStealthMode } from "@/context/StealthContext";
 import { Card } from "@/components/ui/card";
@@ -53,24 +54,19 @@ const methodConfig = {
 };
 
 export default function DashboardPage() {
-  const { profile, loading } = useUserContext();
+  const { profile, loading, refreshProfile } = useUserContext();
   const { isStealthMode } = useStealthMode();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loadingTxns, setLoadingTxns] = useState(true);
 
-  useEffect(() => {
-    async function fetchTransactions() {
-      try {
-        const data = await fetchTransactionHistory<Transaction>();
-        setTransactions(data.transactions);
-      } catch (err) {
-        console.error("[Dashboard] Error fetching transactions:", err);
-      } finally {
-        setLoadingTxns(false);
-      }
-    }
-    fetchTransactions();
+  const fetchTransactions = useCallback(async () => {
+    try { setTransactions((await fetchTransactionHistory<Transaction>()).transactions); }
+    catch (error) { console.error("[Dashboard] Error fetching transactions:", error); }
+    finally { setLoadingTxns(false); }
   }, []);
+  useEffect(() => { void fetchTransactions(); }, [fetchTransactions]);
+  const refreshScheduled = useCallback(() => { void fetchTransactions(); void refreshProfile(); }, [fetchTransactions,refreshProfile]);
+
 
   if (loading || !profile) {
     return (
@@ -114,6 +110,8 @@ export default function DashboardPage() {
             Add Transaction
         </Button>
       </div>
+
+      <ScheduledReminders onChange={refreshScheduled} />
 
       {/* Total Balance Card */}
       <Card className="rounded-[1.4rem] p-6">

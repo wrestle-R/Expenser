@@ -7,14 +7,16 @@ import {createRequire} from 'node:module';
 import {runInNewContext} from 'node:vm';
 import {execFileSync,spawnSync} from 'node:child_process';
 import postgres from 'postgres';
+import * as schedules from './workflow-schedule.js';
+import errors from './api-errors.js';
 const require=createRequire(import.meta.url), ts=require('typescript');
 const available=process.getuid?.()!==0 && ['initdb','pg_ctl'].every(cmd=>spawnSync(cmd,['--version']).status===0);
 const user='00000000-0000-4000-8000-000000000001', other='00000000-0000-4000-8000-000000000002';
-function route(db) {
+function route(db,name="events") {
   const exports={};
-  const deps={'next/server':require('next/server'),'@/lib/auth':{getAuthenticatedUser:async()=>({userId:user})},'@/lib/db':{sql:db}};
-  const src=ts.transpileModule(readFileSync(new URL('../app/api/workflows/events/route.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText;
-  runInNewContext(src,{exports,require:name=>{assert.ok(name in deps,name);return deps[name];},console,Date,Error});
+  const deps={'next/server':require('next/server'),'@/lib/auth':{getAuthenticatedUser:async()=>({userId:user})},'@/lib/db':{sql:db,normalizeNumber:(value,fallback=0)=>Number.isFinite(Number(value))?Number(value):fallback,mapWorkflowRow:row=>({...row,_id:row.id})},'@/lib/workflow-schedule.js':schedules,'@/lib/api-errors':errors};
+  const src=ts.transpileModule(readFileSync(new URL(`../app/api/workflows/${name==='events'?'events/':''}route.ts`,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText;
+  runInNewContext(src,{exports,require:name=>{assert.ok(name in deps,name);return deps[name];},console,Date,Error,URL});
   return exports;
 }
 test('scheduled workflows run once, catch up, skip and undo with real balance triggers', {skip:!available,timeout:30000}, async t=>{
@@ -79,6 +81,21 @@ test('scheduled workflows run once, catch up, skip and undo with real balance tr
     assert.equal((await db`select current_balance from balances where user_id=${user} and payment_method='cash'`)[0].current_balance,'0.00');
     const theirs=await make({...config,days:[clock.day]},other);
     assert.equal((await skip(theirs.id)).status,409);
+    await db`delete from workflows`;
+  });
+  await t.test('workflow API validates schedules and preserves them for legacy clients',async()=>{
+    const api=route(db,'workflows');
+    const input={name:'Rickshaw',type:'expense',amount:20,description:'',category:'transport',paymentMethod:'cash',schedule:config};
+    const request=(method,body,id='')=>new Request(`http://localhost/api/workflows${id?`?id=${id}`:''}`,{method,body:JSON.stringify(body)});
+    assert.equal((await api.POST(request('POST',{...input,schedule:{...config,days:[]}}))).status,400);
+    const created=await api.POST(request('POST',input));
+    assert.equal(created.status,201);
+    const wf=(await created.json()).workflow;
+    const legacy={...input};delete legacy.schedule;
+    assert.equal((await api.PUT(request('PUT',legacy,wf._id))).status,200);
+    assert.deepEqual((await db`select schedule from workflows where id=${wf._id}`)[0].schedule.days,config.days);
+    assert.equal((await api.PUT(request('PUT',{...input,schedule:{...config,enabled:false}},wf._id))).status,200);
+    assert.equal((await db`select next_run_at from workflows where id=${wf._id}`)[0].next_run_at,null);
     await db`delete from workflows`;
   });
   await t.test('paused schedules have no next run; plain templates remain unscheduled',async()=>{

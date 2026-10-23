@@ -13,6 +13,7 @@ import { acknowledgeOutboxOperation, coalesceOutboxOperation } from "./outbox";
 import { withDefaultPaymentMethod } from "./payment-methods.js";
 
 const KEYS = {
+  WORKFLOW_EVENTS: "@expenser_workflow_events",
   TRANSACTIONS: "@expenser_transactions",
   WORKFLOWS: "@expenser_workflows",
   PROFILE: "@expenser_profile",
@@ -50,7 +51,7 @@ function enqueueStorageMutation<T>(
   return result;
 }
 
-export type OutboxEntity = "transaction" | "workflow" | "profile";
+export type OutboxEntity = "transaction" | "workflow" | "workflowOccurrence" | "profile";
 export type OutboxAction = "create" | "update" | "delete";
 
 export interface OutboxOperation {
@@ -723,6 +724,7 @@ export async function clearAllData(): Promise<void> {
       }
     }
     await AsyncStorage.multiRemove([
+      KEYS.WORKFLOW_EVENTS,
       ...partKeys,
       KEYS.TRANSACTIONS,
       KEYS.WORKFLOWS,
@@ -741,4 +743,12 @@ export async function clearAllData(): Promise<void> {
   } catch (error) {
     console.error("[Storage] Error clearing all data:", error);
   }
+}
+
+export async function getStoredWorkflowEvents(): Promise<import("./types").ScheduledWorkflowEvent[]> {
+  const raw = await AsyncStorage.getItem(KEYS.WORKFLOW_EVENTS);
+  return raw ? JSON.parse(raw) : [];
+}
+export async function setStoredWorkflowEvents(events: import("./types").ScheduledWorkflowEvent[]) {
+  await AsyncStorage.setItem(KEYS.WORKFLOW_EVENTS,JSON.stringify(events));
 }

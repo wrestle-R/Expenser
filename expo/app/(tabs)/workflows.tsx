@@ -31,6 +31,7 @@ export default function WorkflowsScreen() {
     workflows,
     loading,
     deleteWorkflow,
+    updateWorkflow,
     isOnline,
     manualRefresh,
   } = useUserContext();
@@ -290,7 +291,7 @@ export default function WorkflowsScreen() {
                         }}
                         numberOfLines={2}
                       >
-                        {workflow.description}
+                        {workflow.description}{workflow.schedule ? ` · ${workflow.schedule.enabled ? '' : 'Paused · '}${workflow.schedule.days.map(day=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day]).join(', ')} at ${workflow.schedule.time} (${workflow.schedule.timeZone})` : ''}
                       </Text>
 
                       <View
@@ -376,7 +377,7 @@ export default function WorkflowsScreen() {
                     </View>
 
                     <View style={{ alignItems: "flex-end" }}>
-                      {workflow.amount && workflow.amount > 0 && (
+                      {!!workflow.amount && workflow.amount > 0 && (
                         <Text
                           style={{
                             fontWeight: "700",
@@ -392,6 +393,12 @@ export default function WorkflowsScreen() {
                           {isStealthMode ? "••••••" : formatCurrency(workflow.amount)}
                         </Text>
                       )}
+                      <TouchableOpacity accessibilityLabel="Edit workflow" onPress={()=>router.push({pathname:"/add-workflow",params:{workflowId:workflow._id}})} style={{padding:10}}>
+                        <Ionicons name="create-outline" size={20} color={colors.textMuted}/>
+                      </TouchableOpacity>
+                      {workflow.schedule && <TouchableOpacity accessibilityLabel={workflow.schedule.enabled?"Pause schedule":"Resume schedule"} onPress={()=>void updateWorkflow(workflow._id,{...workflow,schedule:{...workflow.schedule!,enabled:!workflow.schedule!.enabled}}).catch(()=>showToast("Could not update schedule","error"))} style={{padding:10}}>
+                        <Ionicons name={workflow.schedule.enabled?"pause-outline":"play-outline"} size={20} color={colors.textMuted}/>
+                      </TouchableOpacity>}
                       <TouchableOpacity
                         style={{ padding: 8 }}
                         onPress={() => setWorkflowToDelete(workflow)}

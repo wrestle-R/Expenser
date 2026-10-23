@@ -1,3 +1,5 @@
+import WorkflowScheduleEditor from "../components/WorkflowScheduleEditor";
+import type { WorkflowSchedule } from "../lib/types";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
@@ -9,7 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useTheme } from "../context/ThemeContext";
@@ -33,9 +35,11 @@ export default function AddWorkflowScreen() {
   const { isDark } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
-  const { addWorkflow, profile } = useUserContext();
+  const { addWorkflow, updateWorkflow, workflows, profile } = useUserContext();
   const { showToast } = useToast();
 
+  const {workflowId} = useLocalSearchParams<{workflowId?:string}>();
+  const editing = workflows.find(item=>item._id===workflowId);
   const [name, setName] = useState("");
   const [type, setType] = useState<TransactionType>("expense");
   const [amount, setAmount] = useState("");
@@ -44,7 +48,17 @@ export default function AddWorkflowScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("bank");
   const [splitAmount, setSplitAmount] = useState("");
   const [saving, setSaving] = useState(false);
+  const [schedule,setSchedule] = useState<WorkflowSchedule|null>(null);
   const categories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+
+  const initialized = React.useRef(false);
+  useEffect(()=>{
+    if(!editing || initialized.current)return;
+    initialized.current=true;
+    setName(editing.name);setType(editing.type);setAmount(editing.amount?.toString()??"");
+    setDescription(editing.description);setCategory(editing.category);setPaymentMethod(editing.paymentMethod);
+    setSplitAmount(editing.splitAmount?.toString()??"");setSchedule(editing.schedule??null);
+  },[editing]);
 
   useEffect(() => {
     const validIds = categories.map((item) => item.id);
@@ -94,9 +108,18 @@ export default function AddWorkflowScreen() {
       return;
     }
 
+    if (schedule) {
+      let validZone = true;
+      try { new Intl.DateTimeFormat("en",{timeZone:schedule.timeZone}).format(); } catch { validZone=false; }
+      if (!schedule.days.length || !/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.time) || !validZone || !parsedAmount) {
+        showToast("Choose weekdays, a valid time, time zone and amount", "error"); return;
+      }
+    }
     setSaving(true);
     try {
-      await addWorkflow({
+      const save = editing ? (data: import("../lib/types").CreateWorkflowPayload)=>updateWorkflow(editing._id,data) : addWorkflow;
+      await save({
+        schedule,
         name: name.trim(),
         type,
         amount: parsedAmount,
@@ -105,7 +128,7 @@ export default function AddWorkflowScreen() {
         paymentMethod,
         splitAmount: parsedSplitAmount,
       });
-      showToast("Workflow created successfully", "success");
+      showToast(editing ? "Workflow updated" : "Workflow created successfully", "success");
       router.back();
     } catch {
       showToast("Failed to create workflow", "error");
@@ -125,6 +148,7 @@ export default function AddWorkflowScreen() {
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
       >
+        <WorkflowScheduleEditor value={schedule} onChange={setSchedule} />
         {/* Workflow Name */}
         <View style={{ marginBottom: 20 }}>
           <Text
@@ -479,7 +503,7 @@ export default function AddWorkflowScreen() {
                 fontWeight: "600",
               }}
             >
-              Create Workflow
+              {editing ? "Save Workflow" : "Create Workflow"}
             </Text>
           )}
         </TouchableOpacity>

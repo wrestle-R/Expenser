@@ -15,10 +15,11 @@ export async function GET(req: Request) {
         select *, (local_day+(schedule->>'time')::time) at time zone (schedule->>'timeZone') as due
         from today where schedule->'days' @> to_jsonb(extract(dow from local_day)::integer)
       )
-      select s.id as "workflowId", s.name, s.amount, s.type, s.schedule->>'timeZone' as "timeZone",
-        s.local_day::text as "localDate", s.due as "scheduledAt",
+      select s.id as "workflowId", s.name, coalesce(t.amount,s.amount) as amount, coalesce(t.type,s.type) as type, s.schedule->>'timeZone' as "timeZone",
+        s.local_day::text as "localDate", coalesce(o.scheduled_at,s.due) as "scheduledAt",
         coalesce(o.status,'upcoming') as status
       from scheduled s left join workflow_occurrences o on o.workflow_id=s.id and o.local_date=s.local_day
+      left join transactions t on t.id=o.transaction_id and t.user_id=s.user_id
       where s.due > s.schedule_started_at
         and (s.due at time zone (s.schedule->>'timeZone'))::time=(s.schedule->>'time')::time
       order by s.due,s.id
@@ -37,6 +38,9 @@ export async function POST(req: Request) {
     const body = await req.json();
     if (typeof body.workflowId !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.workflowId) || body.action !== 'skip' || typeof body.localDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(body.localDate)) {
       return NextResponse.json({error:'Invalid event action'},{status:400});
+    }
+    if (!Number.isFinite(Date.parse(`${body.localDate}T00:00:00Z`)) || new Date(`${body.localDate}T00:00:00Z`).toISOString().slice(0,10) !== body.localDate) {
+      return NextResponse.json({error:'Invalid event date'},{status:400});
     }
     const result = await sql.begin(async transaction => {
       const tx = transaction as unknown as typeof sql;

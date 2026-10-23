@@ -208,6 +208,11 @@ class SyncService {
       return;
     }
 
+    if (operation.entity === "workflowOccurrence") {
+      await api.skipWorkflowOccurrence(String(operation.payload.workflowId), String(operation.payload.localDate));
+      return;
+    }
+
     if (operation.entity === "workflow") {
       if (operation.action === "create") {
         const created = await api.createWorkflow(

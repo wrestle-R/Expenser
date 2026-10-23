@@ -242,3 +242,19 @@ test("editing a definitively rejected create repairs its payload and resumes upl
   assert.equal(h.server[0].category, 'food');
   assert.equal((await h.storage.getOutbox()).length, 0);
 });
+
+test("offline workflow skips survive restart and retry the original occurrence date", async () => {
+  const values = new Map();
+  const offline = harness({values,online:false});
+  await offline.storage.enqueueOutbox({entity:'workflowOccurrence',entityId:'workflow-1_2026-10-23',action:'update',payload:{workflowId:'workflow-1',localDate:'2026-10-23'}});
+  await offline.syncService.syncAll();
+  assert.equal((await offline.storage.getOutbox()).length,1);
+  const restarted = harness({values});
+  const calls=[];
+  restarted.api.skipWorkflowOccurrence=async(id,date)=>{calls.push([id,date]);if(calls.length===1)throw new restarted.ApiError('Interrupted',503);};
+  await restarted.syncService.syncAll();
+  assert.equal((await restarted.storage.getOutbox()).length,1);
+  await restarted.syncService.syncAll();
+  assert.deepEqual(calls,[['workflow-1','2026-10-23'],['workflow-1','2026-10-23']]);
+  assert.equal((await restarted.storage.getOutbox()).length,0);
+});

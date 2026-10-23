@@ -76,7 +76,11 @@ function getCategoriesForType(type: "income" | "expense") {
   return type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
 }
 
+import { ScheduleEditor } from "@/components/workflows/schedule-editor";
+import { describeWorkflowSchedule, parseWorkflowSchedule, type WorkflowSchedule } from "@/lib/workflow-schedule";
+
 interface IWorkflow {
+  schedule?: WorkflowSchedule | null;
   _id: string;
   userId: string;
   name: string;
@@ -108,6 +112,9 @@ export default function WorkflowsPage() {
   const [isSplit, setIsSplit] = useState(false);
   const [splitAmount, setSplitAmount] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editingId,setEditingId] = useState<string|null>(null);
+  const [schedule, setSchedule] = useState<WorkflowSchedule | null>(null);
+  const [saveError, setSaveError] = useState("");
 
   const numberClassName = cn(
     "transition-all duration-200",
@@ -150,6 +157,9 @@ export default function WorkflowsPage() {
   }, [newType, newCategory]);
 
   const resetForm = () => {
+    setEditingId(null);
+    setSchedule(null);
+    setSaveError("");
     setWorkflowName("");
     setNewType("expense");
     setNewAmount("");
@@ -178,12 +188,15 @@ export default function WorkflowsPage() {
     };
 
     try {
-      const res = await fetch("/api/workflows", {
-        method: "POST",
+      setSaveError("");
+      parseWorkflowSchedule(schedule, workflowData.amount);
+      const res = await fetch(editingId ? `/api/workflows?id=${editingId}` : "/api/workflows", {
+        method: editingId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(workflowData),
+        body: JSON.stringify({...workflowData, schedule}),
       });
 
+      if (!res.ok) throw new Error((await res.json()).error || "Could not save workflow");
       if (res.ok) {
         console.log("[Workflows] Workflow saved successfully");
         resetForm();
@@ -191,7 +204,7 @@ export default function WorkflowsPage() {
         await fetchWorkflows();
       }
     } catch (err) {
-      console.error("[Workflows] Error saving workflow:", err);
+      setSaveError(err instanceof Error ? err.message : "Could not save workflow");
     } finally {
       setSaving(false);
     }
@@ -232,7 +245,7 @@ export default function WorkflowsPage() {
           />
           <DialogContent className="sm:max-w-xl">
             <DialogHeader>
-              <DialogTitle>Create Workflow</DialogTitle>
+              <DialogTitle>{editingId ? "Edit Workflow" : "Create Workflow"}</DialogTitle>
               <DialogDescription>
                 Save a transaction template for quick reuse.
               </DialogDescription>
@@ -397,6 +410,8 @@ export default function WorkflowsPage() {
                 </div>
               )}
 
+              <ScheduleEditor value={schedule} onChange={setSchedule} />
+              {saveError && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
               <Button
                 className="w-full"
                 onClick={handleSaveWorkflow}
@@ -446,12 +461,12 @@ export default function WorkflowsPage() {
                           <Icon className="size-3 mr-1" />
                           {config?.label || wf.paymentMethod}
                         </Badge>
-                        {wf.amount && wf.amount > 0 && (
+                        {!!wf.amount && wf.amount > 0 && (
                           <Badge variant="outline" className="text-xs">
                             <span className={numberClassName}>₹{wf.amount}</span>
                           </Badge>
                         )}
-                        {wf.splitAmount && wf.splitAmount > 0 && (
+                        {!!wf.splitAmount && wf.splitAmount > 0 && (
                           <Badge variant="outline" className="text-xs text-orange-500">
                             Split <span className={numberClassName}>₹{wf.splitAmount}</span>
                           </Badge>
@@ -460,11 +475,21 @@ export default function WorkflowsPage() {
                           {wf.category}
                         </span>
                       </div>
+                      {wf.schedule && <p className="text-xs text-muted-foreground mt-1">{describeWorkflowSchedule(wf.schedule)}</p>}
                       <p className="text-xs text-muted-foreground mt-1">
                         {wf.description}
                       </p>
                     </div>
                   </div>
+                  <Button size="sm" variant="ghost" onClick={()=>{
+                    setEditingId(wf._id);setWorkflowName(wf.name);setNewType(wf.type);setNewAmount(wf.amount?.toString()??"");
+                    setNewDescription(wf.description);setNewCategory(wf.category);setNewMethod(wf.paymentMethod);
+                    setSplitAmount(wf.splitAmount?.toString()??"");setIsSplit(!!wf.splitAmount);setSchedule(wf.schedule??null);setSaveError("");setDialogOpen(true);
+                  }}>Edit</Button>
+                  {wf.schedule && <Button size="sm" variant="outline" onClick={async()=>{
+                    const res = await fetch(`/api/workflows?id=${wf._id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({...wf,schedule:{...wf.schedule!,enabled:!wf.schedule!.enabled}})});
+                    if(res.ok) await fetchWorkflows(); else window.alert("Could not update schedule. Please retry.");
+                  }}>{wf.schedule.enabled?"Pause":"Resume"}</Button>}
                   <Button
                     onClick={() => handleDeleteWorkflow(wf._id)}
                     size="icon"

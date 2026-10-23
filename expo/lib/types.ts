@@ -24,7 +24,11 @@ export interface ITransaction {
   updatedAt: string;
 }
 
+export interface WorkflowSchedule { days: number[]; time: string; timeZone: string; enabled: boolean; }
+export interface ScheduledWorkflowEvent { workflowId: string; localDate: string; scheduledAt: string; timeZone: string; name: string; amount: number; type: string; status: "upcoming" | "recorded" | "skipped"; }
+
 export interface IWorkflow {
+  schedule?: WorkflowSchedule | null;
   _id: string;
   userId: string;
   clientRequestId?: string;
@@ -181,6 +185,7 @@ export interface UpdateTransactionPayload {
 }
 
 export interface CreateWorkflowPayload {
+  schedule?: WorkflowSchedule | null;
   name: string;
   type: TransactionType;
   amount?: number;

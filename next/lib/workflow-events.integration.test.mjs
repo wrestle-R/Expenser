@@ -27,7 +27,7 @@ test('scheduled workflows run once, catch up, skip and undo with real balance tr
   execFileSync('pg_ctl',['-D',data,'-l',join(directory,'log'),'-o',`-k ${directory} -h '' -p 55440`,'-w','start'],{stdio:'pipe'});started=true;
   db=postgres({host:directory,port:55440,database:'postgres',username:userInfo().username,max:5,onnotice:()=>{}});
   await db.unsafe(`create role authenticated; create role anon; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql as 'select null::uuid';`);
-  for(const name of ['001_reset_expenser_supabase_auth.sql','004_reconciliation_uses_opening_balances.sql','005_scheduled_workflows.sql']) {
+  for(const name of ['001_reset_expenser_supabase_auth.sql','004_reconciliation_uses_opening_balances.sql','005_scheduled_workflows.sql','006_isolate_scheduled_workflow_failures.sql']) {
     const reserved = await db.reserve();
     try { await reserved.unsafe(readFileSync(new URL(`../../supabase/${name}`,import.meta.url),'utf8')); } finally { reserved.release(); }
   }
@@ -36,6 +36,40 @@ test('scheduled workflows run once, catch up, skip and undo with real balance tr
   const config={days:[0,1,5,6],time:'10:00',timeZone:'Asia/Kolkata',enabled:true};
   const make=async(schedule=config,owner=user)=> (await db`insert into workflows(user_id,name,type,amount,description,category,payment_method,schedule) values(${owner},'Rickshaw','expense',20,'Rickshaw','transport','cash',${db.json(schedule)}) returning *`)[0];
   const run=async time=> db`select process_due_workflows(${time}::text::timestamptz,${user}::uuid)`;
+  await t.test('a failing occurrence leaves another owner’s scheduled write intact',async()=>{
+    const damaged=await make({...config, days:[0,1,2,3,4,5,6]},user);
+    const healthy=await make({...config, days:[0,1,2,3,4,5,6]},other);
+    await db`update workflows set next_run_at='2026-10-23T04:30Z' where id=${damaged.id}`;
+    await db`update workflows set next_run_at='2026-10-24T04:30Z' where id=${healthy.id}`;
+    await db.unsafe(`
+      create function public.test_reject_scheduled_transaction() returns trigger language plpgsql as $$
+      begin
+        if new.user_id = '${user}'::uuid then
+          raise check_violation using message='Synthetic transaction failure';
+        end if;
+        return new;
+      end;
+      $$;
+      create trigger test_reject_scheduled_transaction before insert on public.transactions
+        for each row execute function public.test_reject_scheduled_transaction();
+    `);
+    try {
+      assert.equal((await db`select process_due_workflows('2026-10-24T04:30Z') as processed`)[0].processed,1);
+      const [retry]=await db`select next_run_at,processing_retry_after from workflows where id=${damaged.id}`;
+      assert.equal(retry.next_run_at.toISOString(),'2026-10-23T04:30:00.000Z');
+      assert.ok(retry.processing_retry_after);
+      assert.equal((await db`select count(*) as count from workflow_occurrences where workflow_id=${damaged.id}`)[0].count,'0');
+      assert.equal((await db`select count(*) as count from workflow_occurrences where workflow_id=${healthy.id}`)[0].count,'1');
+      await db`drop trigger test_reject_scheduled_transaction on public.transactions`;
+      await db`update workflows set processing_retry_after=null where id=${damaged.id}`;
+      assert.equal((await db`select process_due_workflows('2026-10-23T04:30Z') as processed`)[0].processed,1);
+    } finally {
+      await db`drop trigger if exists test_reject_scheduled_transaction on public.transactions`;
+      await db`drop function public.test_reject_scheduled_transaction()`;
+      await db`delete from transactions where id in (select transaction_id from workflow_occurrences where workflow_id in (${damaged.id},${healthy.id}))`;
+      await db`delete from workflows where id in (${damaged.id},${healthy.id})`;
+    }
+  });
   await t.test('Friday through Monday, timezone conversion and DST',async()=>{
     for(const [after,expected] of [
       ['2026-10-22T12:00Z','2026-10-23T04:30:00.000Z'],

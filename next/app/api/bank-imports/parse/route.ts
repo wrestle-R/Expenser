@@ -122,10 +122,16 @@ function normalizeReviewEvent(
   };
 }
 
-async function parseWithGroq(envelope: NotificationEnvelope): Promise<ParseResult> {
+async function parseWithGroq(envelope: NotificationEnvelope, userId: string): Promise<ParseResult> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     throw new ParseRouteError("Groq fallback is not configured", 503, "not_configured");
+  }
+
+  const { sql } = await import("@/lib/db");
+  const [budget] = await sql`select public.reserve_bank_cloud_parse(${userId}::uuid) as permitted`;
+  if (!budget?.permitted) {
+    throw new ParseRouteError("Cloud parsing is busy. Try again shortly.", 429, "local_rate_limit");
   }
 
   const controller = new AbortController();
@@ -340,7 +346,7 @@ export async function POST(req: Request) {
     const deterministic = excluded
       ? { kind: "non_transaction" as const, reason: excluded }
       : parseBankNotification(envelope.message, envelope);
-    const result = deterministic ?? (await parseWithGroq(envelope));
+    const result = deterministic ?? (await parseWithGroq(envelope, authUser.userId));
     const parser = deterministic ? "regex" : "groq";
     logOutcome(result.kind, parser, startedAt);
 
@@ -374,7 +380,10 @@ export async function POST(req: Request) {
         failureCategory: error.category,
         status: error.status,
       });
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json({ error: error.message }, {
+        status: error.status,
+        ...(error.category === "local_rate_limit" ? { headers: { "Retry-After": "60" } } : {}),
+      });
     }
     console.error("[API /bank-imports/parse] Unexpected parser failure", {
       error: error instanceof Error ? error.name : "UnknownError",

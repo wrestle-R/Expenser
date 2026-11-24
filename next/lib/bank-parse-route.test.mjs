@@ -6,8 +6,9 @@ import { runInNewContext } from "node:vm";
 import * as parser from "./bank-import-parser.js";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
-function harness({ completion, authorized = true, configured = true } = {}) {
+function harness({ completion, authorized = true, configured = true, permitted = true } = {}) {
   let calls = 0;
+  const quotaOwners = [];
   const exports = {};
   const source = ts.transpileModule(readFileSync(new URL("../app/api/bank-imports/parse/route.ts", import.meta.url), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -15,8 +16,12 @@ function harness({ completion, authorized = true, configured = true } = {}) {
   runInNewContext(source, {
     exports, require: (name) => {
       if (name === "next/server") return { NextResponse: { json: (value, init) => Response.json(value, init) } };
-      if (name === "@/lib/auth") return { getAuthenticatedUser: async () => authorized ? { id: "synthetic-test" } : null };
+      if (name === "@/lib/auth") return { getAuthenticatedUser: async () => authorized ? { userId: "synthetic-test" } : null };
       if (name === "@/lib/bank-import-parser") return parser;
+      if (name === "@/lib/db") return { sql: async (_strings, owner) => {
+        quotaOwners.push(owner);
+        return [{ permitted }];
+      } };
       throw new Error(`Unexpected import ${name}`);
     },
     process: { env: configured ? { GROQ_API_KEY: "synthetic-test-key" } : {} },
@@ -26,7 +31,7 @@ function harness({ completion, authorized = true, configured = true } = {}) {
       return Response.json({ choices: [{ message: { content: JSON.stringify(completion) } }] });
     },
   });
-  return { post: exports.POST, calls: () => calls };
+  return { post: exports.POST, calls: () => calls, quotaOwners };
 }
 const envelope = { message: "UPI payment INR 321.00 is done from your account ending 1234.", sender: "VM-HDFCBK", sourceKey: "synthetic", sourcePackage: "sms.test", capturedAt: "2026-10-23T12:00:00.000Z" };
 const request = (body) => new Request("https://api.test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -69,5 +74,17 @@ test("requires authentication and rejects malformed envelopes without calling cl
   for (const body of [null, [], {}, { ...envelope, capturedAt: "invalid" }, { ...envelope, message: "x".repeat(4001) }]) {
     assert.equal((await post(request(body))).status, 400);
   }
+  assert.equal(calls(), 0);
+});
+
+test("a denied cloud budget preserves local parsing and keeps unresolved text off the provider", async () => {
+  const { post, calls, quotaOwners } = harness({ permitted: false });
+  const local = await post(request({ ...envelope, message: "Rs 100 debited from A/c XX1234" }));
+  assert.equal(local.status, 200);
+  assert.deepEqual(quotaOwners, []);
+  const unavailable = await post(request(envelope));
+  assert.equal(unavailable.status, 429);
+  assert.equal(unavailable.headers.get("retry-after"), "60");
+  assert.deepEqual(quotaOwners, ["synthetic-test"]);
   assert.equal(calls(), 0);
 });

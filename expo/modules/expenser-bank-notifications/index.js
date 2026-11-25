@@ -57,8 +57,16 @@ export function clearQueuedImports(sourceKeys) {
   getNativeModule()?.clearQueuedImports?.(sourceKeys);
 }
 
-export function getQueuedRawBankCandidates() {
-  return getNativeModule()?.getQueuedRawBankCandidates?.() ?? [];
+export function setBankImportOwner(owner) {
+  getNativeModule()?.setBankImportOwner?.(owner);
+}
+
+export function getQueuedRawBankCandidates(owner = null, unattendedOnly = false) {
+  return getNativeModule()?.getQueuedRawBankCandidates?.(owner, unattendedOnly) ?? [];
+}
+
+export function markRawBankCandidateForReview(sourceKey) {
+  getNativeModule()?.markRawBankCandidateForReview?.(sourceKey);
 }
 
 export function clearQueuedRawBankCandidates(sourceKeys) {

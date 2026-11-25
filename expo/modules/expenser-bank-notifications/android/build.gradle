@@ -15,5 +15,8 @@ android {
 }
 
 dependencies {
+  // Expo SDK 54 can autolink this module from its bundled Maven publication.
+  implementation(findProject(':expo-background-task') ?: 'host.exp.exponent:expo.modules.backgroundtask:1.0.10')
+  implementation 'androidx.work:work-runtime-ktx:2.9.1'
   testImplementation 'junit:junit:4.13.2'
 }

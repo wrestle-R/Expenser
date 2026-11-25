@@ -2,11 +2,13 @@ import React, { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef,
 import { ActivityIndicator, Alert, AppState, FlatList, Image, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
+import { clearLastNotificationResponse, DEFAULT_ACTION_IDENTIFIER, useLastNotificationResponse } from 'expo-notifications';
 import type { Session } from '@supabase/supabase-js';
 import { ThemeProvider, useTheme } from '../expo/context/ThemeContext';
 import { UserProvider, useUserContext } from '../expo/context/UserContext';
 import { Colors } from '../expo/constants/theme';
 import { initialSession, supabase } from '../expo/lib/supabase';
+import { signInWithGoogle } from '../expo/lib/google-sign-in';
 import { indexTransactions, searchTransactions } from '../expo/lib/transaction-list';
 import SyncStatusBanner from '../expo/components/SyncStatusBanner';
 import { getBankNotificationAccessEnabled, openBankNotificationAccessSettings } from '../expo/lib/bank-imports';
@@ -28,14 +30,21 @@ function Field({ label, colors, ...props }: { label: string; colors: Palette } &
 }
 function SignIn({ colors, onDone }: { colors: Palette; onDone: () => void }) {
   const [email, setEmail] = useState(''), [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [busy, setBusy] = useState<'password' | 'google' | null>(null), [error, setError] = useState('');
   const submit = async () => {
     if (busy) return;
     if (!email.trim() || !password) { setError('Enter your email and password.'); return; }
-    setBusy(true); setError('');
+    setBusy('password'); setError('');
     try { const result = await supabase.auth.signInWithPassword({ email: email.trim(), password }); if (result.error) throw result.error; onDone(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not sign in. Please try again.'); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
+  };
+  const google = async () => {
+    if (busy) return;
+    setBusy('google'); setError('');
+    try { if (await signInWithGoogle('expenser-lite')) onDone(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Google sign-in failed.'); }
+    finally { setBusy(null); }
   };
   return <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 28 }}><View style={{ width: '100%', maxWidth: 420, alignSelf: 'center' }}>
     <Image source={logo} style={{ width: 64, height: 64, marginBottom: 24 }} resizeMode="contain" accessibilityLabel="Expenser logo" />
@@ -44,7 +53,8 @@ function SignIn({ colors, onDone }: { colors: Palette; onDone: () => void }) {
     <Field label="Email" colors={colors} value={email} onChangeText={setEmail} autoCapitalize="none" autoComplete="email" keyboardType="email-address" editable={!busy} />
     <Field label="Password" colors={colors} value={password} onChangeText={setPassword} secureTextEntry autoComplete="current-password" editable={!busy} onSubmitEditing={() => void submit()} />
     {!!error && <Text accessibilityRole="alert" style={{ color: colors.error, marginBottom: 16 }}>{error}</Text>}
-    <Button label={busy ? 'Signing in…' : 'Sign in'} onPress={() => void submit()} colors={colors} disabled={busy} />
+    <Button label={busy === 'password' ? 'Signing in…' : 'Sign in'} onPress={() => void submit()} colors={colors} disabled={Boolean(busy)} />
+    {Platform.OS !== 'web' && <View style={{ marginTop: 12 }}><Button label={busy === 'google' ? 'Connecting…' : 'Continue with Google'} onPress={() => void google()} colors={colors} secondary disabled={Boolean(busy)} /></View>}
     <Pressable accessibilityRole="link" onPress={() => void Linking.openURL('https://expenser-rdp.vercel.app/sign-up')} style={{ paddingVertical: 20 }}><Text style={{ textAlign: 'center', color: colors.textMuted }}>New here? Create an account</Text></Pressable>
   </View></ScrollView></KeyboardAvoidingView>;
 }
@@ -116,6 +126,14 @@ function Transactions({ colors, onSignIn }: { colors: Palette; onSignIn: () => v
   const data = useMemo(() => searchTransactions(index, deferred), [index, deferred]);
   const [editor, setEditor] = useState<{ item: ITransaction | null } | null>(null);
   const [access, setAccess] = useState(getBankNotificationAccessEnabled), [reviewsOpen, setReviewsOpen] = useState(false);
+  const notificationResponse = useLastNotificationResponse();
+  useEffect(() => {
+    if (notificationResponse?.actionIdentifier !== DEFAULT_ACTION_IDENTIFIER) return;
+    const data = notificationResponse.notification.request.content.data;
+    if (data.type !== 'bank-review') return;
+    if (data.kind === 'alert') setReviewsOpen(true);
+    clearLastNotificationResponse();
+  }, [notificationResponse]);
   useEffect(() => { const sub = AppState.addEventListener('change', (state) => { if (state === 'active') setAccess(getBankNotificationAccessEnabled()); }); return () => sub.remove(); }, []);
   const edit = useCallback((item: ITransaction) => setEditor({ item }), []);
   const renderRow = useCallback(({ item }: { item: ITransaction }) => <Row item={item} colors={colors} onEdit={edit} />, [colors, edit]);

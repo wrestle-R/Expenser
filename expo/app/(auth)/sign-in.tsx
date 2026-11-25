@@ -16,6 +16,7 @@ import { Link, useRouter } from "expo-router";
 import { useTheme } from "../../context/ThemeContext";
 import { Colors } from "../../constants/theme";
 import { supabase } from "../../lib/supabase";
+import { signInWithGoogle } from "../../lib/google-sign-in";
 import {
   AUTH_RATE_LIMIT_COOLDOWN_MS,
   formatCooldown,
@@ -31,7 +32,7 @@ export default function SignInScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState<"password" | "google" | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [cooldownUntil, setCooldownUntil] = useState(0);
@@ -72,7 +73,7 @@ export default function SignInScreen() {
       return;
     }
 
-    setSubmitting(true);
+    setSubmitting("password");
     setErrorMessage("");
     try {
       const { error } = await supabase.auth.signInWithPassword({
@@ -93,7 +94,20 @@ export default function SignInScreen() {
     } catch (error) {
       setErrorMessage(getAuthErrorMessage(error instanceof Error ? error.message : "Sign-in failed. Please try again."));
     } finally {
-      setSubmitting(false);
+      setSubmitting(null);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (submitting) return;
+    setSubmitting("google");
+    setErrorMessage("");
+    try {
+      if (await signInWithGoogle("expenser")) router.replace("/(tabs)");
+    } catch (error) {
+      setErrorMessage(getAuthErrorMessage(error instanceof Error ? error.message : "Google sign-in failed."));
+    } finally {
+      setSubmitting(null);
     }
   };
 
@@ -204,9 +218,9 @@ export default function SignInScreen() {
               opacity: submitting || cooldownActive ? 0.75 : 1,
             }}
             onPress={handleSignIn}
-            disabled={submitting || cooldownActive}
+            disabled={Boolean(submitting) || cooldownActive}
           >
-            {submitting ? (
+            {submitting === "password" ? (
               <ActivityIndicator color={colors.primaryForeground} />
             ) : (
               <Text style={{ color: colors.primaryForeground, fontSize: 16, fontWeight: "600" }}>
@@ -214,6 +228,18 @@ export default function SignInScreen() {
               </Text>
             )}
           </TouchableOpacity>
+          {Platform.OS !== "web" && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              disabled={Boolean(submitting)}
+              onPress={handleGoogleSignIn}
+              style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, alignItems: "center" }}
+            >
+              {submitting === "google"
+                ? <ActivityIndicator color={colors.primary} />
+                : <Text style={{ color: colors.text, fontSize: 16, fontWeight: "600" }}>Continue with Google</Text>}
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={{ flexDirection: "row", justifyContent: "center", marginTop: 24 }}>

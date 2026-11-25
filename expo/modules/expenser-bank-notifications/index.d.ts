@@ -55,7 +55,9 @@ export function getNotificationAccessHealth(lookbackMs?: number): NotificationAc
 export function openNotificationAccessSettings(): Promise<void>;
 export function getQueuedImports(): QueuedBankImport[];
 export function clearQueuedImports(sourceKeys: string[]): void;
-export function getQueuedRawBankCandidates(): QueuedRawBankCandidate[];
+export function setBankImportOwner(owner: string | null): void;
+export function getQueuedRawBankCandidates(owner?: string | null, unattendedOnly?: boolean): QueuedRawBankCandidate[];
+export function markRawBankCandidateForReview(sourceKey: string): void;
 export function clearQueuedRawBankCandidates(sourceKeys: string[]): void;
 export function getQueuedBankReviewEvents(): QueuedBankReviewEvent[];
 export function clearQueuedBankReviewEvents(sourceKeys: string[]): void;

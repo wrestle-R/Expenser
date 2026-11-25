@@ -14,6 +14,8 @@ object BankNotificationStore {
   private const val RECENT_READS_KEY = "recent_reads"
   private const val RAW_CANDIDATES_KEY = "raw_bank_candidates"
   private const val REVIEW_EVENTS_KEY = "bank_review_events"
+  private const val OWNER_KEY = "bank_import_owner"
+  private const val FIRST_OWNER_KEY = "bank_import_first_owner"
   private const val MAX_RECENT_READS = 200
 
   @Synchronized
@@ -66,7 +68,9 @@ object BankNotificationStore {
     packageName: String,
     capturedAtMs: Long = System.currentTimeMillis(),
     stableSourceId: String? = null
-  ) {
+  ): Boolean {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val owner = prefs.getString(OWNER_KEY, null) ?: return false
     val safeCapturedAtMs = if (capturedAtMs > 0) capturedAtMs else System.currentTimeMillis()
     val sourceIdentity = stableSourceId?.takeIf(String::isNotBlank)
       ?: "${sender.orEmpty()}|$message"
@@ -78,22 +82,54 @@ object BankNotificationStore {
       .put("capturedAt", isoFormat().format(safeCapturedAtMs))
       .put("sourcePackage", packageName)
       .put("notificationPackage", packageName)
+      .put("owner", owner)
 
-    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val queue = JSONArray(prefs.getString(RAW_CANDIDATES_KEY, "[]"))
     if (containsSourceKey(queue, sourceKey)) {
-      return
+      return false
     }
 
     queue.put(candidate)
-    prefs.edit()
+    return prefs.edit()
       .putString(RAW_CANDIDATES_KEY, queue.toString())
       .commit()
   }
 
-  fun getRawCandidates(context: Context): JSONArray {
+  @Synchronized
+  fun setOwner(context: Context, owner: String?) {
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    return JSONArray(prefs.getString(RAW_CANDIDATES_KEY, "[]"))
+    val editor = prefs.edit().putString(OWNER_KEY, owner)
+    if (owner != null && !prefs.contains(FIRST_OWNER_KEY)) editor.putString(FIRST_OWNER_KEY, owner)
+    editor.apply()
+  }
+
+  @Synchronized
+  fun getRawCandidates(context: Context, expectedOwner: String? = null, unattendedOnly: Boolean = false): JSONArray {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val owner = prefs.getString(OWNER_KEY, null) ?: return JSONArray()
+    if (expectedOwner != null && owner != expectedOwner) return JSONArray()
+    val legacyOwner = prefs.getString(FIRST_OWNER_KEY, null)
+    val queue = JSONArray(prefs.getString(RAW_CANDIDATES_KEY, "[]"))
+    val visible = JSONArray()
+    for (index in 0 until queue.length()) {
+      val item = queue.optJSONObject(index) ?: continue
+      if (item.optString("owner").ifBlank { legacyOwner } == owner &&
+          !(unattendedOnly && item.optBoolean("needsReview"))) visible.put(item)
+    }
+    return visible
+  }
+
+  @Synchronized
+  fun markRawCandidateForReview(context: Context, sourceKey: String) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val queue = JSONArray(prefs.getString(RAW_CANDIDATES_KEY, "[]"))
+    for (index in 0 until queue.length()) {
+      val item = queue.optJSONObject(index) ?: continue
+      if (item.optString("sourceKey") != sourceKey) continue
+      item.put("needsReview", true)
+      prefs.edit().putString(RAW_CANDIDATES_KEY, queue.toString()).commit()
+      return
+    }
   }
 
   fun clearRawCandidates(context: Context, sourceKeys: List<String>) {

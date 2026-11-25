@@ -1,10 +1,10 @@
 module.exports = {
   expo: {
-    name: 'Expenser Lite', slug: 'expenser-lite', version: '1.0.0',
+    name: 'Expenser Lite', slug: 'expenser-lite', version: '1.1.0',
     orientation: 'portrait', scheme: 'expenser-lite', userInterfaceStyle: 'automatic', newArchEnabled: true,
     icon: '../expo/assets/images/icon.png',
     android: {
-      package: 'com.rdp.expenser.lite', edgeToEdgeEnabled: true,
+      package: 'com.rdp.expenser.lite', versionCode: 2, edgeToEdgeEnabled: true,
       adaptiveIcon: { foregroundImage: '../expo/assets/images/android-icon-foreground.png', monochromeImage: '../expo/assets/images/android-icon-monochrome.png', backgroundColor: '#f4f4f5' },
     },
     plugins: [

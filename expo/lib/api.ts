@@ -48,7 +48,8 @@ class ApiService {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    accessToken?: string,
   ): Promise<T> {
     return withRequestDeadline(async (signal) => {
     const url = `${this.baseUrl}${endpoint}`;
@@ -58,7 +59,9 @@ class ApiService {
     };
 
     // Always get a fresh token if getter is available
-    if (this.tokenGetter) {
+    if (accessToken) {
+      headers["Authorization"] = `Bearer ${accessToken}`;
+    } else if (this.tokenGetter) {
       try {
         const freshToken = await this.tokenGetter();
         if (freshToken) {
@@ -108,7 +111,8 @@ class ApiService {
   }
 
   async createTransaction(
-    payload: CreateTransactionPayload
+    payload: CreateTransactionPayload,
+    accessToken?: string,
   ): Promise<ITransaction> {
 
     const data = await this.request<{ transaction: ITransaction }>(
@@ -116,7 +120,8 @@ class ApiService {
       {
         method: "POST",
         body: JSON.stringify(payload),
-      }
+      },
+      accessToken,
     );
     return data.transaction;
   }
@@ -166,7 +171,8 @@ class ApiService {
 
   async parseBankNotification(
     envelope: NotificationEnvelope,
-    allowCloud = true
+    allowCloud = true,
+    accessToken?: string,
   ): Promise<ParsedBankNotificationResponse> {
     const local = parseNotificationLocally(envelope);
     if (local) return local;
@@ -174,7 +180,7 @@ class ApiService {
     return this.request<ParsedBankNotificationResponse>("/api/bank-imports/parse", {
       method: "POST",
       body: JSON.stringify(envelope),
-    });
+    }, accessToken);
   }
 
   async deleteTransaction(id: string): Promise<void> {

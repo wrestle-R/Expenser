@@ -113,8 +113,12 @@ class ExpenserBankNotificationsModule : Module() {
       BankNotificationStore.clearQueued(context, sourceKeys)
     }
 
-    Function("getQueuedRawBankCandidates") {
-      val queue = BankNotificationStore.getRawCandidates(context)
+    Function("setBankImportOwner") { owner: String? ->
+      BankNotificationStore.setOwner(context, owner)
+    }
+
+    Function("getQueuedRawBankCandidates") { owner: String?, unattendedOnly: Boolean ->
+      val queue = BankNotificationStore.getRawCandidates(context, owner, unattendedOnly)
       val items = mutableListOf<Map<String, Any?>>()
       for (index in 0 until queue.length()) {
         val item = queue.optJSONObject(index) ?: continue
@@ -136,6 +140,10 @@ class ExpenserBankNotificationsModule : Module() {
 
     Function("clearQueuedRawBankCandidates") { sourceKeys: List<String> ->
       BankNotificationStore.clearRawCandidates(context, sourceKeys)
+    }
+
+    Function("markRawBankCandidateForReview") { sourceKey: String ->
+      BankNotificationStore.markRawCandidateForReview(context, sourceKey)
     }
 
     Function("getQueuedBankReviewEvents") {

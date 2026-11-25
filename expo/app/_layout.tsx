@@ -1,6 +1,7 @@
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from "@react-navigation/native";
 import { Stack, useGlobalSearchParams, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { clearLastNotificationResponse, DEFAULT_ACTION_IDENTIFIER, useLastNotificationResponse } from "expo-notifications";
 import { useEffect, useState } from "react";
 import { View, ActivityIndicator } from "react-native";
 import type { Session } from "@supabase/supabase-js";
@@ -28,6 +29,17 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   const { reauthenticate } = useGlobalSearchParams<{ reauthenticate?: string }>();
   const router = useRouter();
   const [authTimedOut, setAuthTimedOut] = useState(false);
+  const notificationResponse = useLastNotificationResponse();
+
+  useEffect(() => {
+    if (!isSignedIn || segments[0] === "(auth)" ||
+        notificationResponse?.actionIdentifier !== DEFAULT_ACTION_IDENTIFIER) return;
+    const data = notificationResponse.notification.request.content.data;
+    if (data.type !== "bank-review") return;
+    clearLastNotificationResponse();
+    if (data.kind === "transaction") router.push("/(tabs)/transactions");
+    else router.push("/notification-reviews");
+  }, [isSignedIn, notificationResponse, router, segments]);
 
   useEffect(() => {
     let mounted = true;

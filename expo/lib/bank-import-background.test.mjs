@@ -54,8 +54,8 @@ test("uploads a bank alert under its owner and clears it after the server confir
   assert.deepEqual(task.calls, [
     ["parse", "test-alert", true, "fixture-token"],
     ["upload", "test-transaction", "fixture-token"],
-    ["clear", "test-alert"],
     ["notify", "test-transaction", "transaction"],
+    ["clear", "test-alert"],
   ]);
 });
 

@@ -28,7 +28,11 @@ class ExpenserBankNotificationListenerService : NotificationListenerService() {
       capturedAtMs = sbn.postTime,
       stableSourceId = "${sbn.key}|${sbn.postTime}"
     )
-    if (queued) notifyQueueChanged()
+    if (queued) {
+      notifyQueueChanged()
+      // The persisted native queue remains available if WorkManager is unavailable.
+      runCatching { BankImportWork.enqueue(applicationContext) }
+    }
   }
 
   private fun extractPayload(notification: Notification): SmsPayload? {

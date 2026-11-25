@@ -13,26 +13,28 @@
     "test": "node ../expo/scripts/test.mjs"
   },
   "dependencies": {
-    "expo": "~54.0.37",
-    "react": "19.1.0",
-    "react-native": "0.81.5",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/netinfo": "11.4.1",
     "@supabase/supabase-js": "^2.109.0",
-    "react-native-safe-area-context": "~5.6.0",
-    "react-native-url-polyfill": "^3.0.0",
+    "clsx": "^2.1.1",
+    "expenser-bank-notifications": "file:../expo/modules/expenser-bank-notifications",
+    "expo": "~54.0.37",
+    "expo-build-properties": "~1.0.10",
+    "expo-crypto": "~15.0.9",
     "expo-device": "~8.0.10",
     "expo-notifications": "~0.32.17",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "expo-system-ui": "~6.0.9",
-    "clsx": "^2.1.1",
-    "tailwind-merge": "^3.4.0",
-    "expenser-bank-notifications": "file:../expo/modules/expenser-bank-notifications",
-    "expo-build-properties": "~1.0.10"
+    "expo-web-browser": "~15.0.11",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-url-polyfill": "^3.0.0",
+    "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
-    "typescript": "~5.9.2",
-    "@types/react": "~19.1.0"
+    "@types/react": "~19.1.0",
+    "typescript": "~5.9.2"
   }
 }

@@ -20,7 +20,7 @@ class ExpenserBankNotificationListenerService : NotificationListenerService() {
     val payload = extractPayload(notification) ?: return
     if (!FinancialSmsCandidateDetector.isCandidate(payload.message)) return
 
-    BankNotificationStore.enqueueRawCandidate(
+    val queued = BankNotificationStore.enqueueRawCandidate(
       context = applicationContext,
       sender = payload.sender,
       message = payload.message,
@@ -28,7 +28,7 @@ class ExpenserBankNotificationListenerService : NotificationListenerService() {
       capturedAtMs = sbn.postTime,
       stableSourceId = "${sbn.key}|${sbn.postTime}"
     )
-    notifyQueueChanged()
+    if (queued) notifyQueueChanged()
   }
 
   private fun extractPayload(notification: Notification): SmsPayload? {

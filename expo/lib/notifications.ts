@@ -11,6 +11,7 @@ type NotificationsModule = typeof import("expo-notifications");
 class NotificationService {
   private initialized = false;
   private notifications: NotificationsModule | null | undefined;
+  private notificationQueue: Promise<unknown> = Promise.resolve();
 
   private async getNotifications() {
     if (this.notifications !== undefined) return this.notifications;
@@ -85,35 +86,32 @@ class NotificationService {
     this.initialized = true;
   }
 
-  async notifyImportedTransaction(input: {
-    importSourceKey: string;
-    amount: number;
-    type: "income" | "expense";
-    stealthMode: boolean;
-  }) {
-    await this.initialize();
+  notifyBankReview(sourceKey: string, kind: "transaction" | "alert") {
+    const result = this.notificationQueue.then(() => this.sendBankReview(sourceKey, kind));
+    this.notificationQueue = result.catch(() => {});
+    return result;
+  }
+
+  private async sendBankReview(sourceKey: string, kind: "transaction" | "alert") {
     const Notifications = await this.getNotifications();
-    if (!Notifications || !this.initialized) return;
+    if (!Notifications || (await Notifications.getPermissionsAsync()).status !== "granted") return;
 
     const rawKeys = await AsyncStorage.getItem(NOTIFIED_KEYS);
     const keys: string[] = rawKeys ? JSON.parse(rawKeys) : [];
-    if (keys.includes(input.importSourceKey)) return;
+    if (keys.includes(sourceKey)) return;
 
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: "Transaction added",
-        body: input.stealthMode
-          ? "A bank transaction was added to Expenser."
-          : `${input.type === "income" ? "Received" : "Spent"} ₹${input.amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}. Choose a category if needed.`,
-        data: { type: "transaction-imported", importSourceKey: input.importSourceKey },
-        ...(Platform.OS === "android" ? { channelId: CHANNEL_ID } : {}),
+        title: kind === "transaction" ? "Bank transaction added" : "Bank alert needs review",
+        body: kind === "transaction" ? "Tap to review and choose a category." : "Tap to check the alert and add a transaction.",
+        data: { type: "bank-review", kind },
       },
-      trigger: null,
+      trigger: Platform.OS === "android" ? { channelId: CHANNEL_ID } : null,
     });
 
     await AsyncStorage.setItem(
       NOTIFIED_KEYS,
-      JSON.stringify([input.importSourceKey, ...keys].slice(0, MAX_NOTIFIED_KEYS))
+      JSON.stringify([sourceKey, ...keys].slice(0, MAX_NOTIFIED_KEYS))
     );
   }
 

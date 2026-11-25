@@ -2,6 +2,7 @@ import React, { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef,
 import { ActivityIndicator, Alert, AppState, FlatList, Image, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
+import { clearLastNotificationResponse, DEFAULT_ACTION_IDENTIFIER, useLastNotificationResponse } from 'expo-notifications';
 import type { Session } from '@supabase/supabase-js';
 import { ThemeProvider, useTheme } from '../expo/context/ThemeContext';
 import { UserProvider, useUserContext } from '../expo/context/UserContext';
@@ -125,6 +126,14 @@ function Transactions({ colors, onSignIn }: { colors: Palette; onSignIn: () => v
   const data = useMemo(() => searchTransactions(index, deferred), [index, deferred]);
   const [editor, setEditor] = useState<{ item: ITransaction | null } | null>(null);
   const [access, setAccess] = useState(getBankNotificationAccessEnabled), [reviewsOpen, setReviewsOpen] = useState(false);
+  const notificationResponse = useLastNotificationResponse();
+  useEffect(() => {
+    if (notificationResponse?.actionIdentifier !== DEFAULT_ACTION_IDENTIFIER) return;
+    const data = notificationResponse.notification.request.content.data;
+    if (data.type !== 'bank-review') return;
+    if (data.kind === 'alert') setReviewsOpen(true);
+    clearLastNotificationResponse();
+  }, [notificationResponse]);
   useEffect(() => { const sub = AppState.addEventListener('change', (state) => { if (state === 'active') setAccess(getBankNotificationAccessEnabled()); }); return () => sub.remove(); }, []);
   const edit = useCallback((item: ITransaction) => setEditor({ item }), []);
   const renderRow = useCallback(({ item }: { item: ITransaction }) => <Row item={item} colors={colors} onEdit={edit} />, [colors, edit]);

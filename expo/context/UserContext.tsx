@@ -10,6 +10,8 @@ import React, {
 import { AppState, type AppStateStatus } from "react-native";
 import type { Session } from "@supabase/supabase-js";
 import { api } from "../lib/api";
+import { registerBankImportTask } from "../lib/bank-import-background";
+import { parsedResponsePayload, parsedReviewEvent } from "../lib/bank-import-result";
 import { supabase, initialSession } from "../lib/supabase";
 import { syncService, type SyncStatus } from "../lib/sync";
 import {
@@ -19,7 +21,6 @@ import {
   saveTransactionChange,
   getStoredBankReviewEvents,
   getStoredProfile,
-  getStoredStealthMode,
   getStoredTransactions,
   getStoredWorkflows,
   setStoredProfile,
@@ -33,7 +34,6 @@ import type {
   ITransaction,
   IUserProfile,
   IWorkflow,
-  ParsedBankNotificationResponse,
   PaymentMethod,
   UpdateTransactionPayload,
 } from "../lib/types";
@@ -49,6 +49,7 @@ import {
   getQueuedBankImports,
   getQueuedNativeBankReviewEvents,
   getQueuedRawBankImportCandidates,
+  setBankImportOwner,
 } from "../lib/bank-imports";
 import { getPendingReviewStatus } from "../lib/transaction-review";
 import { withDefaultPaymentMethod } from "../lib/payment-methods.js";
@@ -69,26 +70,6 @@ function dedupeWorkflows(items: IWorkflow[]) {
       new Date(b.updatedAt || b.createdAt).getTime() -
       new Date(a.updatedAt || a.createdAt).getTime()
   );
-}
-
-function parsedResponsePayload(
-  response: Extract<ParsedBankNotificationResponse, { kind: "transaction" }>
-): CreateTransactionPayload {
-  return {
-    type: response.parsed.type,
-    amount: response.parsed.amount,
-    description: response.parsed.payee ?? "",
-    category: "",
-    paymentMethod: "bank",
-    splitAmount: 0,
-    date: response.parsed.occurredAt,
-    importSource: response.importSource,
-    importSourceKey: response.importSourceKey,
-    importedAccountSuffix: response.parsed.accountSuffix ?? undefined,
-    importedBankBalance: response.parsed.availableBalance ?? undefined,
-    importedBankReference: response.parsed.referenceNumber ?? undefined,
-    importedBankConfidence: response.parsed.confidence,
-  };
 }
 
 function signedAmount(transaction: ITransaction) {
@@ -211,11 +192,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     let authChanged = false;
     void initialSession.then((cachedSession) => {
       if (!mounted || authChanged) return;
+      setBankImportOwner(cachedSession?.user.id ?? null);
       setSession(cachedSession);
       setAuthLoaded(true);
     });
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       authChanged = true;
+      setBankImportOwner(nextSession?.user.id ?? null);
       setSession(nextSession);
       setAuthLoaded(true);
     });
@@ -252,6 +235,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       if (state === "active" && isSignedIn) {
         void syncService.syncAll();
         bankImportDrainRef.current?.();
+        void registerBankImportTask().catch(() => {});
       }
     };
     const subscription = AppState.addEventListener("change", listener);
@@ -268,7 +252,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) setLoading(false);
         await syncService.initialize();
         await notificationService.initialize();
-        if (isSignedIn && !cancelled) await syncService.syncAll();
+        if (isSignedIn && !cancelled) {
+          void registerBankImportTask().catch(() => {});
+          await syncService.syncAll();
+        }
         if (!cancelled) await loadLocalData();
       } catch (error) {
         console.error("[User] Initialization failed", error instanceof Error ? error.name : "UnknownError");
@@ -330,7 +317,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     void syncService.syncAll();
   }, [profile]);
 
-  const addTransaction = useCallback(async (payload: CreateTransactionPayload) => {
+  const addTransaction = useCallback(async (payload: CreateTransactionPayload, syncImmediately = true) => {
     const storedTransactions = transactionsRef.current;
     if (
       payload.importSource &&
@@ -377,14 +364,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
 
     if (transaction.importSourceKey) {
-      await notificationService.notifyImportedTransaction({
-        importSourceKey: transaction.importSourceKey,
-        amount: transaction.amount,
-        type: transaction.type,
-        stealthMode: await getStoredStealthMode(),
-      });
+      void notificationService.notifyBankReview(transaction.importSourceKey, "transaction").catch(() => {});
     }
-    void syncService.syncAll();
+    if (syncImmediately) void syncService.syncAll();
   }, [profile?.userId, setTransactionSnapshot]);
 
   const updateTransaction = useCallback(async (id: string, payload: UpdateTransactionPayload) => {
@@ -414,12 +396,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [setTransactionSnapshot]);
 
   const importQueuedBankNotifications = useCallback(async () => {
-    if (!isSignedIn || !profile?.userId) return;
+    const owner = profile?.userId;
+    if (!owner || session?.user.id !== owner) return;
+    const accessToken = session.access_token;
+    let hasTransactions = false;
 
       const importedKeys: string[] = [];
       for (const item of getQueuedBankImports()) {
         try {
-          await addTransaction(bankImportToTransactionPayload(item));
+          await addTransaction(bankImportToTransactionPayload(item), false);
+          hasTransactions = true;
           importedKeys.push(item.importSourceKey);
         } catch (error) {
           console.error("[Bank import] Failed parsed candidate:", error);
@@ -442,7 +428,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       }
 
       const clearedRawKeys: string[] = [];
-      for (const item of getQueuedRawBankImportCandidates()) {
+      for (const item of getQueuedRawBankImportCandidates(owner)) {
         try {
           const envelope = {
             sourceKey: item.sourceKey,
@@ -453,44 +439,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           };
           await processBankImportCandidate({
             candidate: envelope,
-            parse: (envelope) => api.parseBankNotification(envelope, syncService.isOnlineSync()),
+            parse: (envelope) => api.parseBankNotification(envelope, syncService.isOnlineSync(), accessToken),
             queueTransaction: async (response) => {
-              await addTransaction(parsedResponsePayload(response));
+              if ((await supabase.auth.getSession()).data.session?.user.id !== owner) throw new Error("Bank import account changed");
+              await addTransaction(parsedResponsePayload(response), false);
+              hasTransactions = true;
             },
             saveReview: async (response) => {
-              if (response.kind === "review_event") {
-                return addStoredBankReviewEvent({
-                  ...response.event,
-                  importSource: response.importSource,
-                  importSourceKey: response.importSourceKey,
-                  capturedAt: item.capturedAt,
-                  notificationPackage: item.notificationPackage,
-                  parser: response.parser,
-                  rawMessage: item.message,
-                  sender: item.sender,
-                  sourcePackage: item.sourcePackage,
-                  sourceKey: item.sourceKey,
-                });
-              }
-              return addStoredBankReviewEvent({
-                bankName: null,
-                eventType: "unparsed_sms_notification",
-                amount: null,
-                accountSuffix: null,
-                occurredAt: item.capturedAt,
-                summary: "Transaction-like message needs review",
-                confidence: "low",
-                importSource: "sms_notification_review",
-                importSourceKey: `sms:review:${item.sourceKey}`,
-                capturedAt: item.capturedAt,
-                notificationPackage: item.notificationPackage,
-                parser: response.parser,
-                rawMessage: item.message,
-                sender: item.sender,
-                sourcePackage: item.sourcePackage,
-                sourceKey: item.sourceKey,
-                failureReason: response.reason,
-              });
+              if ((await supabase.auth.getSession()).data.session?.user.id !== owner) return false;
+              const event = parsedReviewEvent(response, item);
+              const saved = await addStoredBankReviewEvent(event);
+              if (saved) void notificationService.notifyBankReview(item.sourceKey, "alert").catch(() => {});
+              return saved;
             },
           });
           clearedRawKeys.push(item.sourceKey);
@@ -500,6 +460,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (clearedRawKeys.length) clearQueuedRawBankImportCandidates(clearedRawKeys);
+      if (hasTransactions) void syncService.syncAll();
       if (rawFailure) {
         rawRetryAttemptRef.current += 1;
         const delay = Math.min(60_000, 2_000 * 2 ** (rawRetryAttemptRef.current - 1));
@@ -521,7 +482,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         localReviews: (await getStoredBankReviewEvents()).length,
         retrying: rawFailure,
       });
-  }, [addTransaction, isSignedIn, loadLocalData, profile?.userId]);
+  }, [addTransaction, loadLocalData, profile?.userId, session]);
 
   const requestBankImportDrain = useMemo(
     () => createCoalescingDrain(importQueuedBankNotifications),

@@ -2,15 +2,12 @@ import {
   clearQueuedBankReviewEvents,
   clearQueuedImports,
   clearQueuedRawBankCandidates,
-  addBankImportQueuedListener,
   getNotificationAccessHealth,
   getQueuedBankReviewEvents,
   getQueuedImports,
   getQueuedRawBankCandidates,
   isNotificationAccessEnabled,
   openNotificationAccessSettings,
-  setBankImportOwner,
-  markRawBankCandidateForReview,
   type NotificationAccessHealth,
   type QueuedBankReviewEvent,
   type QueuedBankImport,
@@ -23,7 +20,7 @@ export type NativeNotificationAccessHealth = NotificationAccessHealth;
 export type NativeRawBankCandidate = QueuedRawBankCandidate;
 export type NativeNotificationEnvelope = QueuedRawBankCandidate;
 export type NativeBankReviewEvent = QueuedBankReviewEvent;
-export { addBankImportQueuedListener, markRawBankCandidateForReview, setBankImportOwner };
+export { addBankImportQueuedListener, markRawBankCandidateForReview, setBankImportOwner } from "expenser-bank-notifications";
 
 export function getBankNotificationAccessEnabled() {
   return isNotificationAccessEnabled();

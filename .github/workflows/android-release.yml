@@ -4,6 +4,15 @@ on:
     tags: ['expenser-android-v*']
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: 'Release tag for a build prepared with local credentials'
+        type: string
+      apk_url:
+        description: 'Public EAS artifact URL from the verified local build'
+        type: string
+      apk_sha256:
+        description: 'SHA-256 of the APK from the verified local build'
+        type: string
       eas_build_id:
         description: 'Optional EAS build ID for the selected release tag'
         type: string
@@ -24,15 +33,20 @@ jobs:
       - id: expo
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          APK_URL: ${{ inputs.apk_url }}
         run: |
-          if [[ -n "$EXPO_TOKEN" ]]; then
+          if [[ -n "$EXPO_TOKEN" || -n "$APK_URL" ]]; then
             echo 'configured=true' >> "$GITHUB_OUTPUT"
           else
-            echo 'The hosted release job needs a dedicated Expo credential. The local release scripts can publish with local authentication.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Waiting for a signed EAS artifact prepared with local authentication. A dedicated Expo credential can also start builds directly from tags.' >> "$GITHUB_STEP_SUMMARY"
           fi
   release:
     needs: credentials
-    if: needs.credentials.outputs.configured == 'true' && github.ref_type == 'tag' && startsWith(github.ref_name, 'expenser-android-v')
+    if: >-
+      needs.credentials.outputs.configured == 'true' &&
+      (github.ref_type == 'tag' && startsWith(github.ref_name, 'expenser-android-v') ||
+       github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+       startsWith(inputs.release_tag, 'expenser-android-v'))
     runs-on: ubuntu-24.04
     timeout-minutes: 175
     permissions:
@@ -40,6 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
           persist-credentials: false
       - run: git merge-base --is-ancestor HEAD origin/main
@@ -58,14 +73,19 @@ jobs:
         working-directory: expo
       - run: npm test && ./node_modules/.bin/tsc --noEmit
         working-directory: expo
-      - run: npm install --global eas-cli@18.4.0
+      - if: inputs.apk_url == ''
+        run: npm install --global eas-cli@18.4.0
       - name: Build and verify the signed APK
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EAS_BUILD_ID: ${{ inputs.eas_build_id }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          APK_URL: ${{ inputs.apk_url }}
+          APK_SHA256: ${{ inputs.apk_sha256 }}
           EXPO_NO_TELEMETRY: '1'
-        run: bash .github/scripts/build-android-release.sh "$RUNNER_TEMP/expenser-release" "$EAS_BUILD_ID"
+        run: |
+          git show "$GITHUB_SHA:.github/scripts/build-android-release.sh" > "$RUNNER_TEMP/build-android-release.sh"
+          bash "$RUNNER_TEMP/build-android-release.sh" "$RUNNER_TEMP/expenser-release" "$EAS_BUILD_ID" "$APK_URL" "$APK_SHA256"
       - name: Publish the APK and update manifest
         env:
           GH_TOKEN: ${{ github.token }}

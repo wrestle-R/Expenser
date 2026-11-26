@@ -1,0 +1,10 @@
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+  android:minWidth="210dp"
+  android:minHeight="156dp"
+  android:minResizeWidth="185dp"
+  android:targetCellWidth="3"
+  android:targetCellHeight="3"
+  android:initialLayout="@layout/recent_transactions_widget"
+  android:resizeMode="horizontal"
+  android:updatePeriodMillis="0"
+  android:widgetCategory="home_screen" />

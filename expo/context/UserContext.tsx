@@ -1,3 +1,4 @@
+import { setRecentWidgetTransactions } from "expenser-bank-notifications";
 import React, {
   createContext,
   useCallback,
@@ -37,7 +38,8 @@ import type {
   PaymentMethod,
   UpdateTransactionPayload,
 } from "../lib/types";
-import { generateTempId } from "../lib/utils";
+import { useStealthMode } from "./StealthContext";
+import { formatCurrency, generateTempId } from "../lib/utils";
 import { notificationService } from "../lib/notifications";
 import {
   bankImportToTransactionPayload,
@@ -160,6 +162,19 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const rawRetryAttemptRef = useRef(0);
   const rawRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSignedIn = Boolean(session?.user);
+  const ownerId = session?.user.id;
+  const { isStealthMode } = useStealthMode();
+
+  useEffect(() => {
+    if (!authLoaded) return;
+    const recent = ownerId && !isStealthMode
+      ? transactions.filter(transaction => transaction.userId === ownerId).slice(0, 5)
+      : [];
+    setRecentWidgetTransactions(
+      recent.map(transaction => transaction.description || transaction.category || "Transaction"),
+      recent.map(transaction => `${transaction.type === "income" ? "+" : "−"}₹${formatCurrency(transaction.amount)}`),
+    );
+  }, [authLoaded, isStealthMode, ownerId, transactions]);
 
   const setTransactionSnapshot = useCallback((next: ITransaction[]) => {
     transactionsRef.current = next;

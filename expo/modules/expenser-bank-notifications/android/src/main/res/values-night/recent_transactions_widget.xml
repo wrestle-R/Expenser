@@ -1,0 +1,5 @@
+<resources>
+  <color name="expenser_widget_fill">#292929</color>
+  <color name="expenser_widget_text">#F4F4F5</color>
+  <color name="expenser_widget_subtext">#D4D4D8</color>
+</resources>

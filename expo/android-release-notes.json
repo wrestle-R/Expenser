@@ -1,8 +1,8 @@
 {
-  "version": "1.4.0",
+  "version": "1.5.0",
   "notes": [
-    "Expenser now checks for Android updates when you open the app.",
-    "You can review what changed after installing an update.",
-    "Bank SMS import recovers recent messages and can be paused from the app, widget, or Quick Settings."
+    "See your five latest transactions on an Android home-screen widget.",
+    "Download APK updates inside Expenser, then confirm installation in Android.",
+    "Profile has shorter Bank SMS controls, and successful sync stays out of the way."
   ]
 }

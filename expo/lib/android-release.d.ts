@@ -1,7 +1,7 @@
 export interface AndroidRelease {
   version: string;
   versionCode: number;
-  downloadUrl: string;
+  sha256: string;
 }
 
 export const ANDROID_RELEASE_MANIFEST: string;

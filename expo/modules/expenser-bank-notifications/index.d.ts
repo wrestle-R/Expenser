@@ -68,3 +68,8 @@ export function addBankImportQueuedListener(
 export function isBankImportEnabled(): boolean;
 export function setBankImportEnabled(enabled: boolean): void;
 export function scanRecentSms(): Promise<number>;
+
+export function setRecentWidgetTransactions(titles: string[], amounts: string[]): void;
+export function pinRecentTransactionsWidget(): Promise<boolean>;
+export function downloadAndroidUpdate(version: string, code: number, digest: string): Promise<void>;
+export function installAndroidUpdate(code: number, digest: string): Promise<"permission" | "installer" | "missing">;

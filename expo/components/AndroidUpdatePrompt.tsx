@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { downloadAndroidUpdate, installAndroidUpdate } from "expenser-bank-notifications";
 import * as Application from "expo-application";
 import { useEffect, useRef, useState } from "react";
-import { AppState, Linking, Platform, Pressable, ScrollView, StyleSheet, Text } from "react-native";
+import { AppState, Platform, Pressable, ScrollView, StyleSheet, Text } from "react-native";
 
 import ConfirmModal from "./ConfirmModal";
 import ResponsiveModal from "./ResponsiveModal";
@@ -22,6 +23,8 @@ function AndroidUpdatePrompt() {
   const [release, setRelease] = useState<AndroidRelease | null>(null);
   const [showNotes, setShowNotes] = useState(false);
   const [opening, setOpening] = useState(false);
+  const [downloadedCode, setDownloadedCode] = useState(0);
+  const [permissionRequired, setPermissionRequired] = useState(false);
   const dismissedBuild = useRef(0);
   const installedCode = Number(Application.nativeBuildVersion);
 
@@ -91,15 +94,23 @@ function AndroidUpdatePrompt() {
     void AsyncStorage.setItem(SKIPPED_BUILD, String(release.versionCode)).catch(() => {});
   };
 
-  const download = async () => {
+  const ready = release?.versionCode === downloadedCode;
+  const update = async () => {
     if (!release || opening) return;
     setOpening(true);
     try {
-      await Linking.openURL(release.downloadUrl);
-      dismissedBuild.current = release.versionCode;
-      setRelease(null);
+      if (!ready) {
+        await downloadAndroidUpdate(release.version, release.versionCode, release.sha256);
+        setDownloadedCode(release.versionCode);
+      }
+      const result = await installAndroidUpdate(release.versionCode, release.sha256);
+      setPermissionRequired(result === "permission");
+      if (result === "missing") {
+        setDownloadedCode(0);
+        showToast("The APK is no longer on this device. Download it again.", "info");
+      }
     } catch {
-      showToast("Couldn't open the update download. Please try again.", "error");
+      showToast(ready ? "Couldn't open the Android installer. Please try again." : "Couldn't download the update. Please try again.", "error");
     } finally {
       setOpening(false);
     }
@@ -124,12 +135,16 @@ function AndroidUpdatePrompt() {
         <ConfirmModal
           visible
           title={`Expenser ${release.version} is available`}
-          message="Download the update, then open the APK to install it."
+          message={opening && !ready ? "Downloading the APK…" : ready
+            ? permissionRequired
+              ? "Allow installs from Expenser in Android settings, then return and tap Install."
+              : "Android will ask you to confirm the installation."
+            : "Download the APK here, then confirm installation in Android."}
           icon="cloud-download-outline"
-          confirmText="Update"
+          confirmText={ready ? "Install" : "Update"}
           cancelText="Skip"
           loading={opening}
-          onConfirm={() => { void download(); }}
+          onConfirm={() => { void update(); }}
           onClose={skip}
         />
       )}

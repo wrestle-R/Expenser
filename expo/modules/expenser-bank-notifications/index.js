@@ -89,3 +89,21 @@ export function addBankImportQueuedListener(listener) {
 export function isBankImportEnabled() { return getNativeModule()?.isBankImportEnabled?.() ?? true; }
 export function setBankImportEnabled(enabled) { getNativeModule()?.setBankImportEnabled?.(enabled); }
 export async function scanRecentSms() { return await getNativeModule()?.scanRecentSms?.() ?? 0; }
+
+export function setRecentWidgetTransactions(titles, amounts) {
+  getNativeModule()?.setRecentWidgetTransactions?.(titles, amounts);
+}
+
+export async function pinRecentTransactionsWidget() {
+  return await getNativeModule()?.pinRecentTransactionsWidget?.() ?? false;
+}
+
+export async function downloadAndroidUpdate(version, code, digest) {
+  const module = getNativeModule();
+  if (!module?.downloadAndroidUpdate) throw new Error("Android update download is unavailable");
+  await module.downloadAndroidUpdate(version, code, digest);
+}
+
+export async function installAndroidUpdate(code, digest) {
+  return await getNativeModule()?.installAndroidUpdate?.(code, digest) ?? "missing";
+}

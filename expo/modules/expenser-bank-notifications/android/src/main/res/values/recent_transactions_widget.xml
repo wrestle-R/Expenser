@@ -1,0 +1,7 @@
+<resources>
+  <string name="recent_transactions_widget_title">Recent transactions</string>
+  <string name="recent_transactions_widget_empty">Open Expenser to see activity.</string>
+  <color name="expenser_widget_fill">#FAFAFA</color>
+  <color name="expenser_widget_text">#18181B</color>
+  <color name="expenser_widget_subtext">#3F3F46</color>
+</resources>

@@ -1,4 +1,4 @@
-import { isBankImportEnabled, setBankImportEnabled, scanRecentSms } from "expenser-bank-notifications";
+import { isBankImportEnabled, pinRecentTransactionsWidget, setBankImportEnabled, scanRecentSms } from "expenser-bank-notifications";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   AppState,
@@ -56,19 +56,6 @@ const EMPTY_ACCESS_HEALTH: NativeNotificationAccessHealth = {
   queuedReviewEventCount: 0,
   legacyParsedCount: 0,
 };
-
-function formatLastRead(value: string | null) {
-  if (!value) {
-    return "never";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "unknown";
-  }
-
-  return date.toLocaleString();
-}
 
 export default function ProfileScreen() {
   const { isDark, toggleTheme } = useTheme();
@@ -548,143 +535,75 @@ export default function ProfileScreen() {
         ))}
       </View>
 
-      {/* Bank SMS Import */}
-      <View
-        style={{
-          backgroundColor: colors.card,
-          borderRadius: 16,
-          padding: 20,
-          marginBottom: 16,
-          borderWidth: 1,
-          borderColor: colors.border,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 18,
-            fontWeight: "600",
-            color: colors.text,
-            marginBottom: 12,
-          }}
-        >
-          Bank SMS Import
-        </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <Text style={{ color: colors.text }}>SMS import {importEnabled ? "on" : "paused"}</Text>
-          <Switch accessibilityLabel="SMS import" value={importEnabled} onValueChange={enabled => { setBankImportEnabled(enabled); setImportEnabled(enabled); }} />
+      {Platform.OS === "android" && (
+        <View style={{ backgroundColor: colors.card, borderRadius: 16, paddingHorizontal: 16, marginBottom: 16, borderWidth: 1, borderColor: colors.border }}>
+          <View style={{ minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <Text style={{ color: colors.text, fontSize: 16, fontWeight: "700", flex: 1 }}>Bank SMS import</Text>
+            <Switch accessibilityLabel="SMS import" value={importEnabled} onValueChange={enabled => {
+              setBankImportEnabled(enabled);
+              setImportEnabled(enabled);
+            }} />
+          </View>
+          {accessHealth.settingEnabled === false && (
+            <Text style={{ color: colors.textMuted, fontSize: 13 }}>Notification access is off.</Text>
+          )}
+          {bankImportStatus.queuedCandidates > 0 && (
+            <Text style={{ color: colors.textMuted, fontSize: 13 }}>
+              {bankImportStatus.queuedCandidates} waiting{bankImportStatus.retrying ? " · retrying" : ""}
+            </Text>
+          )}
+          <TouchableOpacity accessibilityRole="button" disabled={scanningSms || !importEnabled}
+            style={{ minHeight: 44, justifyContent: "center", opacity: importEnabled ? 1 : 0.5 }} onPress={async () => {
+              setScanningSms(true);
+              try {
+                const grants = await PermissionsAndroid.requestMultiple([
+                  PermissionsAndroid.PERMISSIONS.READ_SMS, PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
+                ]);
+                if (grants[PermissionsAndroid.PERMISSIONS.READ_SMS] !== PermissionsAndroid.RESULTS.GRANTED) {
+                  showToast("Allow SMS access to scan recent messages", "error");
+                  return;
+                }
+                const count = await scanRecentSms();
+                showToast(`${count} messages queued for checking`, "success");
+                await refreshSetup();
+              } catch {
+                showToast("Could not scan SMS. Please try again.", "error");
+              } finally {
+                setScanningSms(false);
+              }
+            }}>
+            <Text style={{ color: colors.primary, fontWeight: "600" }}>{scanningSms ? "Scanning…" : "Scan past 7 days"}</Text>
+          </TouchableOpacity>
+          {[
+            { label: "Review messages", count: bankReviewEvents.length, action: openNotificationReview },
+            { label: "Categorize transactions", count: pendingReviewTransactions.length, action: openPendingReview },
+            { label: "Notification access", count: 0, action: openBankNotificationAccessSettings },
+          ].filter(row => row.count > 0 || row.action === openNotificationReview || !accessHealth.settingEnabled && row.action === openBankNotificationAccessSettings)
+            .map(({ label, count, action }) => (
+              <TouchableOpacity key={label} accessibilityRole="button" onPress={action}
+                style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, borderColor: colors.border }}>
+                <Text style={{ color: colors.text, flex: 1, fontWeight: "500" }}>{label}</Text>
+                {count > 0 && <Text style={{ color: colors.textMuted }}>{count}</Text>}
+                <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))}
         </View>
-        <Text style={{ color: colors.textMuted, marginBottom: 12 }}>Add the Expenser widget or SMS import Quick Settings tile to pause or resume capture. Android schedules background work and may delay it while saving battery.</Text>
-        <TouchableOpacity accessibilityRole="button" disabled={scanningSms || !importEnabled} style={{ paddingVertical: 14, opacity: importEnabled ? 1 : 0.5 }} onPress={async () => {
-          if (Platform.OS !== "android") return;
-          setScanningSms(true);
+      )}
+
+      {Platform.OS === "android" && (
+        <TouchableOpacity accessibilityRole="button" onPress={async () => {
           try {
-            const grants = await PermissionsAndroid.requestMultiple([PermissionsAndroid.PERMISSIONS.READ_SMS, PermissionsAndroid.PERMISSIONS.RECEIVE_SMS]);
-            if (grants[PermissionsAndroid.PERMISSIONS.READ_SMS] !== PermissionsAndroid.RESULTS.GRANTED) { showToast("Allow SMS access to scan recent messages", "error"); return; }
-            const count = await scanRecentSms();
-            showToast(`${count} messages queued for checking`, "success");
-            await refreshSetup();
-          } catch { showToast("Could not scan SMS. Your saved data is unchanged.", "error"); }
-          finally { setScanningSms(false); }
-        }}>
-          <Text style={{ color: colors.primary }}>{scanningSms ? "Scanning messages…" : "Scan SMS from the past 7 days"}</Text>
+            if (await pinRecentTransactionsWidget()) return;
+          } catch {
+            // Launchers without pinning support can still add widgets manually.
+          }
+          showToast("Add Recent transactions from your launcher’s widget picker.", "info");
+        }} style={{ minHeight: 48, marginBottom: 12, flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Ionicons name="grid-outline" size={17} color={colors.primary} />
+          <Text style={{ color: colors.text, fontWeight: "600", flex: 1 }}>Add recent transactions widget</Text>
+          <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
         </TouchableOpacity>
-        <Text style={{ color: colors.textMuted }}>
-          Permission: {accessHealth.settingEnabled ? "enabled" : "needs attention"}
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Messages activity: {accessHealth.hasRecentReads ? "detected" : "waiting for a Messages notification"}
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Last notification read: {formatLastRead(accessHealth.lastReadAt)}
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Default Messages app: {accessHealth.defaultSmsPackage || "not detected"}
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Queue: {bankImportStatus.queuedCandidates} waiting
-          {bankImportStatus.retrying ? " · retrying" : ""}
-          {` · ${bankImportStatus.queuedNativeReviews} native review`}
-        </Text>
-        <Text style={{ color: colors.textMuted, marginTop: 6 }}>
-          Review inbox: {bankReviewEvents.length}
-          {` · ${pendingReviewTransactions.length} need a category`}
-        </Text>
-        <TouchableOpacity
-          style={{
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: colors.border,
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginTop: 14,
-          }}
-          onPress={openNotificationReview}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", flex: 1, marginRight: 12 }}>
-            <Ionicons name="mail-unread-outline" size={18} color={colors.primary} />
-            <View style={{ marginLeft: 10, flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: "600" }}>
-                Notification review inbox
-              </Text>
-              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
-                {bankReviewEvents.length > 0
-                  ? `${bankReviewEvents.length} ${bankReviewEvents.length === 1 ? "message" : "messages"} need a decision`
-                  : "No uncertain messages"}
-              </Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-        </TouchableOpacity>
-        <Text style={{ color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: 12 }}>
-          Notifications from the default SMS app and SMS received with your permission are inspected. Message bodies stay on this phone unless a transaction-like message needs parsing.
-        </Text>
-        <TouchableOpacity
-          style={{
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: colors.border,
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginTop: 14,
-          }}
-          onPress={openPendingReview}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", flex: 1, marginRight: 12 }}>
-            <Ionicons name="create-outline" size={18} color={colors.primary} />
-            <View style={{ marginLeft: 10, flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: "600" }}>
-                Transactions needing a category
-              </Text>
-              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
-                {pendingReviewTransactions.length > 0
-                  ? `${pendingReviewTransactions.length} ready to review`
-                  : "Open transactions"}
-              </Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={{
-            backgroundColor: colors.primary,
-            borderRadius: 12,
-            paddingVertical: 14,
-            alignItems: "center",
-            marginTop: 14,
-          }}
-          onPress={openBankNotificationAccessSettings}
-        >
-          <Text style={{ color: colors.primaryForeground, fontWeight: "600" }}>
-            Open Android Notification Access
-          </Text>
-        </TouchableOpacity>
-      </View>
+      )}
 
       {/* Sign Out */}
       <TouchableOpacity

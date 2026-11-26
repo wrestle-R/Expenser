@@ -7,8 +7,11 @@ import android.content.IntentFilter
 import android.os.Build
 import android.provider.Settings
 import expo.modules.kotlin.exception.Exceptions
+import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class ExpenserBankNotificationsModule : Module() {
   private val queueReceiver = object : BroadcastReceiver() {
@@ -21,6 +24,20 @@ class ExpenserBankNotificationsModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("ExpenserBankNotifications")
+
+    Function("setRecentWidgetTransactions") { titles: List<String>, amounts: List<String> ->
+      RecentTransactionsWidget.save(context, titles, amounts)
+    }
+    AsyncFunction("pinRecentTransactionsWidget") {
+      RecentTransactionsWidget.pin(context)
+    }
+    AsyncFunction("downloadAndroidUpdate") Coroutine { version: String, code: Int, digest: String ->
+      withContext(Dispatchers.IO) { AndroidAppUpdate.download(context, version, code, digest) }
+    }
+    AsyncFunction("installAndroidUpdate") { code: Int, digest: String ->
+      AndroidAppUpdate.install(context, code, digest)
+    }
+
     Events("onBankImportQueued")
 
     OnStartObserving {

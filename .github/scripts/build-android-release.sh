@@ -13,6 +13,7 @@ version=$(jq -er '.expo.version' "$root/expo/app.json")
 code=$(jq -er '.expo.android.versionCode' "$root/expo/app.json")
 project=$(jq -er '.expo.extra.eas.projectId' "$root/expo/app.json")
 tag="expenser-android-v$version"
+release_notes=$(git -C "$root" show "$sha:expo/android-release-notes.json")
 certificate=c17989c7c712754628b68736f56b66cb0a4e3f4a5849daa448817c0fd1716176
 
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$code" =~ ^[1-9][0-9]*$ ]]
@@ -20,7 +21,7 @@ certificate=c17989c7c712754628b68736f56b66cb0a4e3f4a5849daa448817c0fd1716176
 [[ -z "$(git -C "$root" status --porcelain)" ]]
 jq -e --arg version "$version" '
   .version == $version and (.notes | length > 0 and all(.[]; type == "string" and length > 0))
-' "$root/expo/android-release-notes.json" >/dev/null
+' <<< "$release_notes" >/dev/null
 cd "$root/expo"
 
 if [[ -z "$build_id" ]]; then
@@ -73,4 +74,4 @@ mv "$apk.part" "$apk"
 digest=$(sha256sum "$apk" | cut -d ' ' -f 1)
 jq -n --arg version "$version" --argjson code "$code" --arg sha "$sha" --arg digest "$digest" --arg id "$build_id" \
   '{version:$version, versionCode:$code, commit:$sha, sha256:$digest, easBuildId:$id}' > "$output/expenser-android.json"
-jq -r '.notes[] | "- " + .' "$root/expo/android-release-notes.json" > "$output/notes.md"
+jq -r '.notes[] | "- " + .' <<< "$release_notes" > "$output/notes.md"

@@ -15,6 +15,17 @@
   </queries>
 
   <application>
+    <provider
+      android:name=".ExpenserUpdateFileProvider"
+      android:authorities="${applicationId}.android-update"
+      android:exported="false"
+      android:grantUriPermissions="true">
+      <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/android_update_paths" />
+    </provider>
+    <receiver android:name=".RecentTransactionsWidget" android:label="@string/recent_transactions_widget_title" android:enabled="false" android:exported="false">
+      <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/recent_transactions_widget_info" />
+    </receiver>
     <receiver android:name=".BankSmsReceiver" android:exported="true" android:permission="android.permission.BROADCAST_SMS">
       <intent-filter><action android:name="android.provider.Telephony.SMS_RECEIVED" /></intent-filter>
     </receiver>

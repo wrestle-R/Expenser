@@ -12,4 +12,4 @@ bash .github/scripts/build-android-release.sh "$assets"
 bash .github/scripts/publish-android-release.sh "$assets"
 ```
 
-The publisher uploads the signed APK and update manifest to a draft before making it the latest release. Keep releases for other builds from taking over the latest-release pointer. The Android app reads `expenser-android.json` from that pointer when it enters the foreground. Android handles APK installation, including any permission prompt from the browser.
+The publisher uploads the signed APK and update manifest to a draft before making it the latest release. Keep releases for other builds from taking over the latest-release pointer. The Android app reads `expenser-android.json` from that pointer when it enters the foreground. Expenser downloads the APK and checks its published SHA-256 hash. Android may ask you to allow installs from Expenser before it opens the package installer.

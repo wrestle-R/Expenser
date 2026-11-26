@@ -64,3 +64,7 @@ export function clearQueuedBankReviewEvents(sourceKeys: string[]): void;
 export function addBankImportQueuedListener(
   listener: (event: { queued: boolean }) => void
 ): { remove: () => void };
+
+export function isBankImportEnabled(): boolean;
+export function setBankImportEnabled(enabled: boolean): void;
+export function scanRecentSms(): Promise<number>;

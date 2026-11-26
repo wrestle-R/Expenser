@@ -12,6 +12,7 @@ const source = ts.transpileModule(readFileSync(new URL("./bank-import-background
 function backgroundTask({ account = "owner", canUpload = true } = {}) {
   let run;
   const calls = [];
+  let cleared = false;
   const imports = {
     "react-native": { AppState: { currentState: "background" }, Platform: { OS: "android" } },
     "expo-background-task": { BackgroundTaskResult: { Success: "success", Failed: "failed" } },
@@ -21,9 +22,9 @@ function backgroundTask({ account = "owner", canUpload = true } = {}) {
       getQueuedRawBankImportCandidates: (owner, unattendedOnly) => {
         assert.equal(owner, "owner");
         assert.equal(unattendedOnly, true);
-        return [{ sourceKey: "test-alert" }];
+        return cleared ? [] : [{ sourceKey: "test-alert" }];
       },
-      clearQueuedRawBankImportCandidates: keys => calls.push(["clear", ...keys]),
+      clearQueuedRawBankImportCandidates: keys => { cleared = true; calls.push(["clear", ...keys]); },
     },
     "./api": { api: {
       parseBankNotification: async (candidate, allowCloud, token) => {

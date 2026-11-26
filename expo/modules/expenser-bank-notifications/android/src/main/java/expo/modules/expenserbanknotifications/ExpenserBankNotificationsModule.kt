@@ -37,6 +37,27 @@ class ExpenserBankNotificationsModule : Module() {
       runCatching { context.unregisterReceiver(queueReceiver) }
     }
 
+    AsyncFunction("scanRecentSms") {
+      if (!BankImportControls.enabled(context)) return@AsyncFunction 0
+      var queued = 0
+      val since = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+      context.contentResolver.query(android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+        arrayOf("_id", "address", "body", "date"), "date >= ?", arrayOf(since.toString()), "date ASC")?.use { cursor ->
+        while (cursor.moveToNext()) {
+          val message = cursor.getString(2) ?: continue
+          if (FinancialSmsCandidateDetector.isCandidate(message) && BankNotificationStore.enqueueRawCandidate(context, cursor.getString(1), message, "android.sms", cursor.getLong(3), "${cursor.getString(1)}|${cursor.getLong(3)}|$message")) queued++
+        }
+      }
+      if (queued > 0) {
+        BankImportWork.enqueue(context)
+        sendEvent("onBankImportQueued", mapOf("queued" to true))
+      }
+      queued
+    }
+
+    Function("isBankImportEnabled") { BankImportControls.enabled(context) }
+    Function("setBankImportEnabled") { enabled: Boolean -> BankImportControls.setEnabled(context, enabled) }
+
     Function("isNotificationAccessEnabled") {
       isNotificationAccessEnabled()
     }

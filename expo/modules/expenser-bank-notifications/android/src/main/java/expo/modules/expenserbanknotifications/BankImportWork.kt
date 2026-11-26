@@ -15,6 +15,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 class BankImportWork(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
   override suspend fun doWork(): Result {
+    if (!BankImportControls.enabled(applicationContext)) return Result.success()
     val scope = applicationContext.packageName
     val service = TaskServiceProviderHelper.getTaskServiceImpl(applicationContext) ?: return Result.success()
     if (!service.hasRegisteredTask(TASK, scope)) return Result.success()
@@ -25,7 +26,7 @@ class BankImportWork(context: Context, parameters: WorkerParameters) : Coroutine
     val completion = CompletableDeferred<Boolean>()
     consumer.executeTask { response -> completion.complete((response["result"] as? Number)?.toInt() == 1) }
     val success = withTimeoutOrNull(180_000) { completion.await() }
-    return if (success == true || runAttemptCount >= 2) Result.success() else Result.retry()
+    return if (success == true) Result.success() else Result.retry()
   }
 
   companion object {

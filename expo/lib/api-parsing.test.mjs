@@ -7,7 +7,7 @@ import { withRequestDeadline } from "./request-deadline.js";
 import * as localParser from "./local-bank-parser.js";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
-function harness(respond) {
+function harness(respond, errorStatus) {
   let calls = 0;
   const exports = {};
   const source = ts.transpileModule(readFileSync(new URL("./api.ts", import.meta.url), "utf8"), {
@@ -21,7 +21,7 @@ function harness(respond) {
       throw new Error(`Unexpected import ${name}`);
     },
     console, setTimeout, clearTimeout, AbortController, encodeURIComponent,
-    fetch: async (url) => { calls++; return { ok: true, json: async () => respond ? respond(url, calls) : ({ kind: "unparsed", parser: "groq", reason: "uncertain" }) }; },
+    fetch: async (url) => { calls++; return { ok: !errorStatus, status: errorStatus, statusText: "Unavailable", json: async () => respond ? respond(url, calls) : ({ kind: "unparsed", parser: "groq", reason: "uncertain" }) }; },
   });
   return { api: exports.api, calls: () => calls };
 }
@@ -56,4 +56,10 @@ test("unresolved formats call cloud once online and stay pending offline", async
   await assert.rejects(broken.api.getTransactions(), /repeated a history page/);
   const failed = harness((_url, call) => { if (call === 2) throw new Error('Interrupted download'); return { transactions: [{ _id: 'partial' }], nextCursor: 'page-two' }; });
   await assert.rejects(failed.api.getTransactions(), /Interrupted download/);
+});
+
+test("cloud service failures leave an unresolved alert for review while auth failures still require sign-in", async () => {
+ const unknown = { ...envelope, message: "UPI transaction INR 500 processed" };
+ assert.equal((await harness(() => ({ error: "parser unavailable" }), 500).api.parseBankNotification(unknown)).kind, "unparsed");
+ await assert.rejects(() => harness(() => ({ error: "sign in" }), 401).api.parseBankNotification(unknown), /sign in/);
 });

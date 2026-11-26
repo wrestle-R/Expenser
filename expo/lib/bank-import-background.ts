@@ -47,7 +47,9 @@ async function importBankAlerts() {
       failed = true;
     }
   }
-  return failed ? BackgroundTask.BackgroundTaskResult.Failed : BackgroundTask.BackgroundTaskResult.Success;
+  // Keep draining batches even when no more notifications arrive to wake us.
+  const remaining = getQueuedRawBankImportCandidates(profile.userId, true).length;
+  return failed || remaining > 0 ? BackgroundTask.BackgroundTaskResult.Failed : BackgroundTask.BackgroundTaskResult.Success;
 }
 
 if (Platform.OS === "android") {

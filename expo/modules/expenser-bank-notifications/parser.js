@@ -9,7 +9,9 @@ const ACCOUNT = /\b(?:SB\s+)?(?:A\s*\/?\s*c|Alc|Acc(?:t|ount)?)(?:\s*(?:no\.?|nu
 const CARD = /\bcard(?:\s*(?:no\.?|number|ending(?:\s+(?:in|with))?))?\s*[:.-]?\s*[*xX.-]*\s*(\d{4,16})\b/i;
 
 function normalizeBankMessage(value) {
-  return String(value ?? "").normalize("NFKC").replace(/[\u200B-\u200D\uFEFF]/g, "").replace(/\s+/g, " ").trim();
+  return String(value ?? "").normalize("NFKC").replace(/[\u200B-\u200D\uFEFF]/g, "").replace(/\s+/g, " ").trim()
+    .replace(/(?<![\w*])[0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?\s+INR\b/gi, match => "INR " + match.replace(/\s+INR$/i, ""))
+    .replace(/\b((?:debited|credited)\s+by)\s+([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)(?=\s+(?:on|trf|transfer|to|from)\b)/gi, "$1 INR $2");
 }
 
 function parseAmount(value, allowZero = false) {
@@ -128,6 +130,8 @@ function getNonTransactionReason(message) {
   const text = normalizeBankMessage(message);
   const rules = [
     ["payment_request", /requested money|money request|collect request|request(?:ed)? (?:you to )?pay|on approv(?:al|ing).{0,80}(?:will be|would be) debited|\b(?:payment|collect) request\b/i],
+    ["negated_movement", /\bnot\s+(?:been\s+)?(?:debited|credited|deducted|charged|transferred)\b/i],
+    ["future_credit", /\b(?:will|would|may|shall)\s+(?:be\s+)?(?:credited|refunded|reversed|transferred)\b/i],
     ["future_debit", /\b(?:scheduled|upcoming|due)\b.{0,60}\b(?:debit|payment|autopay)\b|\b(?:debit|payment|autopay)\b.{0,50}\b(?:scheduled|upcoming|due on)\b|\b(?:will|would|may|shall)\s+(?:be\s+)?debited\b|\b(?:on approval|on approving).{0,80}\bdebited\b/i],
     ["failed_payment", /(?:payment|transaction|txn).{0,40}(?:failed|unsuccessful|pending)|declined|(?:could not|unable to).{0,30}(?:debit|process)|if debited.{0,80}(?:refund|reversed)/i],
     ["refund_promise", /\brefund\b.{0,80}\b(?:will|shall|may)\s+(?:be\s+)?credit(?:ed)?\b|\b(?:will|shall|may)\s+(?:receive|get)\b.{0,60}\brefund\b/i],
@@ -148,7 +152,7 @@ function isFinancialNotificationLike(message) {
   const text = normalizeBankMessage(message);
   if (!text) return false;
   const hasMoney = new RegExp(MONEY, "i").test(text);
-  const hasTransactionLanguage = /\b(?:debited|credited|debit|credit|spent|paid|withdrawn|deposited|received|reversed|refunded|sent|transferred|purchase|payment|txn|transaction|UPI|IMPS|NEFT|RTGS)\b/i.test(text);
+  const hasTransactionLanguage = /\b(?:debited|credited|debit|credit|dr|cr|spent|paid|withdrawn|deposited|received|reversed|refunded|sent|transferred|purchase|payment|txn|transaction|UPI|IMPS|NEFT|RTGS)\b/i.test(text);
   const hasCompletedAutoPay = /\bautopay\b.{0,80}\b(?:successful(?:ly)?|executed|processed|completed)\b/i.test(text);
   return (
     (hasMoney && (hasTransactionLanguage || hasCompletedAutoPay)) ||
@@ -177,6 +181,8 @@ function extractAmount(text, directionIndex) {
 }
 
 function extractReference(text) {
+  const compact = /\bby\s+MB\s+(\d{6,})\b/i.exec(text);
+  if (compact) return compact[1];
   const match = /\b(?:ref(?:erence)?\.?\s*(?:no\.?|number|id)?|UTR|RRN|UPI\s+(?:ref(?:erence)?\.?|txn)\s*(?:no\.?|id)?|transaction\s+id|txn\s+id)\s*[:#-]?\s*([^,]*?)(?=\s+(?:Avl|Avail(?:able)?)\.?\s*Bal\b|\s+Bal\s*[:=]|\s+(?:on|at|to|from|for)\s+|,|$)/i.exec(text);
   const value = normalizeBankMessage(match?.[1] ?? "").replace(/[.\s-]+$/g, "");
   if (!value || /^(?:Avl|Avail(?:able)?)?\.?\s*Bal\b/i.test(value)) return null;
@@ -184,11 +190,12 @@ function extractReference(text) {
 }
 
 function extractPayee(text, referenceNumber) {
+  const compact = /\bFv\.\s*(.*?)(?=,|\s+Bal\b|$)/i.exec(text)?.[1];
   const direct = /\b(?:Fvg|To|At|towards)\s*:\s*(.*?)(?=\s+(?:Avl|Available)\s+Bal\b|,|$)/i.exec(text)?.[1];
   const towards = /\btowards\s+(.*?)(?=\s+(?:Avl|Available)\s+Bal\b|,|$)/i.exec(text)?.[1];
   const cardMerchant = /\b(?:debit(?:ed)?|spent)\b.*?\bon\s+(.*?)(?=\s+Bal(?:ance)?\s*[:=]|\s+(?:Not|If\s+not)\s+you|$)/i.exec(text)?.[1];
   const merchant = /\b(?:to|at|from)\s+(?!your\b|(?:a\/?c|account|card|INR|Rs)\b)(.*?)(?=\s+(?:on|using|via|with|ref(?:erence)?|UTR|RRN|UPI\s+ref|Avl|Avail(?:able)?|Bal(?:ance)?|Not you|If not)\b|[;,]|$)/i.exec(text)?.[1];
-  const fvg = normalizePayee(direct ?? towards ?? merchant ?? cardMerchant);
+  const fvg = normalizePayee(compact ?? direct ?? towards ?? merchant ?? cardMerchant);
   if (fvg) return fvg;
   if (referenceNumber && !/^\d{6,}$/.test(referenceNumber)) return normalizePayee(referenceNumber);
   return null;

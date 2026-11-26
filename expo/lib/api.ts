@@ -177,10 +177,19 @@ class ApiService {
     const local = parseNotificationLocally(envelope);
     if (local) return local;
     if (!allowCloud) throw new Error("Message saved for cloud parsing when online.");
-    return this.request<ParsedBankNotificationResponse>("/api/bank-imports/parse", {
-      method: "POST",
-      body: JSON.stringify(envelope),
-    }, accessToken);
+    try {
+      return await this.request<ParsedBankNotificationResponse>("/api/bank-imports/parse", {
+        method: "POST",
+        body: JSON.stringify(envelope),
+      }, accessToken);
+    } catch (error) {
+      // Persist the original message in review instead of retrying a broken
+      // provider forever. Authentication and connectivity still use retries.
+      if (error instanceof ApiError && error.status >= 500) {
+        return { kind: "unparsed", parser: "groq", reason: "Cloud parsing is unavailable. Review this saved message before adding it." };
+      }
+      throw error;
+    }
   }
 
   async deleteTransaction(id: string): Promise<void> {

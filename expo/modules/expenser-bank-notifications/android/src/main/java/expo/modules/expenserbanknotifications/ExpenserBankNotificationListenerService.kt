@@ -8,8 +8,19 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
 class ExpenserBankNotificationListenerService : NotificationListenerService() {
+  override fun onListenerConnected() {
+    super.onListenerConnected()
+    // Recover still-visible alerts after Android reconnects the listener.
+    runCatching { activeNotifications?.forEach { onNotificationPosted(it) } }
+  }
+
+  override fun onListenerDisconnected() {
+    super.onListenerDisconnected()
+    requestRebind(android.content.ComponentName(this, ExpenserBankNotificationListenerService::class.java))
+  }
+
   override fun onNotificationPosted(sbn: StatusBarNotification?) {
-    if (sbn == null) return
+    if (sbn == null || !BankImportControls.enabled(applicationContext)) return
 
     val defaultSmsPackage = DefaultSmsPackageResolver.resolve(applicationContext)
     if (!DefaultSmsSourceFilter.matches(defaultSmsPackage, sbn.packageName)) return

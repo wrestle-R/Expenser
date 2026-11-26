@@ -50,7 +50,7 @@ export async function openNotificationAccessSettings() {
 }
 
 export function getQueuedImports() {
-  return getNativeModule()?.getQueuedImports?.() ?? [];
+  return !isBankImportEnabled() ? [] : getNativeModule()?.getQueuedImports?.() ?? [];
 }
 
 export function clearQueuedImports(sourceKeys) {
@@ -62,7 +62,7 @@ export function setBankImportOwner(owner) {
 }
 
 export function getQueuedRawBankCandidates(owner = null, unattendedOnly = false) {
-  return getNativeModule()?.getQueuedRawBankCandidates?.(owner, unattendedOnly) ?? [];
+  return !isBankImportEnabled() ? [] : getNativeModule()?.getQueuedRawBankCandidates?.(owner, unattendedOnly) ?? [];
 }
 
 export function markRawBankCandidateForReview(sourceKey) {
@@ -85,3 +85,7 @@ export function addBankImportQueuedListener(listener) {
   const module = getNativeModule();
   return module?.addListener?.("onBankImportQueued", listener) ?? { remove() {} };
 }
+
+export function isBankImportEnabled() { return getNativeModule()?.isBankImportEnabled?.() ?? true; }
+export function setBankImportEnabled(enabled) { getNativeModule()?.setBankImportEnabled?.(enabled); }
+export async function scanRecentSms() { return await getNativeModule()?.scanRecentSms?.() ?? 0; }

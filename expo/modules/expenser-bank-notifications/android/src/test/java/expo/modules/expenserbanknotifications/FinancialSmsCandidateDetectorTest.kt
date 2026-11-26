@@ -9,6 +9,12 @@ class FinancialSmsCandidateDetectorTest {
   private val salaryCredit = "A/c *4280 Credited for Rs:10000.00 on 12-08-2026 21:12:41 by Mob Bk ref no 127818473031 Avl Bal Rs:10029.18.Never Share OTP/PIN/CVV-Union Bank of India"
 
   @Test
+  fun acceptsCompactBankDirections() {
+    assertTrue(FinancialSmsCandidateDetector.isCandidate("Union Bank A/c*1234 Dr Rs10.00 on 26-11-26 by MB 669600001234"))
+    assertTrue(FinancialSmsCandidateDetector.isCandidate("Rs10 Cr to A/c*1234. Never share OTP or PIN"))
+  }
+
+  @Test
   fun acceptsTransactionAndReviewCandidates() {
     assertTrue(FinancialSmsCandidateDetector.isCandidate("Rs.125.40 debited from A/c XX4455 via UPI"))
     assertTrue(FinancialSmsCandidateDetector.isCandidate("Lien of INR 500 marked on your account"))

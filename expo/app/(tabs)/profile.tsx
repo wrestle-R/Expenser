@@ -1,5 +1,9 @@
+import { isBankImportEnabled, setBankImportEnabled, scanRecentSms } from "expenser-bank-notifications";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
+  AppState,
+  PermissionsAndroid,
+  Platform,
   View,
   Text,
   ScrollView,
@@ -89,6 +93,8 @@ export default function ProfileScreen() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [importEnabled, setImportEnabled] = useState(isBankImportEnabled);
+  const [scanningSms, setScanningSms] = useState(false);
   const [accessHealth, setAccessHealth] = useState<NativeNotificationAccessHealth>(EMPTY_ACCESS_HEALTH);
   const pendingReviewTransactions = transactions.filter(
     (transaction) => transaction.reviewStatus === "needs_category"
@@ -103,11 +109,14 @@ export default function ProfileScreen() {
   }, [profile]);
 
   const refreshSetup = useCallback(async () => {
+    setImportEnabled(isBankImportEnabled());
     setAccessHealth(getBankNotificationAccessHealth());
   }, []);
 
   useEffect(() => {
     refreshSetup();
+    const subscription = AppState.addEventListener("change", state => { if (state === "active") void refreshSetup(); });
+    return () => subscription.remove();
   }, [refreshSetup]);
 
   const toggleMethod = (id: string) => {
@@ -560,6 +569,25 @@ export default function ProfileScreen() {
         >
           Bank SMS Import
         </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <Text style={{ color: colors.text }}>SMS import {importEnabled ? "on" : "paused"}</Text>
+          <Switch accessibilityLabel="SMS import" value={importEnabled} onValueChange={enabled => { setBankImportEnabled(enabled); setImportEnabled(enabled); }} />
+        </View>
+        <Text style={{ color: colors.textMuted, marginBottom: 12 }}>Add the Expenser widget or SMS import Quick Settings tile to pause or resume capture. Android schedules background work and may delay it while saving battery.</Text>
+        <TouchableOpacity accessibilityRole="button" disabled={scanningSms || !importEnabled} style={{ paddingVertical: 14, opacity: importEnabled ? 1 : 0.5 }} onPress={async () => {
+          if (Platform.OS !== "android") return;
+          setScanningSms(true);
+          try {
+            const grants = await PermissionsAndroid.requestMultiple([PermissionsAndroid.PERMISSIONS.READ_SMS, PermissionsAndroid.PERMISSIONS.RECEIVE_SMS]);
+            if (grants[PermissionsAndroid.PERMISSIONS.READ_SMS] !== PermissionsAndroid.RESULTS.GRANTED) { showToast("Allow SMS access to scan recent messages", "error"); return; }
+            const count = await scanRecentSms();
+            showToast(`${count} messages queued for checking`, "success");
+            await refreshSetup();
+          } catch { showToast("Could not scan SMS. Your saved data is unchanged.", "error"); }
+          finally { setScanningSms(false); }
+        }}>
+          <Text style={{ color: colors.primary }}>{scanningSms ? "Scanning messages…" : "Scan SMS from the past 7 days"}</Text>
+        </TouchableOpacity>
         <Text style={{ color: colors.textMuted }}>
           Permission: {accessHealth.settingEnabled ? "enabled" : "needs attention"}
         </Text>
@@ -611,7 +639,7 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </TouchableOpacity>
         <Text style={{ color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: 12 }}>
-          Only notifications from the phone&apos;s default SMS app are inspected. Message bodies stay on this phone unless a transaction-like message needs parsing.
+          Notifications from the default SMS app and SMS received with your permission are inspected. Message bodies stay on this phone unless a transaction-like message needs parsing.
         </Text>
         <TouchableOpacity
           style={{

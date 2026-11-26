@@ -82,3 +82,34 @@ test("mobile canonical keys match server SHA-256 including Unicode and repeated 
   assert.equal(hashNormalizedBankMessage(message), createHash("sha256").update(message).digest("hex"));
   assert.equal(parse(message).importSourceKey, parse(message.replace(/ /g, "  ")).importSourceKey);
 });
+
+test("Union Bank compact Dr and Cr alerts parse locally with their reference and payee", () => {
+  for (const [direction, type] of [["Dr", "expense"], ["Cr", "income"]]) {
+    const result = parseNotificationLocally({ message: `Union Bank of India A/c*1234 ${direction} Rs10.00 on 26-11-26 13:31 by MB 669600001234 Fv.Test Merchant, Bal Rs2281.34 Not U?Call 18002333`, sender: "VM-UNIONB-S", capturedAt: "2026-11-26T08:01:00Z" });
+    assert.equal(result?.kind, "transaction");
+    assert.equal(result.parsed.type, type);
+    assert.equal(result.parsed.amount, 10);
+    assert.equal(result.parsed.referenceNumber, "669600001234");
+    assert.equal(result.parsed.payee, "Test Merchant");
+    assert.equal(result.parsed.availableBalance, 2281.34);
+  }
+});
+
+test("generic completed bank wording, variable dates and named references", () => {
+  for (const [message, amount, type] of [
+    ["A/c *1234 Credited for Rs:1000.00 on 14-11-2026 13:11:07 by Mob Bk ref no TEST PERSON Avl Bal Rs:1241.34.Never Share OTP/PIN/CVV-Union Bank of India", 1000, "income"],
+    ["Your SBI A/c XX1234 debited by 125.00 on 26/11/26 transfer to merchant Ref No 123456789012",125,"expense"],
+    ["Account XX1234 debited 250.00 INR on 26-11-26. Ref No 123456789013",250,"expense"],
+    ["Account XX1234 credited 1,500 INR on 26-11-27. Ref No 123456789014",1500,"income"],
+  ]) {
+    const result = parse(message);
+    assert.equal(result?.kind, "transaction", message);
+    assert.equal(result.parsed.amount, amount);
+    assert.equal(result.parsed.type, type);
+  }
+});
+
+test("generic negated and future bank movements never book a transaction", () => {
+ for (const message of ["Your account XX1234 is not debited with Rs 500 due to rejection", "Rs 500 will be credited to account XX1234 tomorrow", "Rs 500 was not credited to account XX1234"])
+  assert.notEqual(parse(message)?.kind, "transaction", message);
+});

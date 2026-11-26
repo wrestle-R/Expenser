@@ -1,0 +1,8 @@
+{
+  "version": "1.4.0",
+  "notes": [
+    "Expenser now checks for Android updates when you open the app.",
+    "You can review what changed after installing an update.",
+    "Bank SMS import recovers recent messages and can be paused from the app, widget, or Quick Settings."
+  ]
+}

@@ -16,6 +16,7 @@ import { TabPreferencesProvider } from "../context/TabPreferencesContext";
 import { Colors } from "../constants/theme";
 import { syncService } from "../lib/sync";
 import { supabase, initialSession } from "../lib/supabase";
+import AndroidUpdates from "../components/AndroidUpdatePrompt";
 import BalanceReconciliationPrompt from "../components/BalanceReconciliationPrompt";
 
 const AUTH_LOAD_TIMEOUT_MS = 5000;
@@ -199,6 +200,7 @@ function InnerLayout() {
             />
               </Stack>
             </AuthGuard>
+            <AndroidUpdates />
           </ToastProvider>
         </TabPreferencesProvider>
       </UserProvider>

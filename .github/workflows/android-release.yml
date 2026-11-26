@@ -1,0 +1,72 @@
+name: Expenser Android release
+on:
+  push:
+    tags: ['expenser-android-v*']
+  workflow_dispatch:
+    inputs:
+      eas_build_id:
+        description: 'Optional EAS build ID for the selected release tag'
+        type: string
+
+concurrency:
+  group: expenser-android-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  credentials:
+    runs-on: ubuntu-24.04
+    outputs:
+      configured: ${{ steps.expo.outputs.configured }}
+    steps:
+      - id: expo
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [[ -n "$EXPO_TOKEN" ]]; then
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'The hosted release job needs a dedicated Expo credential. The local release scripts can publish with local authentication.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+  release:
+    needs: credentials
+    if: needs.credentials.outputs.configured == 'true' && github.ref_type == 'tag' && startsWith(github.ref_name, 'expenser-android-v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 175
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git merge-base --is-ancestor HEAD origin/main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: expo/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@138b5fb1cf087fdb4c5f3c621466fe304d0cf2e3 # v4.0.3
+      - run: sdkmanager 'build-tools;36.0.0'
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+        working-directory: expo
+      - run: npm test && ./node_modules/.bin/tsc --noEmit
+        working-directory: expo
+      - run: npm install --global eas-cli@18.4.0
+      - name: Build and verify the signed APK
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_BUILD_ID: ${{ inputs.eas_build_id }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          EXPO_NO_TELEMETRY: '1'
+        run: bash .github/scripts/build-android-release.sh "$RUNNER_TEMP/expenser-release" "$EAS_BUILD_ID"
+      - name: Publish the APK and update manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/publish-android-release.sh "$RUNNER_TEMP/expenser-release"

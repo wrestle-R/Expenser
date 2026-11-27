@@ -1,0 +1,78 @@
+name: Expenser signed Android candidate
+on:
+  push:
+    branches: ['android-release-candidate/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: expo/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@138b5fb1cf087fdb4c5f3c621466fe304d0cf2e3 # v4.0.3
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Test and assemble the APK
+        working-directory: expo
+        run: |
+          jq -er '.build.preview.env | to_entries[] | "\(.key)=\(.value | @sh)"' eas.json > "$RUNNER_TEMP/expenser-build.env"
+          set -a
+          source "$RUNNER_TEMP/expenser-build.env"
+          set +a
+          npm ci --no-audit --no-fund --ignore-scripts
+          npm test
+          ./node_modules/.bin/tsc --noEmit
+          ./node_modules/.bin/expo prebuild --platform android --no-install
+          cd android
+          ./gradlew --no-daemon --max-workers=2 :expenser-bank-notifications:testDebugUnitTest :app:assembleRelease
+      - name: Sign and verify the release candidate
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          umask 077
+          keystore=$(mktemp "$RUNNER_TEMP/expenser-signing.XXXXXXXX")
+          trap 'rm -f "$keystore"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          unset ANDROID_KEYSTORE_BASE64
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          assets="$RUNNER_TEMP/expenser-release"
+          mkdir "$assets"
+          apk="$assets/expenser-android.apk"
+          "$tools/apksigner" sign --ks "$keystore" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$apk" expo/android/app/build/outputs/apk/release/app-release.apk
+          signer=$("$tools/apksigner" verify --print-certs "$apk" | awk '/^Signer #[0-9]+ certificate SHA-256 digest:/ { print $NF }')
+          [[ "$signer" == c17989c7c712754628b68736f56b66cb0a4e3f4a5849daa448817c0fd1716176 ]]
+          version=$(jq -er '.expo.version' expo/app.json)
+          code=$(jq -er '.expo.android.versionCode' expo/app.json)
+          badging=$("$tools/aapt" dump badging "$apk")
+          [[ "$badging" == "package: name='com.rdp.expenser' versionCode='$code' versionName='$version'"* ]]
+          digest=$(sha256sum "$apk" | cut -d ' ' -f 1)
+          jq -n --arg version "$version" --argjson code "$code" --arg sha "$GITHUB_SHA" \
+            --arg digest "$digest" --arg run "$GITHUB_RUN_ID" \
+            '{version:$version, versionCode:$code, commit:$sha, sha256:$digest, githubRunId:$run}' > "$assets/expenser-android.json"
+          jq -er --arg version "$version" 'select(.version == $version) | .notes[] | "- " + .' \
+            expo/android-release-notes.json > "$assets/notes.md"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: expenser-android-candidate
+          path: ${{ runner.temp }}/expenser-release
+          if-no-files-found: error
+          retention-days: 3

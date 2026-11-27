@@ -1,4 +1,4 @@
-name: Expenser signed Android candidate
+name: Expenser Android candidate
 on:
   push:
     branches: ['android-release-candidate/**']
@@ -11,6 +11,8 @@ jobs:
     timeout-minutes: 45
     env:
       EXPO_NO_TELEMETRY: '1'
+      EXPECTED_SIGNER: c17989c7c712754628b68736f56b66cb0a4e3f4a5849daa448817c0fd1716176
+      BUILT_APK: expo/android/app/build/outputs/apk/release/app-release.apk
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,40 +41,86 @@ jobs:
           ./node_modules/.bin/expo prebuild --platform android --no-install
           cd android
           ./gradlew --no-daemon --max-workers=2 :expenser-bank-notifications:testDebugUnitTest :app:assembleRelease
+      - name: Verify the APK package and version
+        run: |
+          version=$(jq -er '.expo.version' expo/app.json)
+          code=$(jq -er '.expo.android.versionCode' expo/app.json)
+          badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$BUILT_APK")
+          if [[ "$badging" != "package: name='com.rdp.expenser' versionCode='$code' versionName='$version'"* ]]; then
+            echo '::error::The APK package or version does not match Expenser app.json.'
+            exit 1
+          fi
       - name: Sign and verify the release candidate
+        id: sign
+        shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          local_signing() {
+            echo "::warning::$1"
+            printf '%s\n' "$1 Download expenser-android-for-local-signing and sign it with the production key before publishing." >> "$GITHUB_STEP_SUMMARY"
+            install -D "$BUILT_APK" "$RUNNER_TEMP/expenser-local-signing/expenser-android-build.apk"
+            echo 'signed=false' >> "$GITHUB_OUTPUT"
+          }
+
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" || -z "$ANDROID_KEYSTORE_PASSWORD" || -z "$ANDROID_KEY_ALIAS" || -z "$ANDROID_KEY_PASSWORD" ]]; then
+            local_signing 'Production signing credentials are unavailable in GitHub Actions.'
+            exit 0
+          fi
+
           umask 077
           keystore=$(mktemp "$RUNNER_TEMP/expenser-signing.XXXXXXXX")
           trap 'rm -f "$keystore"' EXIT
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          if ! printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"; then
+            local_signing 'The configured Android keystore is not valid base64.'
+            exit 0
+          fi
           unset ANDROID_KEYSTORE_BASE64
+          if ! fingerprint=$(keytool -exportcert -keystore "$keystore" -storepass:env ANDROID_KEYSTORE_PASSWORD \
+            -alias "$ANDROID_KEY_ALIAS" 2>/dev/null | sha256sum); then
+            local_signing 'The configured Android keystore or alias could not be opened.'
+            exit 0
+          fi
+          if [[ "${fingerprint%% *}" != "$EXPECTED_SIGNER" ]]; then
+            local_signing 'The configured Android key does not match the production signing certificate.'
+            exit 0
+          fi
+
           tools="$ANDROID_HOME/build-tools/36.0.0"
           assets="$RUNNER_TEMP/expenser-release"
           mkdir "$assets"
           apk="$assets/expenser-android.apk"
           "$tools/apksigner" sign --ks "$keystore" --ks-key-alias "$ANDROID_KEY_ALIAS" \
             --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
-            --out "$apk" expo/android/app/build/outputs/apk/release/app-release.apk
+            --v4-signing-enabled false --out "$apk" "$BUILT_APK"
           signer=$("$tools/apksigner" verify --print-certs "$apk" | awk '/^Signer #[0-9]+ certificate SHA-256 digest:/ { print $NF }')
-          [[ "$signer" == c17989c7c712754628b68736f56b66cb0a4e3f4a5849daa448817c0fd1716176 ]]
+          if [[ "$signer" != "$EXPECTED_SIGNER" ]]; then
+            echo '::error::The signed APK does not match the production signing certificate.'
+            exit 1
+          fi
           version=$(jq -er '.expo.version' expo/app.json)
           code=$(jq -er '.expo.android.versionCode' expo/app.json)
-          badging=$("$tools/aapt" dump badging "$apk")
-          [[ "$badging" == "package: name='com.rdp.expenser' versionCode='$code' versionName='$version'"* ]]
           digest=$(sha256sum "$apk" | cut -d ' ' -f 1)
           jq -n --arg version "$version" --argjson code "$code" --arg sha "$GITHUB_SHA" \
             --arg digest "$digest" --arg run "$GITHUB_RUN_ID" \
             '{version:$version, versionCode:$code, commit:$sha, sha256:$digest, githubRunId:$run}' > "$assets/expenser-android.json"
           jq -er --arg version "$version" 'select(.version == $version) | .notes[] | "- " + .' \
             expo/android-release-notes.json > "$assets/notes.md"
+          echo 'signed=true' >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
+        if: steps.sign.outputs.signed == 'true'
         with:
           name: expenser-android-candidate
           path: ${{ runner.temp }}/expenser-release
+          if-no-files-found: error
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        if: steps.sign.outputs.signed == 'false'
+        with:
+          name: expenser-android-for-local-signing
+          path: ${{ runner.temp }}/expenser-local-signing/expenser-android-build.apk
           if-no-files-found: error
           retention-days: 3

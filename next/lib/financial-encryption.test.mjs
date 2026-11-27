@@ -94,10 +94,17 @@ test("backfills a disposable ledger, survives re-runs, and refreshes changed cip
         (${owner}, 'income', 100, 'bank', '2026-11-27', '2026-11-28')
     `;
     await db`insert into public.user_categories (user_id, name, type) values (${owner}, 'Fitness', 'expense')`;
+    const [legacyAlert] = await db`
+      insert into public.balance_reconciliation_alerts
+        (user_id, transaction_id, payment_method, expected_balance, bank_balance, difference, status, source)
+      values (${owner}, ${entry.id}, 'bank', 25, 42, 17, 'kept', 'legacy_alert')
+      returning id
+    `;
     const counts = await backfillFinancialEncryption(db, cipher, { pageSize: 1 });
     assert.equal(counts.transactions, 5);
     assert.equal(counts.balances, 3);
     assert.equal(counts.user_categories, 1);
+    assert.equal(counts.balance_reconciliation_alerts, 1);
     assert.deepEqual(await verifyFinancialEncryptionBackfill(db, cipher, { pageSize: 1 }), counts);
     const legacy = Object.fromEntries(
       (await db`select payment_method, current_balance from balances where user_id = ${owner}`)
@@ -128,6 +135,13 @@ test("backfills a disposable ledger, survives re-runs, and refreshes changed cip
     assert.deepEqual(await verifyFinancialEncryptionBackfill(db, cipher), counts);
 
     await cutOverEncryptedStorage(db, cipher);
+    const [savedAlert] = await db`
+      select envelope from expenser_private.financial_payloads
+      where record_kind = 'balance_reconciliation_alerts' and owner_id = ${owner} and record_id = ${legacyAlert.id}
+    `;
+    assert.deepEqual(cipher.open({ kind: "balance_reconciliation_alerts", ownerId: owner, recordId: legacyAlert.id }, savedAlert.envelope), {
+      bank_balance: 42, expected_balance: 25, difference: 17, source: "legacy_alert",
+    });
     await assert.rejects(cutOverEncryptedStorage(db, cipher), /already applied/);
     const [neutral] = await db`select amount, description, category, import_source_key from transactions where id = ${entry.id}`;
     assert.deepEqual({ ...neutral }, { amount: 0, description: "", category: "General", import_source_key: null });

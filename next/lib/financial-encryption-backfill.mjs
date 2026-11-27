@@ -15,12 +15,12 @@ async function walkFinancialRecords(sql, pageSize, handleBatch) {
     do {
       rows = await sql.begin(async (tx) => {
         const batch = await tx`
-          select user_id::text as owner_id, ${tx(key)}::text as record_id, to_jsonb(source) as financial_data
-          from public.${tx(kind)} source
+          select user_id::text as owner_id, ${tx(key)}::text as record_id, to_jsonb(financial_row.*) as financial_data
+          from public.${tx(kind)} financial_row
           where (user_id, ${tx(key)}::text) > (${cursor.owner_id}::uuid, ${cursor.record_id}::text)
           order by user_id, ${tx(key)}::text
           limit ${pageSize}
-          for share of source
+          for share of financial_row
         `;
         if (batch.length === 0) return batch;
 

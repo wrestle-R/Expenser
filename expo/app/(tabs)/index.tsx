@@ -211,12 +211,7 @@ export default function HomeScreen() {
       </View>
 
       {/* Balance Cards */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ marginBottom: 24 }}
-        contentContainerStyle={{ gap: 12 }}
-      >
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, marginBottom: 24 }}>
         {profile?.paymentMethods?.map((method) => {
           const config = paymentMethodConfig[method as keyof typeof paymentMethodConfig];
           const balance = getBalance(method as "bank" | "cash" | "splitwise");
@@ -230,7 +225,8 @@ export default function HomeScreen() {
                 backgroundColor: colors.card,
                 borderRadius: 12,
                 padding: 16,
-                minWidth: 140,
+                flexGrow: 1,
+                flexBasis: 140,
                 borderWidth: 1,
                 borderColor: colors.border,
               }}
@@ -264,6 +260,7 @@ export default function HomeScreen() {
                 <Text
                   style={{
                     marginLeft: 8,
+                    flexShrink: 1,
                     fontWeight: "500",
                     color: colors.text,
                   }}
@@ -277,7 +274,7 @@ export default function HomeScreen() {
             </View>
           );
         })}
-      </ScrollView>
+      </View>
 
       {/* Quick Actions - Workflows */}
       {workflows.length > 0 && (

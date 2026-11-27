@@ -2,9 +2,12 @@
   android:minWidth="210dp"
   android:minHeight="156dp"
   android:minResizeWidth="185dp"
+  android:minResizeHeight="96dp"
   android:targetCellWidth="3"
   android:targetCellHeight="3"
+  android:previewImage="@drawable/recent_transactions_widget_preview_image"
+  android:previewLayout="@layout/recent_transactions_widget_preview"
   android:initialLayout="@layout/recent_transactions_widget"
-  android:resizeMode="horizontal"
+  android:resizeMode="horizontal|vertical"
   android:updatePeriodMillis="0"
   android:widgetCategory="home_screen" />

@@ -1,6 +1,9 @@
 <resources>
-  <string name="recent_transactions_widget_title">Recent transactions</string>
-  <string name="recent_transactions_widget_empty">Open Expenser to see activity.</string>
+  <dimen name="transaction_widget_row_height">42dp</dimen>
+  <dimen name="transaction_widget_header_height">24dp</dimen>
+  <dimen name="transaction_widget_vertical_padding">8dp</dimen>
+  <string name="recent_transactions_widget_title">Transactions</string>
+  <string name="recent_transactions_widget_empty">No transactions to show.</string>
   <color name="expenser_widget_fill">#FAFAFA</color>
   <color name="expenser_widget_text">#18181B</color>
   <color name="expenser_widget_subtext">#3F3F46</color>

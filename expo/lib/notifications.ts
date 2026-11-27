@@ -86,13 +86,13 @@ class NotificationService {
     this.initialized = true;
   }
 
-  notifyBankReview(sourceKey: string, kind: "transaction" | "alert") {
-    const result = this.notificationQueue.then(() => this.sendBankReview(sourceKey, kind));
+  notifyBankReview(sourceKey: string, kind: "transaction" | "alert", direction?: "income" | "expense") {
+    const result = this.notificationQueue.then(() => this.sendBankReview(sourceKey, kind, direction));
     this.notificationQueue = result.catch(() => {});
     return result;
   }
 
-  private async sendBankReview(sourceKey: string, kind: "transaction" | "alert") {
+  private async sendBankReview(sourceKey: string, kind: "transaction" | "alert", direction?: "income" | "expense") {
     const Notifications = await this.getNotifications();
     if (!Notifications || (await Notifications.getPermissionsAsync()).status !== "granted") return;
 
@@ -100,9 +100,14 @@ class NotificationService {
     const keys: string[] = rawKeys ? JSON.parse(rawKeys) : [];
     if (keys.includes(sourceKey)) return;
 
+    const title = kind === "alert" ? "Bank alert needs review"
+      : direction === "income" ? "Bank credit added"
+      : direction === "expense" ? "Bank debit added"
+      : "Bank transaction added";
     await Notifications.scheduleNotificationAsync({
+      identifier: sourceKey,
       content: {
-        title: kind === "transaction" ? "Bank transaction added" : "Bank alert needs review",
+        title,
         body: kind === "transaction" ? "Tap to review and choose a category." : "Tap to check the alert and add a transaction.",
         data: { type: "bank-review", kind },
       },

@@ -24,21 +24,25 @@ class ExpenserBankNotificationsModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("ExpenserBankNotifications")
+    Events("onBankImportQueued", "onAndroidUpdateProgress")
 
-    Function("setRecentWidgetTransactions") { titles: List<String>, amounts: List<String> ->
-      RecentTransactionsWidget.save(context, titles, amounts)
+    Function("setTransactionWidgetHistory") { titles: List<String>, amounts: List<String>, details: List<String>, owner: String? ->
+      RecentTransactionsWidget.save(context, titles, amounts, details, owner)
     }
+    Function("hasRecentTransactionsWidget") { RecentTransactionsWidget.isPinned(context) }
     AsyncFunction("pinRecentTransactionsWidget") {
       RecentTransactionsWidget.pin(context)
     }
     AsyncFunction("downloadAndroidUpdate") Coroutine { version: String, code: Int, digest: String ->
-      withContext(Dispatchers.IO) { AndroidAppUpdate.download(context, version, code, digest) }
+      withContext(Dispatchers.IO) {
+        AndroidAppUpdate.download(context, version, code, digest) { received, total ->
+          sendEvent("onAndroidUpdateProgress", mapOf("versionCode" to code, "received" to received, "total" to total))
+        }
+      }
     }
     AsyncFunction("installAndroidUpdate") { code: Int, digest: String ->
       AndroidAppUpdate.install(context, code, digest)
     }
-
-    Events("onBankImportQueued")
 
     OnStartObserving {
       val filter = IntentFilter(BANK_IMPORT_QUEUED_ACTION)
@@ -153,6 +157,7 @@ class ExpenserBankNotificationsModule : Module() {
 
     Function("setBankImportOwner") { owner: String? ->
       BankNotificationStore.setOwner(context, owner)
+      RecentTransactionsWidget.clearForOwnerChange(context, owner)
     }
 
     Function("getQueuedRawBankCandidates") { owner: String?, unattendedOnly: Boolean ->

@@ -38,3 +38,14 @@ test("a late result from the previous account or foreground visit cannot open a 
   });
   assert.deepEqual(current, ["current"]);
 });
+
+test("reopening Expenser does not present an already shown alert again", async () => {
+  const cycle = createBalancePromptCycle();
+  const shown = [];
+  const present = (alert) => { shown.push(alert._id); return true; };
+  await cycle.check(async () => ({ _id: "latest" }), present);
+  cycle.reset();
+  await cycle.check(async () => ({ _id: "latest" }), present);
+  await cycle.check(async () => ({ _id: "newer" }), present);
+  assert.deepEqual(shown, ["latest", "newer"]);
+});

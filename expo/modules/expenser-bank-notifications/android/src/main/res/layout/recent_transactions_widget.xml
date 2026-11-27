@@ -5,10 +5,11 @@
   android:background="@drawable/recent_widget_background"
   android:orientation="vertical"
   android:paddingHorizontal="12dp"
-  android:paddingVertical="8dp">
+  android:paddingVertical="@dimen/transaction_widget_vertical_padding">
   <TextView
+    android:id="@+id/recent_widget_title"
     android:layout_width="match_parent"
-    android:layout_height="24dp"
+    android:layout_height="@dimen/transaction_widget_header_height"
     android:gravity="center_vertical"
     android:text="@string/recent_transactions_widget_title"
     android:textColor="@color/expenser_widget_text"

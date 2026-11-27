@@ -90,8 +90,17 @@ export function isBankImportEnabled() { return getNativeModule()?.isBankImportEn
 export function setBankImportEnabled(enabled) { getNativeModule()?.setBankImportEnabled?.(enabled); }
 export async function scanRecentSms() { return await getNativeModule()?.scanRecentSms?.() ?? 0; }
 
-export function setRecentWidgetTransactions(titles, amounts) {
-  getNativeModule()?.setRecentWidgetTransactions?.(titles, amounts);
+export function setRecentWidgetTransactions(titles, amounts, details, owner) {
+  const module = getNativeModule();
+  if (module?.setTransactionWidgetHistory) {
+    module.setTransactionWidgetHistory(titles, amounts, details, owner ?? null);
+  } else {
+    module?.setRecentWidgetTransactions?.(titles.slice(0, 5), amounts.slice(0, 5));
+  }
+}
+
+export function hasRecentTransactionsWidget() {
+  return getNativeModule()?.hasRecentTransactionsWidget?.() ?? false;
 }
 
 export async function pinRecentTransactionsWidget() {
@@ -106,4 +115,8 @@ export async function downloadAndroidUpdate(version, code, digest) {
 
 export async function installAndroidUpdate(code, digest) {
   return await getNativeModule()?.installAndroidUpdate?.(code, digest) ?? "missing";
+}
+
+export function addAndroidUpdateProgressListener(listener) {
+  return getNativeModule()?.addListener?.("onAndroidUpdateProgress", listener) ?? { remove() {} };
 }

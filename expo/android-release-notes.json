@@ -1,8 +1,8 @@
 {
-  "version": "1.5.0",
+  "version": "1.5.1",
   "notes": [
-    "See your five latest transactions on an Android home-screen widget.",
-    "Download APK updates inside Expenser, then confirm installation in Android.",
-    "Profile has shorter Bank SMS controls, and successful sync stays out of the way."
+    "Hosted financial data is encrypted.",
+    "The Transactions widget shows the newest rows that fit and refreshes in the background.",
+    "Bank balance prompts use the latest alert, and Add Transaction includes your saved categories."
   ]
 }

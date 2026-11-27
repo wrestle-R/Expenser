@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { financialRead, financialWrite, hydrate, type Cipher } from "@/lib/financial-db";
+import { readEncryptedBalances, rebaseEncryptedBalance, refreshEncryptedBalances } from "@/lib/encrypted-transaction-storage.mjs";
 import {
   getBalanceReconciliationStats,
   sortBalanceReconciliationHistory,
@@ -9,10 +11,31 @@ import {
   mapBalanceReconciliationAlertRow,
   mapUserRow,
   sql,
-  type BalanceRow,
+  type TransactionRow,
   type BalanceReconciliationAlertRow,
   type UserRow,
 } from "@/lib/db";
+
+
+async function loadLatestBalanceAlert(db: typeof sql, key: Cipher, userId: string) {
+  const metadata = await db<(TransactionRow & { transaction_date: string })[]>`
+    select entry.*, entry.date::text as transaction_date
+    from transactions entry
+    join balances bank on bank.user_id = entry.user_id and bank.payment_method = 'bank'
+    where entry.user_id = ${userId} and entry.deleted_at is null and entry.date > bank.opening_at
+    order by entry.date desc, entry.created_at desc, entry.id desc
+  `;
+  const latest = (await hydrate(db, key, "transactions", userId, metadata))
+    .find((row) => row.payment_method === "bank" && row.imported_bank_balance != null);
+  if (!latest) return undefined;
+  const rows = await db<BalanceReconciliationAlertRow[]>`
+    select * from balance_reconciliation_alerts
+    where user_id = ${userId} and transaction_id = ${latest.id} and status = 'pending'
+    order by created_at desc, id desc limit 1
+  `;
+  const [alert] = await hydrate(db, key, "balance_reconciliation_alerts", userId, rows);
+  return alert ? { ...alert, transaction_date: latest.transaction_date } : undefined;
+}
 
 export async function GET(req: Request) {
   try {
@@ -24,43 +47,20 @@ export async function GET(req: Request) {
     const includeHistory =
       new URL(req.url).searchParams.get("includeHistory") === "true";
 
-    // One decision for the latest transaction covers the pending batch, even
-    // when older SMS messages were imported after newer ones.
-    const alerts = await sql<BalanceReconciliationAlertRow[]>`
-      select alerts.*
-      from balance_reconciliation_alerts alerts
-      join transactions on transactions.id = alerts.transaction_id
-      where alerts.user_id = ${userId}
-        and transactions.user_id = ${userId}
-        and transactions.deleted_at is null
-        and alerts.status = 'pending'
-      order by transactions.date desc, alerts.created_at desc, alerts.id desc
-      limit 1
-    `;
-
-    const mappedAlerts = alerts.map(mapBalanceReconciliationAlertRow);
-    if (!includeHistory) {
-      return NextResponse.json({ alerts: mappedAlerts });
-    }
-
-    const historyRows = await sql<BalanceReconciliationAlertRow[]>`
-      select *
-      from balance_reconciliation_alerts
-      where user_id = ${userId}
-      order by created_at desc
-    `;
-    const fullHistory = sortBalanceReconciliationHistory(
-      historyRows.map(mapBalanceReconciliationAlertRow)
-    );
-    const history = fullHistory.slice(0, 20);
-
-    return NextResponse.json({
-      alerts: mappedAlerts,
-      history,
-      stats: getBalanceReconciliationStats(fullHistory),
+    return await financialRead(async (db, key) => {
+      const alert = await loadLatestBalanceAlert(db, key, userId);
+      const alerts = alert ? [mapBalanceReconciliationAlertRow(alert)] : [];
+      if (!includeHistory) return NextResponse.json({ alerts });
+      const rows = await db<BalanceReconciliationAlertRow[]>`
+        select * from balance_reconciliation_alerts where user_id = ${userId} order by created_at desc
+      `;
+      const fullHistory = sortBalanceReconciliationHistory(
+        (await hydrate(db, key, "balance_reconciliation_alerts", userId, rows)).map(mapBalanceReconciliationAlertRow),
+      );
+      return NextResponse.json({ alerts, history: fullHistory.slice(0, 20), stats: getBalanceReconciliationStats(fullHistory) });
     });
   } catch (error) {
-    console.error("[API /bank-imports/reconcile GET] Error:", error);
+    console.error("[API /bank-imports/reconcile GET] Error:", error instanceof Error ? error.name : "UnknownError");
     return NextResponse.json({ error: "Failed to load balance alerts" }, { status: 500 });
   }
 }
@@ -83,30 +83,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Action must be apply or keep" }, { status: 400 });
     }
 
-    const result = await sql.begin(async (tx) => {
-      const trx = tx as unknown as typeof sql;
-      // Imports lock this same balance row before recording a mismatch. Hold
-      // it until the choice and all covered alerts are committed together.
-      await trx`select ensure_user_balances(${userId})`;
-      await trx`
-        select user_id from balances
-        where user_id = ${userId} and payment_method = 'bank'
-        for update
-      `;
-      const alerts = (await trx`
-        select alerts.*, transactions.date::text as transaction_date
-        from balance_reconciliation_alerts alerts
-        join transactions on transactions.id = alerts.transaction_id
-        where alerts.user_id = ${userId}
-          and transactions.user_id = ${userId}
-          and transactions.deleted_at is null
-          and alerts.status = 'pending'
-        order by transactions.date desc, alerts.created_at desc, alerts.id desc
-        limit 1
-        for update of alerts
-      `) as (BalanceReconciliationAlertRow & { transaction_date: string })[];
-
-      const alert = alerts[0];
+    const result = await financialWrite(userId, async (trx, key) => {
+      const alert = await loadLatestBalanceAlert(trx, key, userId);
       if (!alert || alert.id !== id) {
         return null;
       }
@@ -118,28 +96,11 @@ export async function POST(req: Request) {
         },
         action
       );
-      await trx`
-        insert into balances (
-          user_id, payment_method, opening_balance, opening_at, current_balance
-        ) values (
-          ${userId}, 'bank', ${openingBalance},
-          ${alert.transaction_date}::text::timestamptz, ${openingBalance}
-        )
-        on conflict (user_id, payment_method) do update set
-          opening_balance = excluded.opening_balance,
-          opening_at = excluded.opening_at,
-          current_balance = excluded.current_balance
-      `;
-      await trx`select recalculate_user_balances(${userId})`;
-      const users = (await trx`
-        select * from users where user_id = ${userId} limit 1
-      `) as UserRow[];
-      const balances = (await trx`
-        select * from balances where user_id = ${userId}
-        order by payment_method
-      `) as BalanceRow[];
-      const profile = users[0] ? mapUserRow(users[0], balances) : null;
-
+      await rebaseEncryptedBalance(trx, key, userId, "bank", openingBalance, alert.transaction_date);
+      await refreshEncryptedBalances(trx, key, userId);
+      const rows = await trx<UserRow[]>`select * from users where user_id = ${userId}`;
+      const [user] = await hydrate(trx, key, "users", userId, rows);
+      const profile = user ? mapUserRow(user, await readEncryptedBalances(trx, key, userId)) : null;
       const updatedAlerts = (await trx`
         update balance_reconciliation_alerts
         set
@@ -152,7 +113,9 @@ export async function POST(req: Request) {
       `) as BalanceReconciliationAlertRow[];
 
       return {
-        alert: updatedAlerts.find((row) => row.id === id)!,
+        alert: { ...alert, ...updatedAlerts.find((row) => row.id === id),
+          expected_balance: alert.expected_balance, bank_balance: alert.bank_balance,
+          difference: alert.difference, source: alert.source },
         profile,
       };
     });
@@ -166,7 +129,7 @@ export async function POST(req: Request) {
       profile: result.profile,
     });
   } catch (error) {
-    console.error("[API /bank-imports/reconcile POST] Error:", error);
+    console.error("[API /bank-imports/reconcile POST] Error:", error instanceof Error ? error.name : "UnknownError");
     return NextResponse.json({ error: "Failed to resolve balance alert" }, { status: 500 });
   }
 }

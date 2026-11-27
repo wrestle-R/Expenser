@@ -43,6 +43,13 @@ function getApiErrorResponse(error, fallbackMessage) {
     };
   }
 
+  if (typeof error?.code === "string" && /^[0-9A-Z]{5}$/.test(error.code)) {
+    return { body: { error: fallbackMessage }, status: 500 };
+  }
+  if (/^(Financial (record|encryption|storage)|Encrypted financial|Invalid encryption|Unsupported financial|Balance account unavailable)/.test(error?.message ?? "")) {
+    return { body: { error: "Financial storage temporarily unavailable" }, status: 503 };
+  }
+
   if (error instanceof Error) {
     return {
       body: { error: error.message },

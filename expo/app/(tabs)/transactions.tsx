@@ -22,11 +22,11 @@ import {
   Colors,
   paymentMethodConfig,
 } from "../../constants/theme";
-import { api } from "../../lib/api";
 import { formatCurrency, formatDate } from "../../lib/utils";
-import { ITransaction, IUserCategory, PaymentMethod, TransactionType, UpdateTransactionPayload } from "../../lib/types";
+import { ITransaction, PaymentMethod, TransactionType, UpdateTransactionPayload } from "../../lib/types";
 import ConfirmModal from "../../components/ConfirmModal";
 import ResponsiveModal from "../../components/ResponsiveModal";
+import TransactionCategoryPicker from "../../components/TransactionCategoryPicker";
 import {
   getPendingReviewUpdate,
   getTransactionDisplayFields,
@@ -44,29 +44,8 @@ const paymentMethods: { id: PaymentMethod; label: string; icon: keyof typeof Ion
   { id: "splitwise", label: "Splitwise", icon: "swap-horizontal" },
 ];
 
-const EXPENSE_CATEGORIES = [
-  { id: "food", label: "Food", icon: "restaurant-outline" as const, color: "#f97316" },
-  { id: "transport", label: "Transport", icon: "car-outline" as const, color: "#3b82f6" },
-  { id: "shopping", label: "Shopping", icon: "bag-handle-outline" as const, color: "#ec4899" },
-  { id: "other", label: "Other", icon: "ellipsis-horizontal-circle-outline" as const, color: "#6b7280" },
-];
-
-const INCOME_CATEGORIES = [
-  { id: "salary", label: "Salary", icon: "briefcase-outline" as const, color: "#10b981" },
-  { id: "gift", label: "Gift", icon: "gift-outline" as const, color: "#a855f7" },
-  { id: "exchange", label: "Exchange", icon: "swap-horizontal-outline" as const, color: "#0ea5e9" },
-  { id: "other", label: "Other", icon: "ellipsis-horizontal-circle-outline" as const, color: "#6b7280" },
-];
-
 type EditMode = "edit" | "review";
 type ActiveTransactionModal = "none" | "edit" | "delete";
-
-type CategoryOption = {
-  id: string;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-};
 
 const TransactionListRow = React.memo(function TransactionListRow({
   transaction,
@@ -166,38 +145,6 @@ function normalizeEditableCategory(category: string) {
   return trimmed;
 }
 
-function getCategoriesForType(
-  type: TransactionType,
-  userCategories: IUserCategory[],
-  selectedCategory: string
-): CategoryOption[] {
-  const builtIns = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-  const builtInIds = new Set(builtIns.map((category) => category.id.toLowerCase()));
-  const customCategories = userCategories
-    .filter((category) => category.type === type && !builtInIds.has(category.name.toLowerCase()))
-    .map((category) => ({
-      id: category.name,
-      label: category.name,
-      icon: "pricetag-outline" as const,
-      color: category.color,
-    }));
-  const options = [...builtIns, ...customCategories];
-
-  if (
-    selectedCategory.trim() &&
-    !options.some((category) => category.id.toLowerCase() === selectedCategory.toLowerCase())
-  ) {
-    options.push({
-      id: selectedCategory,
-      label: selectedCategory,
-      icon: "pricetag-outline",
-      color: "#6b7280",
-    });
-  }
-
-  return options;
-}
-
 export default function TransactionsScreen() {
   const { isDark } = useTheme();
   const { isStealthMode, toggleStealthMode } = useStealthMode();
@@ -237,36 +184,9 @@ export default function TransactionsScreen() {
   const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>("bank");
   const [editSplitAmount, setEditSplitAmount] = useState("");
   const [editIsSplit, setEditIsSplit] = useState(false);
-  const [userCategories, setUserCategories] = useState<IUserCategory[]>([]);
   const [saving, setSaving] = useState(false);
   const handledReviewIdRef = useRef<string | null>(null);
   const reviewId = typeof params.reviewId === "string" ? params.reviewId : undefined;
-
-  const categoryOptions = useMemo(
-    () =>
-      getCategoriesForType(editType, userCategories, editCategory).filter(
-        (category) => editMode !== "review" || category.id !== "exchange"
-      ),
-    [editCategory, editMode, editType, userCategories]
-  );
-
-  useEffect(() => {
-    let active = true;
-
-    api.getCategories()
-      .then((categories) => {
-        if (active) {
-          setUserCategories(categories);
-        }
-      })
-      .catch((error) => {
-        console.error("[Transactions] Failed to load categories:", error);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -779,41 +699,8 @@ export default function TransactionsScreen() {
                       placeholderTextColor={colors.textMuted}
                     />
 
-                    {/* Category */}
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6 }}>
-                      Category
-                    </Text>
-                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                      {categoryOptions.map((category) => {
-                        const isSelected = editCategory === category.id;
-
-                        return (
-                          <TouchableOpacity
-                            key={category.id}
-                            style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              paddingHorizontal: 12,
-                              paddingVertical: 8,
-                              borderRadius: 8,
-                              backgroundColor: isSelected ? `${category.color}18` : colors.card,
-                              borderWidth: 1,
-                              borderColor: isSelected ? category.color : colors.border,
-                            }}
-                            onPress={() => setEditCategory(category.id)}
-                          >
-                            <Ionicons
-                              name={category.icon}
-                              size={16}
-                              color={category.color}
-                            />
-                            <Text style={{ marginLeft: 6, color: colors.text, fontSize: 13 }}>
-                              {category.label}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                    <TransactionCategoryPicker ownerId={profile?.userId} type={editType}
+                      value={editCategory} onChange={setEditCategory} allowExchange={editMode !== "review"} />
 
                     {editMode !== "review" && (
                       <>

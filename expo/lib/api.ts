@@ -95,12 +95,12 @@ class ApiService {
   }
 
   // === Transactions ===
-  async getTransactions(): Promise<ITransaction[]> {
+  async getTransactions(accessToken?: string): Promise<ITransaction[]> {
     const transactions = new Map<string, ITransaction>();
     const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
-      const data: TransactionsResponse = await this.request<TransactionsResponse>(`/api/transactions?limit=250${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      const data: TransactionsResponse = await this.request<TransactionsResponse>(`/api/transactions?limit=250${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, {}, accessToken);
       for (const transaction of data.transactions) transactions.set(transaction._id, transaction);
       cursor = data.nextCursor ?? null;
       if (cursor && cursors.has(cursor)) throw new Error("The server repeated a history page. Your saved data is unchanged.");

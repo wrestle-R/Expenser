@@ -12,23 +12,23 @@ export function ScheduledReminders({onChange}:{onChange:()=>void}) {
   const response=await fetch('/api/workflows/events',{cache:'no-store'});
   if(!response.ok)throw new Error('Could not refresh scheduled workflows. Please retry.');
   const data=await response.json();
-  setEvents(data.events);setError('');
+  setEvents(data.events);
   const signature=JSON.stringify(data.events);
   if(signature!==last.current){last.current=signature;callback.current();}
  },[]);
  useEffect(()=>{
-  let active=true;
-  const refresh=()=>{if(document.visibilityState==='visible')void load().catch(e=>{if(active)setError(e.message);});};
+  const refresh=()=>{if(document.visibilityState==='visible')void load().catch(()=>{});};
   refresh();const timer=setInterval(refresh,15000);
   window.addEventListener('focus',refresh);
-  return()=>{active=false;clearInterval(timer);window.removeEventListener('focus',refresh);};
+  return()=>{clearInterval(timer);window.removeEventListener('focus',refresh);};
  },[load]);
  const skip=async(event:Event)=>{
   setSaving(event.workflowId);setError('');
   try{
    const res=await fetch('/api/workflows/events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workflowId:event.workflowId,localDate:event.localDate,action:'skip'})});
    if(!res.ok)throw new Error('Could not skip this event. Please retry.');
-   await load();callback.current();
+   callback.current();
+   await load().catch(()=>{});
   }catch(e){setError(e instanceof Error?e.message:'Could not update event');}finally{setSaving(null);}
  };
  if(!events.length&&!error)return null;

@@ -258,3 +258,15 @@ test("offline workflow skips survive restart and retry the original occurrence d
   assert.deepEqual(calls,[['workflow-1','2026-10-23'],['workflow-1','2026-10-23']]);
   assert.equal((await restarted.storage.getOutbox()).length,0);
 });
+
+test("a failed workflow refresh does not fail transaction and balance sync", async () => {
+  const { storage, api, syncService, statuses } = harness();
+  await storage.setStoredWorkflows([{ _id: "last-saved-workflow" }]);
+  api.getWorkflows = async () => { throw new Error("Scheduled workflows unavailable"); };
+  await queueCreate(storage);
+  const result = await syncService.syncAll();
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.workflows[0]._id, "last-saved-workflow");
+  assert.equal(statuses.at(-1).pendingChanges, 0);
+  assert.equal(statuses.at(-1).error, undefined);
+});

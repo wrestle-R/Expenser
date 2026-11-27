@@ -1,15 +1,21 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { downloadAndroidUpdate, installAndroidUpdate } from "expenser-bank-notifications";
+import { Ionicons } from "@expo/vector-icons";
+import {
+  addAndroidUpdateProgressListener,
+  downloadAndroidUpdate,
+  installAndroidUpdate,
+  type AndroidUpdateProgress,
+} from "expenser-bank-notifications";
 import * as Application from "expo-application";
 import { useEffect, useRef, useState } from "react";
-import { AppState, Platform, Pressable, ScrollView, StyleSheet, Text } from "react-native";
+import {
+  ActivityIndicator, AppState, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View,
+} from "react-native";
 
-import ConfirmModal from "./ConfirmModal";
 import ResponsiveModal from "./ResponsiveModal";
 import notes from "../android-release-notes.json";
 import { Colors } from "../constants/theme";
 import { useTheme } from "../context/ThemeContext";
-import { useToast } from "../context/ToastContext";
 import { ANDROID_RELEASE_MANIFEST, availableAndroidRelease, type AndroidRelease } from "../lib/android-release";
 import { withRequestDeadline } from "../lib/request-deadline";
 
@@ -19,10 +25,12 @@ const SEEN_NOTES = "android-release:seen-notes";
 function AndroidUpdatePrompt() {
   const { isDark } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
-  const { showToast } = useToast();
+  const { fontScale, width } = useWindowDimensions();
   const [release, setRelease] = useState<AndroidRelease | null>(null);
   const [showNotes, setShowNotes] = useState(false);
-  const [opening, setOpening] = useState(false);
+  const [operation, setOperation] = useState<"download" | "install" | null>(null);
+  const [progress, setProgress] = useState<AndroidUpdateProgress | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [downloadedCode, setDownloadedCode] = useState(0);
   const [permissionRequired, setPermissionRequired] = useState(false);
   const dismissedBuild = useRef(0);
@@ -91,28 +99,52 @@ function AndroidUpdatePrompt() {
     if (!release) return;
     dismissedBuild.current = release.versionCode;
     setRelease(null);
+    setError(null);
     void AsyncStorage.setItem(SKIPPED_BUILD, String(release.versionCode)).catch(() => {});
   };
 
   const ready = release?.versionCode === downloadedCode;
+  const downloading = operation === "download";
+  const inlineActions = width >= 350 && fontScale < 1.3;
+  const activeProgress = progress?.versionCode === release?.versionCode ? progress : null;
+  const percent = activeProgress && activeProgress.total > 0
+    ? Math.min(100, Math.floor(100 * activeProgress.received / activeProgress.total))
+    : null;
+  const title = downloading ? "Downloading update"
+    : ready && permissionRequired ? "Allow installation"
+    : ready ? "Ready to install" : "Update available";
+  const description = ready && permissionRequired
+    ? "Allow installs from Expenser in Android settings, then return and tap Install."
+    : ready ? "Android will ask you to confirm the installation."
+    : "Download in Expenser, then confirm the install in Android.";
+
   const update = async () => {
-    if (!release || opening) return;
-    setOpening(true);
+    if (!release || operation) return;
+    setError(null);
+    setProgress(null);
+    let canInstall = ready;
+    let subscription: ReturnType<typeof addAndroidUpdateProgressListener> | undefined;
     try {
-      if (!ready) {
+      if (!canInstall) {
+        setOperation("download");
+        subscription = addAndroidUpdateProgressListener(setProgress);
         await downloadAndroidUpdate(release.version, release.versionCode, release.sha256);
+        canInstall = true;
         setDownloadedCode(release.versionCode);
       }
+      setOperation("install");
       const result = await installAndroidUpdate(release.versionCode, release.sha256);
       setPermissionRequired(result === "permission");
       if (result === "missing") {
         setDownloadedCode(0);
-        showToast("The APK is no longer on this device. Download it again.", "info");
+        setError("The download is no longer on this device. Download it again.");
       }
     } catch {
-      showToast(ready ? "Couldn't open the Android installer. Please try again." : "Couldn't download the update. Please try again.", "error");
+      setError(canInstall ? "Couldn't open the installer. Try again."
+        : "Couldn't download the update. Check your connection and try again.");
     } finally {
-      setOpening(false);
+      subscription?.remove();
+      setOperation(null);
     }
   };
 
@@ -128,25 +160,65 @@ function AndroidUpdatePrompt() {
           ))}
         </ScrollView>
         <Pressable accessibilityRole="button" onPress={closeNotes} style={[styles.done, { backgroundColor: colors.primary }]}>
-          <Text style={styles.doneText}>Done</Text>
+          <Text style={[styles.actionText, { color: colors.primaryForeground }]}>Done</Text>
         </Pressable>
       </ResponsiveModal>
       {release && !showNotes && (
-        <ConfirmModal
-          visible
-          title={`Expenser ${release.version} is available`}
-          message={opening && !ready ? "Downloading the APK…" : ready
-            ? permissionRequired
-              ? "Allow installs from Expenser in Android settings, then return and tap Install."
-              : "Android will ask you to confirm the installation."
-            : "Download the APK here, then confirm installation in Android."}
-          icon="cloud-download-outline"
-          confirmText={ready ? "Install" : "Update"}
-          cancelText="Skip"
-          loading={opening}
-          onConfirm={() => { void update(); }}
-          onClose={skip}
-        />
+        <ResponsiveModal visible onClose={skip} loading={Boolean(operation)} maxWidth={360} contentStyle={styles.updateModal}>
+          <View style={styles.heading}>
+            <Ionicons
+              name={ready && permissionRequired ? "shield-outline" : ready ? "checkmark-circle-outline" : "download-outline"}
+              size={23}
+              color={ready && permissionRequired ? colors.warning : ready ? colors.success : colors.text}
+              accessible={false}
+            />
+            <View style={styles.headingText}>
+              <Text accessibilityRole="header" style={[styles.title, { color: colors.text }]}>{title}</Text>
+              <Text style={[styles.version, { color: colors.textMuted }]}>Expenser {release.version}</Text>
+            </View>
+          </View>
+
+          {downloading ? (
+            <View style={styles.progress} accessibilityLiveRegion="polite">
+              <View style={styles.progressLabel}>
+                <Text style={[styles.description, { color: colors.text }]}>
+                  {percent === 100 ? "Verifying download…" : percent === null && !activeProgress?.received
+                    ? "Starting download…" : "Downloading…"}
+                </Text>
+                {percent === null ? <ActivityIndicator size="small" color={colors.primary} /> : (
+                  <Text style={[styles.progressNumber, { color: colors.text }]}>{percent}%</Text>
+                )}
+              </View>
+              {percent !== null && (
+                <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: percent }}
+                  style={[styles.track, { backgroundColor: colors.backgroundSecondary }]}>
+                  <View style={[styles.fill, { backgroundColor: colors.primary, width: `${percent}%` }]} />
+                </View>
+              )}
+            </View>
+          ) : (
+            <Text accessibilityRole={error ? "alert" : undefined}
+              style={[styles.description, { color: error ? colors.error : colors.text }]}>
+              {error ?? description}
+            </Text>
+          )}
+
+          {!downloading && (
+            <View style={[styles.actions, !inlineActions && styles.stackedActions]}>
+              <Pressable accessibilityRole="button" disabled={Boolean(operation)} onPress={skip}
+                style={[styles.action, inlineActions && styles.secondary, { backgroundColor: colors.backgroundSecondary }]}>
+                <Text style={[styles.actionText, { color: colors.text }]}>Skip</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ busy: Boolean(operation), disabled: Boolean(operation) }}
+                disabled={Boolean(operation)} onPress={() => { void update(); }}
+                style={[styles.action, inlineActions && styles.primary, { backgroundColor: colors.primary }]}>
+                <Text style={[styles.actionText, { color: colors.primaryForeground }]}>
+                  {operation === "install" ? "Opening installer…" : ready ? "Install" : error ? "Retry download" : "Download update"}
+                </Text>
+              </Pressable>
+            </View>
+          )}
+        </ResponsiveModal>
       )}
     </>
   );
@@ -163,5 +235,20 @@ const styles = StyleSheet.create({
   notesList: { flexGrow: 0 },
   note: { fontSize: 15, lineHeight: 22, marginBottom: 8 },
   done: { alignItems: "center", justifyContent: "center", minHeight: 48, borderRadius: 12 },
-  doneText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  updateModal: { padding: 20, gap: 14 },
+  heading: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  headingText: { flex: 1 },
+  version: { fontSize: 13, marginTop: 3 },
+  description: { fontSize: 15, lineHeight: 21 },
+  actions: { flexDirection: "row", gap: 8 },
+  stackedActions: { flexDirection: "column-reverse" },
+  action: { minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  primary: { flex: 2 },
+  secondary: { flex: 1 },
+  actionText: { fontSize: 15, fontWeight: "700", textAlign: "center" },
+  progress: { gap: 8 },
+  progressLabel: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  progressNumber: { fontSize: 15, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  track: { borderRadius: 4, height: 6, overflow: "hidden" },
+  fill: { borderRadius: 4, height: "100%" },
 });

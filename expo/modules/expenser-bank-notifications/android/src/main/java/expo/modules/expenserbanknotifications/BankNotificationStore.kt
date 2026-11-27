@@ -95,6 +95,9 @@ object BankNotificationStore {
       .commit()
   }
 
+  fun owner(context: Context): String? =
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(OWNER_KEY, null)
+
   @Synchronized
   fun setOwner(context: Context, owner: String?) {
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

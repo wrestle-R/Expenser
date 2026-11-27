@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { financialRead, financialWrite, hydrate } from "@/lib/financial-db";
+import { deleteFinancialRow, storeFinancialRows } from "@/lib/financial-records.mjs";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { getApiErrorResponse } from "@/lib/api-errors";
 import {
   mapWorkflowRow,
   normalizeNumber,
-  sql,
   type WorkflowRow,
 } from "@/lib/db";
 
@@ -125,6 +126,14 @@ function parseClientRequestId(value: unknown) {
   return normalized;
 }
 
+function workflowFields(row: WorkflowRow, payload: ReturnType<typeof parseWorkflowInput>, requestId: string | null): WorkflowRow {
+  return {
+    ...row, client_request_id: requestId, name: payload.name, type: payload.type, amount: payload.amount,
+    description: payload.description, category: payload.category, payment_method: payload.paymentMethod,
+    split_amount: payload.splitAmount,
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(req);
@@ -133,18 +142,16 @@ export async function GET(req: NextRequest) {
     }
     const userId = authUser.userId;
 
-    const workflows = await sql<WorkflowRow[]>`
-      select *
-      from workflows
-      where user_id = ${userId}
-      order by created_at desc
-    `;
+    const workflows = await financialRead(async (db, key) => {
+      const rows = await db<WorkflowRow[]>`select * from workflows where user_id = ${userId} order by created_at desc`;
+      return hydrate(db, key, "workflows", userId, rows);
+    });
     return NextResponse.json(
       { workflows: workflows.map(mapWorkflowRow) },
       { status: 200 }
     );
   } catch (error) {
-    console.error("[API /workflows GET] Error:", error);
+    console.error("[API /workflows GET] Error:", error instanceof Error ? error.name : "UnknownError");
     return NextResponse.json(
       { error: "Failed to fetch workflows" },
       { status: 500 }
@@ -164,72 +171,24 @@ export async function POST(req: NextRequest) {
       (await req.json()) as Record<string, unknown>
     );
 
-    const result = await sql.begin(async (tx) => {
-      const trx = tx as unknown as typeof sql;
+    const result = await financialWrite(userId, async (db, key) => {
       if (payload.clientRequestId) {
-        const existingWorkflows = (await trx`
-          select *
-          from workflows
-          where user_id = ${userId}
-            and client_request_id = ${payload.clientRequestId}
-          limit 1
-        `) as WorkflowRow[];
-
-        const existing = existingWorkflows[0];
-        if (existing) {
-          return existing;
-        }
+        const lookup = key.lookup(userId, "workflows-request", payload.clientRequestId);
+        const rows = await db<WorkflowRow[]>`
+          select workflow.* from expenser_private.financial_payloads encrypted
+          join workflows workflow on workflow.id::text = encrypted.record_id and workflow.user_id = encrypted.owner_id
+          where encrypted.owner_id = ${userId} and encrypted.record_kind = 'workflows' and encrypted.request_lookup = ${lookup}
+        `;
+        const [existing] = await hydrate(db, key, "workflows", userId, rows);
+        if (existing) return existing;
       }
-
-      try {
-        const insertedWorkflows = (await tx.savepoint((insertTx) => (insertTx as unknown as typeof sql)`
-          insert into workflows (
-            user_id,
-            client_request_id,
-            name,
-            type,
-            amount,
-            description,
-            category,
-            payment_method,
-            split_amount,
-            schedule
-          )
-          values (
-            ${userId},
-            ${payload.clientRequestId},
-            ${payload.name},
-            ${payload.type},
-            ${payload.amount},
-            ${payload.description},
-            ${payload.category},
-            ${payload.paymentMethod},
-            ${payload.splitAmount},
-            ${payload.schedule ? trx.json(payload.schedule) : null}
-          )
-          returning *
-        `)) as WorkflowRow[];
-
-        return insertedWorkflows[0];
-      } catch (error: unknown) {
-        const err = error as { code?: string };
-        if (payload.clientRequestId && err?.code === "23505") {
-          const existingWorkflows = (await trx`
-            select *
-            from workflows
-            where user_id = ${userId}
-              and client_request_id = ${payload.clientRequestId}
-            limit 1
-          `) as WorkflowRow[];
-
-          const existing = existingWorkflows[0];
-          if (existing) {
-            return existing;
-          }
-        }
-
-        throw error;
-      }
+      const [row] = await db<WorkflowRow[]>`
+        insert into workflows (user_id, name, type, description, payment_method, schedule)
+        values (${userId}, '', 'expense', '', 'bank', ${payload.schedule ? db.json(payload.schedule) : null}) returning *
+      `;
+      const workflow = workflowFields(row, payload, payload.clientRequestId);
+      await storeFinancialRows(db, key, "workflows", [workflow]);
+      return workflow;
     });
 
     const workflow = result;
@@ -238,7 +197,7 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[API /workflows POST] Error:", error);
+    console.error("[API /workflows POST] Error:", error instanceof Error ? error.name : "UnknownError");
     return jsonApiError(error, "Failed to create workflow");
   }
 }
@@ -260,13 +219,11 @@ export async function DELETE(req: NextRequest) {
         { status: 400 }
       );
     }
-    const deletedWorkflows = await sql<WorkflowRow[]>`
-      delete from workflows
-      where id = ${id} and user_id = ${userId}
-      returning *
-    `;
-
-    const workflow = deletedWorkflows[0];
+    const workflow = await financialWrite(userId, async (db) => {
+      const [row] = await db`delete from workflows where id = ${id} and user_id = ${userId} returning id`;
+      if (row) await deleteFinancialRow(db, "workflows", userId, id);
+      return row;
+    });
 
     if (!workflow) {
       return NextResponse.json(
@@ -279,7 +236,7 @@ export async function DELETE(req: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("[API /workflows DELETE] Error:", error);
+    console.error("[API /workflows DELETE] Error:", error instanceof Error ? error.name : "UnknownError");
     return NextResponse.json(
       { error: "Failed to delete workflow" },
       { status: 500 }
@@ -308,22 +265,20 @@ export async function PUT(req: NextRequest) {
     const body = (await req.json()) as Record<string, unknown>;
     const payload = parseWorkflowInput(body);
 
-    const updatedWorkflows = await sql<WorkflowRow[]>`
-      update workflows
-      set
-        name = ${payload.name},
-        type = ${payload.type},
-        amount = ${payload.amount},
-        description = ${payload.description},
-        category = ${payload.category},
-        payment_method = ${payload.paymentMethod},
-        split_amount = ${payload.splitAmount},
-        schedule = case when ${Object.hasOwn(body, "schedule")} then ${payload.schedule ? sql.json(payload.schedule) : null}::jsonb else schedule end
-      where id = ${id} and user_id = ${userId}
-      returning *
-    `;
-
-    const workflow = updatedWorkflows[0];
+    const workflow = await financialWrite(userId, async (db, key) => {
+      const rows = await db<WorkflowRow[]>`
+        select * from workflows where id = ${id} and user_id = ${userId}`;
+      const [existing] = await hydrate(db, key, "workflows", userId, rows);
+      if (!existing) return null;
+      const schedule = Object.hasOwn(body, "schedule") ? payload.schedule : parseWorkflowSchedule(existing.schedule, payload.amount);
+      const [metadata] = await db<WorkflowRow[]>`
+        update workflows set schedule = ${schedule ? db.json(schedule) : null}
+        where id = ${id} and user_id = ${userId} returning *
+      `;
+      const row = workflowFields(metadata, payload, existing.client_request_id);
+      await storeFinancialRows(db, key, "workflows", [row]);
+      return row;
+    });
 
     if (!workflow) {
       return NextResponse.json(
@@ -336,7 +291,7 @@ export async function PUT(req: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("[API /workflows PUT] Error:", error);
+    console.error("[API /workflows PUT] Error:", error instanceof Error ? error.name : "UnknownError");
     return jsonApiError(error, "Failed to update workflow");
   }
 }

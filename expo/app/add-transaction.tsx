@@ -22,6 +22,7 @@ import {
 } from "../constants/theme";
 import { generateTempId } from "../lib/utils";
 import { TransactionType, PaymentMethod } from "../lib/types";
+import TransactionCategoryPicker from "../components/TransactionCategoryPicker";
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: string }[] = [
   { id: "bank", label: "Bank (UPI)", icon: "card" },
@@ -41,6 +42,7 @@ export default function AddTransactionScreen() {
   const [type, setType] = useState<TransactionType>("expense");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("bank");
   const [splitAmount, setSplitAmount] = useState("");
   const [isSplit, setIsSplit] = useState(false);
@@ -53,6 +55,7 @@ export default function AddTransactionScreen() {
     if (params.type) setType(params.type as TransactionType);
     if (params.amount) setAmount(params.amount as string);
     if (params.description) setDescription(params.description as string);
+    if (typeof params.category === "string") setCategory(params.category.trim());
     if (params.paymentMethod)
       setPaymentMethod(params.paymentMethod as PaymentMethod);
     if (typeof params.splitAmount === "string") {
@@ -113,16 +116,10 @@ export default function AddTransactionScreen() {
         type,
         amount: payAmount,
         description: description.trim(),
-        category:
-          typeof params.category === "string" && params.category.trim()
-            ? params.category.trim()
-            : type === "income"
-              ? "income"
-              : "expense",
+        category: category || type,
         paymentMethod,
         splitAmount: finalSplit,
       };
-      console.log("[AddTransaction] Sending payload:", payload);
       await addTransaction(payload);
       showToast("Transaction added successfully", "success");
       router.back();
@@ -174,7 +171,7 @@ export default function AddTransactionScreen() {
                   type === "expense" ? colors.error : colors.border,
                 alignItems: "center",
               }}
-              onPress={() => setType("expense")}
+              onPress={() => { if (type !== "expense") setCategory(""); setType("expense"); }}
             >
               <Ionicons
                 name="arrow-down"
@@ -203,7 +200,7 @@ export default function AddTransactionScreen() {
                   type === "income" ? colors.success : colors.border,
                 alignItems: "center",
               }}
-              onPress={() => setType("income")}
+              onPress={() => { if (type !== "income") setCategory(""); setType("income"); }}
             >
               <Ionicons
                 name="arrow-up"
@@ -295,6 +292,8 @@ export default function AddTransactionScreen() {
             onChangeText={setDescription}
           />
         </View>
+
+        <TransactionCategoryPicker ownerId={profile?.userId} type={type} value={category} onChange={setCategory} />
 
         {/* Payment Method */}
         <View style={{ marginBottom: 20 }}>

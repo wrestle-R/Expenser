@@ -2,7 +2,7 @@
   "expo": {
     "name": "Expenser",
     "slug": "expenser",
-    "version": "1.5.0",
+    "version": "1.5.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "expenser",
@@ -25,7 +25,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": ["android.permission.REQUEST_INSTALL_PACKAGES"],
-      "versionCode": 6
+      "versionCode": 7
     },
     "web": {
       "output": "static",

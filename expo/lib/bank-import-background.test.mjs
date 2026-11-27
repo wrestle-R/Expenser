@@ -9,16 +9,17 @@ const source = ts.transpileModule(readFileSync(new URL("./bank-import-background
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText;
 
-function backgroundTask({ account = "owner", canUpload = true } = {}) {
+function backgroundTask({ account = "owner", canUpload = true, notificationAccess = true, candidatePending = true, smsEnabled = true } = {}) {
   let run;
   const calls = [];
-  let cleared = false;
+  let cleared = !candidatePending;
   const imports = {
     "react-native": { AppState: { currentState: "background" }, Platform: { OS: "android" } },
     "expo-background-task": { BackgroundTaskResult: { Success: "success", Failed: "failed" } },
     "expo-task-manager": { defineTask: (_name, task) => { run = task; } },
     "./bank-imports": {
-      getBankNotificationAccessEnabled: () => true,
+      getBankNotificationAccessEnabled: () => notificationAccess,
+      isBankImportEnabled: () => smsEnabled,
       getQueuedRawBankImportCandidates: (owner, unattendedOnly) => {
         assert.equal(owner, "owner");
         assert.equal(unattendedOnly, true);
@@ -29,7 +30,7 @@ function backgroundTask({ account = "owner", canUpload = true } = {}) {
     "./api": { api: {
       parseBankNotification: async (candidate, allowCloud, token) => {
         calls.push(["parse", candidate.sourceKey, allowCloud, token]);
-        return { kind: "transaction", importSourceKey: "test-transaction" };
+        return { kind: "transaction", importSourceKey: "test-transaction", type: "expense" };
       },
       createTransaction: async (payload, token) => {
         calls.push(["upload", payload.importSourceKey, token]);
@@ -38,8 +39,9 @@ function backgroundTask({ account = "owner", canUpload = true } = {}) {
     } },
     "./bank-import-result": { parsedResponsePayload: result => result },
     "./notifications": { notificationService: {
-      notifyBankReview: async (key, kind) => { calls.push(["notify", key, kind]); },
+      notifyBankReview: async (key, kind, direction) => { calls.push(["notify", key, kind, direction]); },
     } },
+    "./transaction-widget": { refreshBackgroundTransactionWidget: async (owner, token) => { calls.push(["widget", owner, token]); } },
     "./storage": { getStoredProfile: async () => ({ userId: "owner" }) },
     "./supabase": { supabase: { auth: {
       getSession: async () => ({ data: { session: { user: { id: account }, access_token: "fixture-token" } } }),
@@ -55,16 +57,29 @@ test("uploads a bank alert under its owner and clears it after the server confir
   assert.deepEqual(task.calls, [
     ["parse", "test-alert", true, "fixture-token"],
     ["upload", "test-transaction", "fixture-token"],
-    ["notify", "test-transaction", "transaction"],
+    ["notify", "test-transaction", "transaction", "expense"],
     ["clear", "test-alert"],
+    ["widget", "owner", "fixture-token"],
   ]);
 });
 
 test("preserves a failed upload and skips work under a different session", async () => {
   const offline = backgroundTask({ canUpload: false });
   assert.equal(await offline.run(), "failed");
-  assert.deepEqual(offline.calls.map(([operation]) => operation), ["parse", "upload"]);
+  assert.deepEqual(offline.calls.map(([operation]) => operation), ["parse", "upload", "widget"]);
   const otherAccount = backgroundTask({ account: "other" });
   assert.equal(await otherAccount.run(), "success");
   assert.deepEqual(otherAccount.calls, []);
+});
+
+test("uploads a directly received SMS without notification-listener access", async () => {
+  const task = backgroundTask({ notificationAccess: false });
+  assert.equal(await task.run(), "success");
+  assert.deepEqual(task.calls.map(([operation]) => operation), ["parse", "upload", "notify", "clear", "widget"]);
+});
+
+test("refreshes pinned widget history in the background even with SMS import paused", async () => {
+  const task = backgroundTask({ candidatePending: false, smsEnabled: false });
+  assert.equal(await task.run(), "success");
+  assert.deepEqual(task.calls, [["widget", "owner", "fixture-token"]]);
 });

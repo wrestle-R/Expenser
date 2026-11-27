@@ -1,0 +1,11 @@
+<resources>
+  <string name="recent_preview_label_1">Groceries</string>
+  <string name="recent_preview_amount_1">−₹840</string>
+  <string name="recent_preview_details_1">26 Nov · Bank (UPI)</string>
+  <string name="recent_preview_label_2">Payday</string>
+  <string name="recent_preview_amount_2">+₹2,500</string>
+  <string name="recent_preview_details_2">24 Nov · Bank (UPI)</string>
+  <string name="recent_preview_label_3">Coffee</string>
+  <string name="recent_preview_amount_3">−₹180</string>
+  <string name="recent_preview_details_3">24 Nov · Cash</string>
+</resources>

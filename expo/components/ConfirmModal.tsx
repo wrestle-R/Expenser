@@ -38,6 +38,7 @@ export default function ConfirmModal({
 }: ConfirmModalProps) {
   const { isDark } = useTheme();
   const colors = isDark ? Colors.dark : Colors.light;
+  const confirmTextColor = confirmColor === "primary" ? colors.primaryForeground : Colors.dark.background;
 
   const getConfirmButtonColor = () => {
     switch (confirmColor) {
@@ -104,6 +105,7 @@ export default function ConfirmModal({
               {/* Buttons */}
               <View style={styles.buttonContainer}>
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={[
                     styles.button,
                     styles.cancelButton,
@@ -118,6 +120,7 @@ export default function ConfirmModal({
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={[
                     styles.button,
                     styles.confirmButton,
@@ -127,9 +130,9 @@ export default function ConfirmModal({
                   disabled={loading}
                 >
                   {loading ? (
-                    <ActivityIndicator size="small" color="#fff" />
+                    <ActivityIndicator size="small" color={confirmTextColor} />
                   ) : (
-                    <Text style={[styles.buttonText, { color: "#fff" }]}>
+                    <Text style={[styles.buttonText, { color: confirmTextColor }]}>
                       {confirmText}
                     </Text>
                   )}

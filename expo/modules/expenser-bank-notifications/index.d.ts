@@ -69,7 +69,13 @@ export function isBankImportEnabled(): boolean;
 export function setBankImportEnabled(enabled: boolean): void;
 export function scanRecentSms(): Promise<number>;
 
-export function setRecentWidgetTransactions(titles: string[], amounts: string[]): void;
+export function setRecentWidgetTransactions(titles: string[], amounts: string[], details: string[], owner?: string): void;
+export function hasRecentTransactionsWidget(): boolean;
 export function pinRecentTransactionsWidget(): Promise<boolean>;
 export function downloadAndroidUpdate(version: string, code: number, digest: string): Promise<void>;
 export function installAndroidUpdate(code: number, digest: string): Promise<"permission" | "installer" | "missing">;
+
+export type AndroidUpdateProgress = { versionCode: number; received: number; total: number };
+export function addAndroidUpdateProgressListener(
+  listener: (progress: AndroidUpdateProgress) => void
+): { remove: () => void };

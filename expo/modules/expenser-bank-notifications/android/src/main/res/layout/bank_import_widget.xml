@@ -1,4 +1,0 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="8dp" android:background="#292929">
-<TextView android:id="@+id/bank_import_open" android:layout_width="match_parent" android:layout_height="48dp" android:text="Expenser" android:textColor="#ffffff" android:textSize="16sp" android:gravity="center" />
-<Button android:id="@+id/bank_import_toggle" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp" android:text="SMS import" android:textColor="#ffffff" android:backgroundTint="#444444" android:textAllCaps="false" />
-</LinearLayout>

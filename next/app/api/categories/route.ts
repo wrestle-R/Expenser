@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { financialWrite, hydrate, type Cipher } from "@/lib/financial-db";
+import { deleteFinancialRow, storeFinancialRows } from "@/lib/financial-records.mjs";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { getApiErrorResponse } from "@/lib/api-errors";
 import {
@@ -57,16 +59,24 @@ function parseColor(value: unknown) {
   return color;
 }
 
-async function ensureDefaultCategories(userId: string) {
-  for (const type of CATEGORY_TYPES) {
-    for (const category of DEFAULT_CATEGORIES[type]) {
-      await sql`
-        insert into user_categories (user_id, type, name, color)
-        values (${userId}, ${type}, ${category.name}, ${category.color})
-        on conflict (user_id, type, lower(name)) do nothing
-      `;
-    }
-  }
+async function saveCategory(
+  db: typeof sql, key: Cipher, userId: string, type: TransactionType, name: string, color: string, overwrite: boolean,
+) {
+  const lookup = key.lookup(userId, "category-name:" + type, name.toLowerCase());
+  const [existing] = await db<UserCategoryRow[]>`
+    select category.* from expenser_private.financial_payloads encrypted
+    join user_categories category on category.user_id = encrypted.owner_id and category.id::text = encrypted.record_id
+    where encrypted.owner_id = ${userId} and encrypted.record_kind = 'user_categories' and encrypted.category_lookup = ${lookup}
+  `;
+  if (existing && !overwrite) return;
+  const [metadata] = existing
+    ? await db<UserCategoryRow[]>`
+        update user_categories set updated_at = now() where id = ${existing.id} and user_id = ${userId} returning *
+      `
+    : await db<UserCategoryRow[]>`insert into user_categories (user_id, type, name) values (${userId}, ${type}, '') returning *`;
+  const row = { ...metadata, name, color };
+  await storeFinancialRows(db, key, "user_categories", [row]);
+  return row;
 }
 
 export async function GET(req: Request) {
@@ -77,20 +87,20 @@ export async function GET(req: Request) {
     }
     const userId = authUser.userId;
 
-    await ensureDefaultCategories(userId);
-
-    const categories = await sql<UserCategoryRow[]>`
-      select *
-      from user_categories
-      where user_id = ${userId}
-      order by type asc, name asc
-    `;
-
-    return NextResponse.json({
-      categories: categories.map(mapUserCategoryRow),
+    const categories = await financialWrite(userId, async (db, key) => {
+      for (const type of CATEGORY_TYPES) {
+        for (const { name, color } of DEFAULT_CATEGORIES[type]) {
+          await saveCategory(db, key, userId, type, name, color, false);
+        }
+      }
+      const rows = await db<UserCategoryRow[]>`select * from user_categories where user_id = ${userId}`;
+      return (await hydrate(db, key, "user_categories", userId, rows))
+        .sort((left, right) => left.type.localeCompare(right.type) || left.name.localeCompare(right.name))
+        .map(mapUserCategoryRow);
     });
+    return NextResponse.json({ categories });
   } catch (error) {
-    console.error("[API /categories GET] Error:", error);
+    console.error("[API /categories GET] Error:", error instanceof Error ? error.name : "UnknownError");
     return NextResponse.json({ error: "Failed to load categories" }, { status: 500 });
   }
 }
@@ -108,17 +118,11 @@ export async function POST(req: Request) {
     const name = sanitizeCategoryName(data.name);
     const color = parseColor(data.color);
 
-    const rows = await sql<UserCategoryRow[]>`
-      insert into user_categories (user_id, type, name, color)
-      values (${userId}, ${type}, ${name}, ${color})
-      on conflict (user_id, type, lower(name))
-      do update set color = excluded.color
-      returning *
-    `;
-
-    return NextResponse.json({ category: mapUserCategoryRow(rows[0]) }, { status: 201 });
+    const row = await financialWrite(userId, (db, key) => saveCategory(db, key, userId, type, name, color, true));
+    if (!row) throw new Error("Category unavailable");
+    return NextResponse.json({ category: mapUserCategoryRow(row) }, { status: 201 });
   } catch (error) {
-    console.error("[API /categories POST] Error:", error);
+    console.error("[API /categories POST] Error:", error instanceof Error ? error.name : "UnknownError");
     return jsonApiError(error, "Failed to save category");
   }
 }
@@ -137,14 +141,14 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Category ID required" }, { status: 400 });
     }
 
-    await sql`
-      delete from user_categories
-      where id = ${id} and user_id = ${userId}
-    `;
+    await financialWrite(userId, async (db) => {
+      await db`delete from user_categories where id = ${id} and user_id = ${userId}`;
+      await deleteFinancialRow(db, "user_categories", userId, id);
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("[API /categories DELETE] Error:", error);
+    console.error("[API /categories DELETE] Error:", error instanceof Error ? error.name : "UnknownError");
     return NextResponse.json({ error: "Failed to delete category" }, { status: 500 });
   }
 }

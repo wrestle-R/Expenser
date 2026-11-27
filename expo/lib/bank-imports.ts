@@ -20,7 +20,7 @@ export type NativeNotificationAccessHealth = NotificationAccessHealth;
 export type NativeRawBankCandidate = QueuedRawBankCandidate;
 export type NativeNotificationEnvelope = QueuedRawBankCandidate;
 export type NativeBankReviewEvent = QueuedBankReviewEvent;
-export { addBankImportQueuedListener, markRawBankCandidateForReview, setBankImportOwner } from "expenser-bank-notifications";
+export { isBankImportEnabled, addBankImportQueuedListener, markRawBankCandidateForReview, setBankImportOwner } from "expenser-bank-notifications";
 
 export function getBankNotificationAccessEnabled() {
   return isNotificationAccessEnabled();

@@ -29,7 +29,7 @@ internal object AndroidAppUpdate {
   }
 
   @Synchronized
-  fun download(context: Context, version: String, code: Int, digest: String) {
+  fun download(context: Context, version: String, code: Int, digest: String, progress: (Long, Long) -> Unit) {
     require(versionPattern.matches(version))
     val target = updateFile(context, code, digest)
     if (target.isFile) return
@@ -43,9 +43,13 @@ internal object AndroidAppUpdate {
     connection.readTimeout = 20_000
     val checksum = MessageDigest.getInstance("SHA-256")
     try {
-      check(connection.responseCode == 200 && connection.contentLengthLong <= maxBytes)
+      check(connection.responseCode == 200)
+      val total = connection.contentLengthLong
+      check(total <= maxBytes)
       val deadline = SystemClock.elapsedRealtime() + maxDownloadMillis
       var received = 0L
+      var lastProgress = 0L
+      progress(received, total)
       connection.inputStream.use { input ->
         partial.outputStream().use { output ->
           val buffer = ByteArray(64 * 1024)
@@ -53,12 +57,18 @@ internal object AndroidAppUpdate {
             val count = input.read(buffer)
             if (count < 0) break
             received += count
-            check(received <= maxBytes && SystemClock.elapsedRealtime() <= deadline)
+            val now = SystemClock.elapsedRealtime()
+            check(received <= maxBytes && now <= deadline)
+            if (now - lastProgress >= 250) {
+              lastProgress = now
+              progress(received, total)
+            }
             checksum.update(buffer, 0, count)
             output.write(buffer, 0, count)
           }
         }
       }
+      progress(received, total)
       check(checksum.digest().joinToString("") { "%02x".format(it) } == digest)
       val archive = context.packageManager.getPackageArchiveInfo(partial.path, 0)
       check(archive != null && archive.packageName == context.packageName &&

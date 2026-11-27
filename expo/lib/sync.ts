@@ -344,7 +344,7 @@ class SyncService {
       serverProfile ? setStoredProfile(operations.some((item) => item.entity === "profile")
         ? { ...serverProfile, ...await getStoredProfile() } : serverProfile) : Promise.resolve(),
     ]);
-    const failed = results.some((result) => result.status === "rejected");
+    const failed = results[0].status === "rejected" || results[2].status === "rejected";
     if (failed) {
       const allFailed = results.every((result) => result.status === "rejected");
       const authFailure = results.find((result) => result.status === "rejected" && result.reason instanceof ApiError && [401, 403].includes(result.reason.status));

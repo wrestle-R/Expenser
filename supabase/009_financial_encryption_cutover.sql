@@ -27,6 +27,8 @@ $$;
 
 -- The schedule trigger only handles queryable metadata after cutover.
 -- The authenticated application validates the encrypted amount before writing.
+alter table public.workflows add column if not exists processing_retry_after timestamptz;
+
 create or replace function public.prepare_workflow_schedule()
 returns trigger language plpgsql set search_path = '' as $$
 begin

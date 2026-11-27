@@ -69,7 +69,7 @@ test("backfills a disposable ledger, survives re-runs, and refreshes changed cip
       "001_reset_expenser_supabase_auth.sql",
       "004_reconciliation_uses_opening_balances.sql",
       "005_scheduled_workflows.sql",
-      "006_isolate_scheduled_workflow_failures.sql",
+      "007_limit_bank_cloud_parsing.sql",
       "008_prepare_financial_encryption.sql",
     ]) {
       await db.unsafe(readFileSync(new URL(`../../supabase/${name}`, import.meta.url), "utf8"));
